@@ -123,7 +123,7 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
   );
 };
 
-const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
+const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const [hoveredCorner, setHoveredCorner] = useState<Corner>(null);
   const [isResizing, setIsResizing] = useState(false);
   const [nodeSize, setNodeSize] = useState({ width: data.width || 0, height: data.height || 0 });
@@ -157,8 +157,8 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
   const titleLength = data.displayName.length + data.nodeType.length;
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
   
-  // Min width: base + title chars (approx 7px per char) + padding for chips
-  const MIN_WIDTH = Math.max(180, 80 + titleLength * 7);
+  // Min width: base + title chars (approx 7px per char) + padding for chips + delete button (22px)
+  const MIN_WIDTH = Math.max(200, 100 + titleLength * 7);
   // Min height: header (40px) + ports (22px each) + padding
   const MIN_HEIGHT = Math.max(80, 42 + maxPorts * 22);
 
@@ -252,6 +252,18 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
             </span>
           )}
           <span className="node-device-chip">{data.device_hint.toUpperCase()}</span>
+          <button
+            className="node-delete-btn nodrag"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDelete?.(id);
+            }}
+            title="Delete Node"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -311,13 +323,6 @@ const SelectionIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2z" />
     <path d="M10 8l6 4-6 4V8z" />
-  </svg>
-);
-
-// Delete Icon SVG
-const DeleteIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
   </svg>
 );
 
@@ -455,6 +460,19 @@ const App = () => {
     [updateNodeData]
   );
 
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    setNodes((current) => current.filter((node) => node.id !== nodeId));
+    setEdges((current) =>
+      current.filter(
+        (edge) => edge.source !== nodeId && edge.target !== nodeId
+      )
+    );
+    if (selectedNodeId === nodeId) {
+      setSelectedNodeId(null);
+    }
+    setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
+  }, [selectedNodeId, setEdges, setNodes]);
+
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
       const params: Record<string, unknown> = {};
@@ -464,6 +482,13 @@ const App = () => {
       }
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
+      
+      // Calculate initial size based on content (same formula as in BlueprintNode)
+      const titleLength = nodeType.display_name.length + nodeType.node_type.length;
+      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const initialWidth = Math.max(200, 100 + titleLength * 7);
+      const initialHeight = Math.max(80, 42 + maxPorts * 22);
+      
       const payload: Node<BlueprintNodeData> = {
         id,
         type: "blueprint",
@@ -478,11 +503,14 @@ const App = () => {
           device_hint: "auto",
           breakpoint: false,
           metadata: nodeType,
+          onDelete: handleDeleteNode,
+          width: initialWidth,
+          height: initialHeight,
         },
       };
       setNodes((existing) => existing.concat(payload));
     },
-    [nodes.length, setNodes]
+    [handleDeleteNode, nodes.length, setNodes]
   );
 
   const graphStats = useMemo(
@@ -626,21 +654,6 @@ const App = () => {
     [nodes, selectedNodeId]
   );
 
-  const handleDeleteSelected = useCallback(() => {
-    if (selectedNodeIds.length === 0) {
-      return;
-    }
-    const removalSet = new Set(selectedNodeIds);
-    setNodes((current) => current.filter((node) => !removalSet.has(node.id)));
-    setEdges((current) =>
-      current.filter(
-        (edge) => !removalSet.has(edge.source) && !removalSet.has(edge.target)
-      )
-    );
-    setSelectedNodeIds([]);
-    setSelectedNodeId(null);
-  }, [selectedNodeIds, setEdges, setNodes]);
-
   // Calculate actual panel widths for dynamic positioning
   const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
   const actualRightWidth = rightPanelCollapsed ? 0 : rightPanelWidth;
@@ -719,15 +732,6 @@ const App = () => {
               title="Step"
             >
               <StepIcon />
-            </button>
-            <div className="toolbar-divider" />
-            <button
-              className="icon-btn danger"
-              onClick={handleDeleteSelected}
-              disabled={graphStats.selection === 0}
-              title="Delete Selected"
-            >
-              <DeleteIcon />
             </button>
             {lastError && <span className="error-indicator" title={lastError}>!</span>}
           </div>

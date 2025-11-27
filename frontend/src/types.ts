@@ -46,5 +46,6 @@ export interface BlueprintNodeData {
   last_device?: string;
   width?: number;
   height?: number;
+  onDelete?: (nodeId: string) => void;
 }
 
