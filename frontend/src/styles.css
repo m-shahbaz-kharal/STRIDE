@@ -88,6 +88,24 @@ body {
   padding: 1rem;
 }
 
+.palette-search {
+  margin-top: 0.75rem;
+}
+
+.palette-search input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.55rem 0.75rem;
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+.palette-search input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .palette-list {
   display: flex;
   flex-direction: column;
