@@ -26,6 +26,35 @@ import {
   NodeTypeDefinition,
 } from "./types";
 
+const formatValue = (value: unknown): string => {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+};
+
+const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
+  const [expanded, setExpanded] = useState(false);
+  const formatted = formatValue(value);
+  const isLong = formatted.length > 12;
+  const displayValue = isLong && !expanded ? formatted.slice(0, 10) + "…" : formatted;
+
+  return (
+    <span 
+      className={`node-output-value ${isLong ? "expandable" : ""} ${expanded ? "expanded" : ""}`}
+      onClick={(e) => {
+        if (isLong) {
+          e.stopPropagation();
+          setExpanded(!expanded);
+        }
+      }}
+      title={isLong ? formatted : undefined}
+    >
+      = {displayValue}
+    </span>
+  );
+};
+
 const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
   const executed = Boolean(data.last_device);
   const statusClass = data.breakpoint
@@ -41,7 +70,14 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
           <strong>{data.displayName}</strong>
           <span className="node-type-chip">{data.nodeType}</span>
         </div>
-        <span className="node-device-chip">{data.device_hint.toUpperCase()}</span>
+        <div className="node-header-right">
+          {data.last_device && (
+            <span className="node-ran-chip" title={`Ran on ${data.last_device.toUpperCase()}`}>
+              {data.last_device.toUpperCase()}
+            </span>
+          )}
+          <span className="node-device-chip">{data.device_hint.toUpperCase()}</span>
+        </div>
       </div>
 
       <div className="node-ports">
@@ -59,29 +95,23 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
           ))}
         </div>
         <div className="node-port-column">
-          {data.output_ports.map((port, index) => (
-            <div key={`out-${port}-${index}`} className="node-port node-port-output">
-              <span>{port}</span>
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={port}
-                className="node-handle"
-              />
-            </div>
-          ))}
+          {data.output_ports.map((port, index) => {
+            const outputValue = data.last_outputs?.[port];
+            const hasValue = outputValue !== undefined;
+            return (
+              <div key={`out-${port}-${index}`} className="node-port node-port-output">
+                <span className="node-port-label">{port}</span>
+                {hasValue && <OutputValue port={port} value={outputValue} />}
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={port}
+                  className="node-handle"
+                />
+              </div>
+            );
+          })}
         </div>
-      </div>
-
-      <div className="node-footer">
-        {data.last_device && <span>Last run on {data.last_device.toUpperCase()}</span>}
-        {data.last_outputs && (
-          <span className="node-preview">
-            {Object.entries(data.last_outputs)
-              .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-              .join(", ")}
-          </span>
-        )}
       </div>
     </div>
   );

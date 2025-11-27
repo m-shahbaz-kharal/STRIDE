@@ -955,6 +955,12 @@ body {
   font-family: var(--font-mono);
 }
 
+.node-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .node-device-chip {
   font-size: 9px;
   padding: 2px 6px;
@@ -962,6 +968,16 @@ body {
   background: var(--bg-deep);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.node-ran-chip {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(74, 158, 255, 0.15);
+  border: 1px solid rgba(74, 158, 255, 0.3);
+  color: var(--accent-blue);
   font-family: var(--font-mono);
 }
 
@@ -994,6 +1010,39 @@ body {
 .node-port-output {
   padding-right: 6px;
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.node-port-label {
+  flex-shrink: 0;
+}
+
+.node-output-value {
+  font-size: 9px;
+  color: var(--accent-green);
+  font-family: var(--font-mono);
+  margin-left: 3px;
+  padding: 0 3px;
+  background: rgba(63, 185, 80, 0.1);
+  border-radius: 2px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-output-value.expandable {
+  cursor: pointer;
+}
+
+.node-output-value.expandable:hover {
+  background: rgba(63, 185, 80, 0.2);
+}
+
+.node-output-value.expanded {
+  max-width: none;
+  white-space: normal;
+  word-break: break-all;
 }
 
 .node-handle {
@@ -1019,22 +1068,7 @@ body {
   background: var(--accent-green) !important;
 }
 
-.node-footer {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-subtle);
-  font-size: 10px;
-  color: var(--text-muted);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.node-preview {
-  color: var(--accent-green);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
+/* Node footer removed - outputs now shown inline with ports */
 
 .node-breakpoint {
   border-color: rgba(248, 81, 73, 0.6);
