@@ -111,6 +111,8 @@ export interface BlueprintNodeData {
   executionStatus?: NodeExecutionStatus;
   executionProgress?: number;
   executionDuration?: number;
+  // Highlight state (for hover interactions from timeline/performance panels)
+  isHighlighted?: boolean;
 }
 
 export interface ExecutionResult {

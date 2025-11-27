@@ -4,7 +4,9 @@ import { ExecutionStats, ExecutionTraceEntry } from "../types";
 interface PerformanceDashboardProps {
   stats: ExecutionStats | null;
   trace: ExecutionTraceEntry[];
+  levels: string[][];
   isRunning: boolean;
+  onHighlightNodes?: (nodeIds: string[]) => void;
 }
 
 const formatDuration = (ms: number): string => {
@@ -16,7 +18,9 @@ const formatDuration = (ms: number): string => {
 const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
   stats,
   trace,
+  levels,
   isRunning,
+  onHighlightNodes,
 }) => {
   // Calculate slowest nodes
   const slowestNodes = useMemo(() => {
@@ -26,28 +30,56 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
       .slice(0, 5);
   }, [trace]);
 
-  // Calculate level timing
+  // Calculate level timing with node IDs
   const levelTiming = useMemo(() => {
-    const levels: Record<number, { count: number; totalTime: number; maxTime: number }> = {};
+    const levelData: Record<number, { count: number; totalTime: number; maxTime: number; nodes: string[] }> = {};
     
     for (const entry of trace) {
       const level = entry.level ?? 0;
-      if (!levels[level]) {
-        levels[level] = { count: 0, totalTime: 0, maxTime: 0 };
+      if (!levelData[level]) {
+        levelData[level] = { count: 0, totalTime: 0, maxTime: 0, nodes: [] };
       }
       const duration = entry.duration_ms ?? 0;
-      levels[level].count++;
-      levels[level].totalTime += duration;
-      levels[level].maxTime = Math.max(levels[level].maxTime, duration);
+      levelData[level].count++;
+      levelData[level].totalTime += duration;
+      levelData[level].maxTime = Math.max(levelData[level].maxTime, duration);
+      levelData[level].nodes.push(entry.node_id);
     }
     
-    return Object.entries(levels)
+    // Also include nodes from levels that may not have trace entries yet
+    levels.forEach((levelNodes, idx) => {
+      if (!levelData[idx]) {
+        levelData[idx] = { count: levelNodes.length, totalTime: 0, maxTime: 0, nodes: levelNodes };
+      } else {
+        // Merge with existing, preferring trace data but ensuring all nodes are listed
+        const existingNodes = new Set(levelData[idx].nodes);
+        levelNodes.forEach(nodeId => {
+          if (!existingNodes.has(nodeId)) {
+            levelData[idx].nodes.push(nodeId);
+          }
+        });
+      }
+    });
+    
+    return Object.entries(levelData)
       .map(([level, data]) => ({
         level: parseInt(level),
         ...data,
       }))
       .sort((a, b) => a.level - b.level);
-  }, [trace]);
+  }, [trace, levels]);
+
+  const handleNodeHover = (nodeId: string | null) => {
+    if (onHighlightNodes) {
+      onHighlightNodes(nodeId ? [nodeId] : []);
+    }
+  };
+
+  const handleLevelHover = (nodes: string[] | null) => {
+    if (onHighlightNodes) {
+      onHighlightNodes(nodes ?? []);
+    }
+  };
 
   if (!stats && trace.length === 0) {
     return (
@@ -146,8 +178,13 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
             <div className="dashboard-section">
               <h4>Level Breakdown</h4>
               <div className="level-breakdown">
-                {levelTiming.map(({ level, count, maxTime }) => (
-                  <div key={level} className="level-item">
+                {levelTiming.map(({ level, count, maxTime, nodes }) => (
+                  <div 
+                    key={level} 
+                    className="level-item hoverable"
+                    onMouseEnter={() => handleLevelHover(nodes)}
+                    onMouseLeave={() => handleLevelHover(null)}
+                  >
                     <div className="level-info">
                       <span className="level-name">Level {level}</span>
                       <span className="level-nodes">{count} node{count !== 1 ? "s" : ""}</span>
@@ -165,7 +202,12 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
               <h4>Slowest Nodes</h4>
               <div className="slowest-nodes">
                 {slowestNodes.map((entry, index) => (
-                  <div key={entry.node_id} className="slowest-item">
+                  <div 
+                    key={entry.node_id} 
+                    className="slowest-item hoverable"
+                    onMouseEnter={() => handleNodeHover(entry.node_id)}
+                    onMouseLeave={() => handleNodeHover(null)}
+                  >
                     <div className="slowest-rank">{index + 1}</div>
                     <div className="slowest-info">
                       <div className="slowest-name">{entry.node_id}</div>

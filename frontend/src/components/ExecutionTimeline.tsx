@@ -8,6 +8,7 @@ interface ExecutionTimelineProps {
   isRunning: boolean;
   currentNodeId: string | null;
   nodeStatuses: Map<string, NodeExecutionStatus>;
+  onHighlightNodes?: (nodeIds: string[]) => void;
 }
 
 const getStatusColor = (status: NodeExecutionStatus | undefined): string => {
@@ -39,6 +40,7 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
   isRunning,
   currentNodeId,
   nodeStatuses,
+  onHighlightNodes,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +78,18 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
   }, [levels]);
 
   const hasData = trace.length > 0 || stats !== null;
+
+  const handleNodeHover = (nodeId: string | null) => {
+    if (onHighlightNodes) {
+      onHighlightNodes(nodeId ? [nodeId] : []);
+    }
+  };
+
+  const handleLevelHover = (nodes: string[] | null) => {
+    if (onHighlightNodes) {
+      onHighlightNodes(nodes ?? []);
+    }
+  };
 
   return (
     <div className="execution-timeline">
@@ -118,7 +132,12 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           </div>
           <div className="levels-visualization">
             {levelStats.map(({ level, nodeCount, nodes }) => (
-              <div key={level} className="level-bar-container">
+              <div 
+                key={level} 
+                className="level-bar-container hoverable"
+                onMouseEnter={() => handleLevelHover(nodes)}
+                onMouseLeave={() => handleLevelHover(null)}
+              >
                 <div className="level-label">L{level}</div>
                 <div className="level-bar" style={{ "--node-count": nodeCount } as React.CSSProperties}>
                   {nodes.map((nodeId) => {
@@ -130,6 +149,14 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
                         className={`level-node ${status ?? "pending"} ${nodeId === currentNodeId ? "active" : ""}`}
                         title={`${nodeId}${traceEntry?.duration_ms ? ` (${formatDuration(traceEntry.duration_ms)})` : ""}`}
                         style={{ backgroundColor: getStatusColor(status) }}
+                        onMouseEnter={(e) => {
+                          e.stopPropagation();
+                          handleNodeHover(nodeId);
+                        }}
+                        onMouseLeave={(e) => {
+                          e.stopPropagation();
+                          handleNodeHover(null);
+                        }}
                       />
                     );
                   })}
@@ -152,7 +179,9 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
         {timelineData.map((entry, index) => (
           <div
             key={`${entry.node_id}-${index}`}
-            className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""}`}
+            className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
+            onMouseEnter={() => handleNodeHover(entry.node_id)}
+            onMouseLeave={() => handleNodeHover(null)}
           >
             <div className="entry-header">
               <div className="entry-info">

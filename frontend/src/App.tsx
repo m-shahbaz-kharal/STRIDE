@@ -145,6 +145,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const statusClass = data.breakpoint
     ? "node-breakpoint"
     : executionStatusClass || (data.last_outputs ? "node-executed" : "");
+  const highlightClass = data.isHighlighted ? "node-highlighted" : "";
 
   const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {
     if (!corner || !nodeRef.current) return;
@@ -220,7 +221,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   return (
     <div 
       ref={nodeRef}
-      className={`blueprint-node ${statusClass}`}
+      className={`blueprint-node ${statusClass} ${highlightClass}`}
       style={sizeStyle}
     >
       {/* Execution progress ring for running nodes */}
@@ -367,6 +368,7 @@ const App = () => {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [useStreaming, setUseStreaming] = useState(true);
+  const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
   const nodeIdRef = useRef(1);
 
   // Panel collapse states
@@ -530,6 +532,24 @@ const App = () => {
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
     setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
   }, [selectedNodeId, setEdges, setNodes]);
+
+  // Handle highlighting nodes from timeline/performance panel hover
+  const handleHighlightNodes = useCallback((nodeIds: string[]) => {
+    setHighlightedNodeIds(nodeIds);
+  }, []);
+
+  // Update nodes with highlighted state
+  useEffect(() => {
+    setNodes((existing) =>
+      existing.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          isHighlighted: highlightedNodeIds.includes(node.id),
+        },
+      }))
+    );
+  }, [highlightedNodeIds, setNodes]);
 
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
@@ -824,6 +844,7 @@ const App = () => {
                   currentNodeId={currentNodeId}
                   nodeStatuses={nodeStatuses}
                   progress={progress}
+                  onHighlightNodes={handleHighlightNodes}
                 />
               </div>
             </>

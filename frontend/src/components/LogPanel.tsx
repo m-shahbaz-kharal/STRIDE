@@ -13,6 +13,7 @@ type LogPanelProps = {
   currentNodeId?: string | null;
   nodeStatuses?: Map<string, NodeExecutionStatus>;
   progress?: number;
+  onHighlightNodes?: (nodeIds: string[]) => void;
 };
 
 type TabType = "outputs" | "timeline" | "performance";
@@ -27,6 +28,7 @@ const LogPanel = ({
   currentNodeId = null,
   nodeStatuses = new Map(),
   progress = 0,
+  onHighlightNodes,
 }: LogPanelProps) => {
   const [activeTab, setActiveTab] = useState<TabType>("timeline");
 
@@ -87,6 +89,7 @@ const LogPanel = ({
             isRunning={isRunning}
             currentNodeId={currentNodeId}
             nodeStatuses={nodeStatuses}
+            onHighlightNodes={onHighlightNodes}
           />
         )}
 
@@ -94,7 +97,9 @@ const LogPanel = ({
           <PerformanceDashboard
             stats={stats}
             trace={trace}
+            levels={levels}
             isRunning={isRunning}
+            onHighlightNodes={onHighlightNodes}
           />
         )}
 
