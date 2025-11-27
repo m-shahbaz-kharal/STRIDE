@@ -4,7 +4,6 @@ import { BlueprintNodeData, ParamSchemaField } from "../types";
 
 type InspectorProps = {
   node?: Node<BlueprintNodeData>;
-  onDeviceHintChange: (nodeId: string, hint: string) => void;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
   onToggleBreakpoint: (nodeId: string) => void;
 };
@@ -25,7 +24,6 @@ const parseParamValue = (
 
 const NodeInspector = ({
   node,
-  onDeviceHintChange,
   onParamChange,
   onToggleBreakpoint,
 }: InspectorProps) => {
@@ -45,21 +43,6 @@ const NodeInspector = ({
     <div className="inspector-panel">
       <h3>{node.data.displayName}</h3>
       <div className="inspector-subtitle">{node.data.nodeType}</div>
-
-      <div className="inspector-section">
-        <h4>Device</h4>
-        <div className="inspector-field">
-          <select
-            id="device-hint"
-            value={node.data.device_hint}
-            onChange={(event) => onDeviceHintChange(node.id, event.target.value)}
-          >
-            <option value="auto">Auto</option>
-            <option value="cpu">CPU</option>
-            <option value="gpu">GPU</option>
-          </select>
-        </div>
-      </div>
 
       {schemaEntries.length > 0 && (
         <div className="inspector-section">

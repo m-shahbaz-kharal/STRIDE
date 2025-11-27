@@ -8,19 +8,16 @@ SAMPLE_GRAPH = {
         {
             "id": "const_a",
             "type": "constant.number",
-            "device_hint": "cpu",
             "params": {"value": 12},
         },
         {
             "id": "const_b",
             "type": "constant.number",
-            "device_hint": "cpu",
             "params": {"value": 7},
         },
         {
             "id": "adder",
             "type": "math.add",
-            "device_hint": "gpu",
             "params": {},
         },
     ],
@@ -39,9 +36,8 @@ def run_sample() -> None:
     result = executor.run()
     print("Sample graph result:", result["outputs"])
     for step in result["trace"]:
-        print(f" - {step['node_id']} [{step['device']}]: {step['outputs']}")
+        print(f" - {step['node_id']}: {step['outputs']}")
 
 
 if __name__ == "__main__":
     run_sample()
-

@@ -20,6 +20,7 @@ def get_node(node_type: str) -> Type[NodeBase]:
 
 from . import addition  # noqa: F401
 from . import constant  # noqa: F401
+from . import math_ops  # noqa: F401
 
 
 def list_node_types() -> List[Dict[str, Any]]:

@@ -19,17 +19,79 @@ export interface NodeTypeDefinition {
   params_defaults?: Record<string, string | number | boolean>;
 }
 
+export type NodeExecutionStatus = 
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "skipped"
+  | "error";
+
 export interface ExecutionTraceEntry {
   node_id: string;
   type: string;
-  device: string;
   outputs: Record<string, unknown>;
   logs: string[];
+  duration_ms?: number;
+  level?: number;
 }
 
-export interface ExecutionUnit {
-  device: string;
-  nodes: Array<{ id: string; type: string }>;
+export interface ExecutionStats {
+  total_nodes: number;
+  executed_nodes: number;
+  skipped_nodes: number;
+  error_nodes: number;
+  total_time_ms: number;
+  node_time_ms: number;
+  parallel_efficiency: number;
+  max_parallelism: number;
+  levels_executed: number;
+}
+
+export interface ExecutionPlanNode {
+  node_id: string;
+  node_type: string;
+  level: number;
+}
+
+export interface ExecutionEvent {
+  event_type: 
+    | "start"
+    | "node_queued"
+    | "node_started"
+    | "node_completed"
+    | "node_error"
+    | "complete"
+    | "result"
+    | "error";
+  execution_id: string;
+  timestamp: number;
+  node_id?: string;
+  node_type?: string;
+  status?: NodeExecutionStatus;
+  outputs?: Record<string, unknown>;
+  logs?: string[];
+  duration_ms?: number;
+  error?: string;
+  level?: number;
+  progress?: number;
+  total_nodes?: number;
+  completed_nodes?: number;
+  execution_plan?: ExecutionPlanNode[];
+  levels?: string[][];
+  // For result event
+  trace?: ExecutionTraceEntry[];
+  stats?: ExecutionStats;
+}
+
+export interface NodeExecutionState {
+  status: NodeExecutionStatus;
+  progress: number;
+  startTime?: number;
+  endTime?: number;
+  duration_ms?: number;
+  outputs?: Record<string, unknown>;
+  error?: string;
 }
 
 export interface BlueprintNodeData {
@@ -39,13 +101,22 @@ export interface BlueprintNodeData {
   input_ports: string[];
   output_ports: string[];
   params: Record<string, unknown>;
-  device_hint: string;
   breakpoint: boolean;
   metadata?: NodeTypeDefinition;
   last_outputs?: Record<string, unknown>;
-  last_device?: string;
   width?: number;
   height?: number;
   onDelete?: (nodeId: string) => void;
+  // Execution state
+  executionStatus?: NodeExecutionStatus;
+  executionProgress?: number;
+  executionDuration?: number;
 }
 
+export interface ExecutionResult {
+  outputs: Record<string, unknown>;
+  trace: ExecutionTraceEntry[];
+  stats?: ExecutionStats;
+  levels?: string[][];
+  execution_id?: string;
+}

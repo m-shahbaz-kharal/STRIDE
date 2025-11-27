@@ -3,7 +3,6 @@ import ReactFlow, {
   addEdge,
   Background,
   Controls,
-  Edge,
   Handle,
   MiniMap,
   Node,
@@ -19,10 +18,10 @@ import "reactflow/dist/style.css";
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
+import { useGraphExecution } from "./hooks/useGraphExecution";
 import {
   BlueprintNodeData,
-  ExecutionTraceEntry,
-  ExecutionUnit,
+  NodeExecutionStatus,
   NodeTypeDefinition,
 } from "./types";
 
@@ -70,11 +69,7 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
   
   const isTop = corner.includes("top");
   const isLeft = corner.includes("left");
-  
-  // Cursor based on corner
   const cursor = (corner === "top-left" || corner === "bottom-right") ? "nwse-resize" : "nesw-resize";
-  
-  // Rotation for the L-shape to point outward from corner
   const rotation = corner === "top-left" ? 0 :
                    corner === "top-right" ? 90 :
                    corner === "bottom-right" ? 180 : 270;
@@ -109,7 +104,6 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
             pointerEvents: "none",
           }}
         >
-          {/* L-shaped stroke that matches the 6px border radius */}
           <path
             d="M 1 10 L 1 6 Q 1 1 6 1 L 10 1"
             fill="none"
@@ -123,6 +117,22 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
   );
 };
 
+// Get status-based styling for nodes
+const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
+  switch (status) {
+    case "running":
+      return "node-running";
+    case "queued":
+      return "node-queued";
+    case "completed":
+      return "node-executed";
+    case "error":
+      return "node-error";
+    default:
+      return "";
+  }
+};
+
 const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const [hoveredCorner, setHoveredCorner] = useState<Corner>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -131,35 +141,27 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const startPosRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const resizeCornerRef = useRef<Corner>(null);
 
-  const executed = Boolean(data.last_device);
+  const executionStatusClass = getExecutionStatusClass(data.executionStatus);
   const statusClass = data.breakpoint
     ? "node-breakpoint"
-    : executed
-    ? "node-executed"
-    : "";
+    : executionStatusClass || (data.last_outputs ? "node-executed" : "");
 
   const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {
     if (!corner || !nodeRef.current) return;
     
     e.stopPropagation();
     e.preventDefault();
-    // Use offsetWidth/offsetHeight - these give CSS dimensions before any transform (zoom)
     const width = nodeRef.current.offsetWidth;
     const height = nodeRef.current.offsetHeight;
     startPosRef.current = { x: e.clientX, y: e.clientY, width, height };
     resizeCornerRef.current = corner;
-    // Lock in current size immediately to prevent any jump
     setNodeSize({ width, height });
     setIsResizing(true);
   }, []);
 
-  // Calculate minimum size based on content
   const titleLength = data.displayName.length + data.nodeType.length;
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
-  
-  // Min width: base + title chars (approx 7px per char) + padding for chips + delete button (22px)
   const MIN_WIDTH = Math.max(200, 100 + titleLength * 7);
-  // Min height: header (40px) + ports (22px each) + padding
   const MIN_HEIGHT = Math.max(80, 42 + maxPorts * 22);
 
   useEffect(() => {
@@ -174,12 +176,6 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       
       let newWidth = startPosRef.current.width;
       let newHeight = startPosRef.current.height;
-      
-      // Natural resize: each corner only resizes in its outward direction
-      // bottom-right: positive dx/dy = bigger, negative = smaller (clamped to min)
-      // bottom-left: negative dx = bigger width, positive dy = bigger height
-      // top-right: positive dx = bigger width, negative dy = bigger height  
-      // top-left: negative dx/dy = bigger
       
       if (corner === "bottom-right") {
         newWidth += dx;
@@ -213,13 +209,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isResizing]);
+  }, [isResizing, MIN_HEIGHT, MIN_WIDTH]);
 
   const sizeStyle = nodeSize.width > 0 && nodeSize.height > 0 
     ? { width: nodeSize.width, height: nodeSize.height } 
     : {};
   
-  // Only bottom-right corner for intuitive resizing
   const corners: Corner[] = ["bottom-right"];
 
   return (
@@ -228,7 +223,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       className={`blueprint-node ${statusClass}`}
       style={sizeStyle}
     >
-      {/* Resize zones at each corner */}
+      {/* Execution progress ring for running nodes */}
+      {data.executionStatus === "running" && (
+        <div className="node-execution-ring" />
+      )}
+      
       {corners.map((corner) => (
         <ResizeZone
           key={corner}
@@ -246,12 +245,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           <span className="node-type-chip">{data.nodeType}</span>
         </div>
         <div className="node-header-right">
-          {data.last_device && (
-            <span className="node-ran-chip" title={`Ran on ${data.last_device.toUpperCase()}`}>
-              {data.last_device.toUpperCase()}
+          {data.executionStatus === "running" && (
+            <span className="node-status-chip running">
+              <span className="status-dot pulse" />
+              RUN
             </span>
           )}
-          <span className="node-device-chip">{data.device_hint.toUpperCase()}</span>
+          {data.executionStatus === "queued" && (
+            <span className="node-status-chip queued">QUEUE</span>
+          )}
+          {data.executionDuration !== undefined && data.executionStatus === "completed" && (
+            <span className="node-timing-chip" title={`Execution time: ${data.executionDuration.toFixed(1)}ms`}>
+              {data.executionDuration < 1 ? "<1" : data.executionDuration.toFixed(0)}ms
+            </span>
+          )}
           <button
             className="node-delete-btn nodrag"
             onClick={(e) => {
@@ -304,21 +311,19 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   );
 };
 
-// Play Icon SVG
+// Icons
 const PlayIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M8 5v14l11-7z" />
   </svg>
 );
 
-// Step Icon SVG
 const StepIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
   </svg>
 );
 
-// Selection Run Icon SVG
 const SelectionIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2z" />
@@ -326,7 +331,13 @@ const SelectionIcon = () => (
   </svg>
 );
 
-// Chevron Icons
+const StreamIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" opacity="0.3" />
+    <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" />
+  </svg>
+);
+
 const ChevronLeft = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
     <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
@@ -339,50 +350,66 @@ const ChevronRight = () => (
   </svg>
 );
 
+const ConnectionIcon = ({ connected }: { connected: boolean }) => (
+  <div className={`connection-indicator ${connected ? "connected" : "disconnected"}`} title={connected ? "WebSocket Connected" : "WebSocket Disconnected"}>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+      {connected ? (
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+      ) : (
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" />
+      )}
+    </svg>
+  </div>
+);
+
 const App = () => {
   const [nodeLibrary, setNodeLibrary] = useState<NodeTypeDefinition[]>([]);
-  const [trace, setTrace] = useState<ExecutionTraceEntry[]>([]);
-  const [outputs, setOutputs] = useState<Record<string, unknown>>({});
-  const [units, setUnits] = useState<ExecutionUnit[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [lastError, setLastError] = useState<string | null>(null);
-  const [lastRunMode, setLastRunMode] = useState<string>("");
+  const [useStreaming, setUseStreaming] = useState(true);
   const nodeIdRef = useRef(1);
 
   // Panel collapse states
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
-  
-  // Panel width states (for resizing)
   const [leftPanelWidth, setLeftPanelWidth] = useState(260);
-  const [rightPanelWidth, setRightPanelWidth] = useState(300);
-  
-  // Resizing states
+  const [rightPanelWidth, setRightPanelWidth] = useState(340);
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
+  // Use the execution hook
+  const {
+    isConnected,
+    isRunning,
+    error,
+    trace,
+    outputs,
+    stats,
+    levels,
+    nodeStatuses,
+    currentNodeId,
+    progress,
+    runGraph,
+    runGraphSync,
+  } = useGraphExecution();
+
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
 
+  // Load node types
   useEffect(() => {
     fetch("/api/node-types")
       .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Unable to load node registry.");
-        }
+        if (!response.ok) throw new Error("Unable to load node registry.");
         const data: NodeTypeDefinition[] = await response.json();
         setNodeLibrary(data);
       })
-      .catch(() => {
-        setNodeLibrary([]);
-      });
+      .catch(() => setNodeLibrary([]));
   }, []);
 
-  // Handle mouse move for resizing
+  // Handle panel resizing
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizingLeft) {
@@ -390,7 +417,7 @@ const App = () => {
         setLeftPanelWidth(newWidth);
       }
       if (isResizingRight) {
-        const newWidth = Math.min(Math.max(200, window.innerWidth - e.clientX), 500);
+        const newWidth = Math.min(Math.max(280, window.innerWidth - e.clientX), 600);
         setRightPanelWidth(newWidth);
       }
     };
@@ -414,6 +441,47 @@ const App = () => {
       document.body.style.userSelect = "";
     };
   }, [isResizingLeft, isResizingRight]);
+
+  // Update node execution states when nodeStatuses change
+  useEffect(() => {
+    if (nodeStatuses.size === 0 && !isRunning) return;
+    
+    setNodes((existing) =>
+      existing.map((node) => {
+        const status = nodeStatuses.get(node.id);
+        const traceEntry = trace.find((t) => t.node_id === node.id);
+        
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            executionStatus: status,
+            executionDuration: traceEntry?.duration_ms,
+            last_outputs: traceEntry?.outputs ?? node.data.last_outputs,
+          },
+        };
+      })
+    );
+  }, [nodeStatuses, trace, isRunning, setNodes]);
+
+  // Update edges for running state (animated flow)
+  useEffect(() => {
+    setEdges((existing) =>
+      existing.map((edge) => ({
+        ...edge,
+        animated: isRunning,
+        style: {
+          ...edge.style,
+          stroke: isRunning 
+            ? nodeStatuses.get(edge.source) === "completed" 
+              ? "var(--accent-green)" 
+              : "var(--accent-blue)"
+            : "#4a9eff",
+          strokeWidth: isRunning ? 2.5 : 2,
+        },
+      }))
+    );
+  }, [isRunning, nodeStatuses, setEdges]);
 
   const handleSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
@@ -439,12 +507,6 @@ const App = () => {
     [setNodes]
   );
 
-  const handleDeviceHintChange = useCallback(
-    (nodeId: string, hint: string) =>
-      updateNodeData(nodeId, (data) => ({ ...data, device_hint: hint })),
-    [updateNodeData]
-  );
-
   const handleParamChange = useCallback(
     (nodeId: string, param: string, value: string | number | boolean) =>
       updateNodeData(nodeId, (data) => ({
@@ -463,13 +525,9 @@ const App = () => {
   const handleDeleteNode = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) =>
-      current.filter(
-        (edge) => edge.source !== nodeId && edge.target !== nodeId
-      )
+      current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
     );
-    if (selectedNodeId === nodeId) {
-      setSelectedNodeId(null);
-    }
+    if (selectedNodeId === nodeId) setSelectedNodeId(null);
     setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
   }, [selectedNodeId, setEdges, setNodes]);
 
@@ -483,7 +541,6 @@ const App = () => {
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
       
-      // Calculate initial size based on content (same formula as in BlueprintNode)
       const titleLength = nodeType.display_name.length + nodeType.node_type.length;
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
       const initialWidth = Math.max(200, 100 + titleLength * 7);
@@ -500,7 +557,6 @@ const App = () => {
           input_ports: nodeType.input_ports,
           output_ports: nodeType.output_ports,
           params,
-          device_hint: "auto",
           breakpoint: false,
           metadata: nodeType,
           onDelete: handleDeleteNode,
@@ -529,11 +585,11 @@ const App = () => {
         id: node.id,
         type: node.data.nodeType,
         params: node.data.params,
-        device_hint: node.data.device_hint,
       }));
 
       const linkPayload = edges
-        .filter((edge) => edge.sourceHandle && edge.targetHandle)
+        .filter((edge): edge is typeof edge & { sourceHandle: string; targetHandle: string } => 
+          Boolean(edge.sourceHandle) && Boolean(edge.targetHandle))
         .map((edge) => ({
           from_node: edge.source,
           from_port: edge.sourceHandle,
@@ -564,83 +620,46 @@ const App = () => {
     [edges, nodes, selectedNodeIds]
   );
 
-  const runGraph = useCallback(
+  const handleRunGraph = useCallback(
     async (mode: "full" | "selection", extras?: { max_steps?: number }) => {
-      if (isRunning || nodes.length === 0) {
-        return;
-      }
-      setIsRunning(true);
-      setLastError(null);
-      const modeLabel = extras?.max_steps
-        ? `${mode} (step ${extras.max_steps})`
-        : mode === "selection"
-        ? "selection"
-        : "full";
-      setLastRunMode(modeLabel);
+      if (isRunning || nodes.length === 0) return;
 
       const payload = buildGraphPayload(mode, extras);
-      try {
-        const response = await fetch("/api/run-graph", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Graph execution failed");
+
+      // Clear previous execution states
+      setNodes((existing) =>
+        existing.map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            executionStatus: undefined,
+            executionDuration: undefined,
+          },
+        }))
+      );
+
+      if (useStreaming && isConnected) {
+        runGraph(payload);
+      } else {
+        try {
+          await runGraphSync(payload);
+        } catch {
+          // Error handled by hook
         }
-        const data = await response.json();
-        const traceResult: ExecutionTraceEntry[] = data.trace ?? [];
-        setOutputs(data.outputs ?? {});
-        setTrace(traceResult);
-        setUnits(data.units ?? []);
-        setNodes((existing) =>
-          existing.map((node) => {
-            const entry = traceResult.find((item) => item.node_id === node.id);
-            if (!entry) {
-              if (!node.data.last_outputs && !node.data.last_device) {
-                return node;
-              }
-              return {
-                ...node,
-                data: { ...node.data, last_outputs: undefined, last_device: undefined },
-              };
-            }
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                last_device: entry.device,
-                last_outputs: entry.outputs,
-              },
-            };
-          })
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown execution error";
-        setLastError(message);
-      } finally {
-        setIsRunning(false);
       }
     },
-    [buildGraphPayload, isRunning, nodes.length, setNodes]
+    [buildGraphPayload, isConnected, isRunning, nodes.length, runGraph, runGraphSync, setNodes, useStreaming]
   );
-
-  const handleRunGraph = useCallback(() => runGraph("full"), [runGraph]);
-  const handleRunSelection = useCallback(() => runGraph("selection"), [runGraph]);
-  const handleStep = useCallback(() => runGraph("full", { max_steps: 1 }), [runGraph]);
 
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
-      if (!connection.sourceHandle || !connection.targetHandle) {
-        return;
-      }
+      if (!connection.sourceHandle || !connection.targetHandle) return;
       setEdges((existing) =>
         addEdge(
           {
             ...connection,
-            animated: true,
-            style: { stroke: "#4a9eff" },
+            animated: false,
+            style: { stroke: "#4a9eff", strokeWidth: 2 },
           },
           existing
         )
@@ -654,15 +673,12 @@ const App = () => {
     [nodes, selectedNodeId]
   );
 
-  // Calculate actual panel widths for dynamic positioning
   const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
   const actualRightWidth = rightPanelCollapsed ? 0 : rightPanelWidth;
-  const collapseBtnWidth = 24; // Width of collapse button area
 
   return (
     <ReactFlowProvider>
       <div className="app-shell">
-        {/* Full-page ReactFlow Canvas */}
         <div className="reactflow-fullpage">
           <ReactFlow
             nodes={nodes}
@@ -682,35 +698,56 @@ const App = () => {
               showFitView 
               showInteractive={false} 
               position="bottom-left"
-              style={{ left: actualLeftWidth}}
+              style={{ left: actualLeftWidth }}
             />
             <MiniMap 
-              nodeColor={(node) => (node.data?.breakpoint ? "#ff5555" : "#4a9eff")} 
+              nodeColor={(node) => {
+                const status = nodeStatuses.get(node.id);
+                if (status === "running") return "#58a6ff";
+                if (status === "completed") return "#3fb950";
+                if (status === "error") return "#f85149";
+                if (node.data?.breakpoint) return "#ff5555";
+                return "#4a9eff";
+              }} 
               maskColor="rgba(0,0,0,0.8)"
               style={{ 
                 backgroundColor: "rgba(20,25,35,0.9)",
-                right: actualRightWidth
+                right: actualRightWidth,
               }}
             />
           </ReactFlow>
         </div>
 
-        {/* Overlay Header - fixed full width */}
         <header className="overlay-header">
           <div className="header-left">
-            <h1>Graph</h1>
+            <h1>LiGuard Graph</h1>
             <div className="header-stats">
               <span className="stat-badge">{graphStats.nodes} nodes</span>
               <span className="stat-badge">{graphStats.edges} edges</span>
               {graphStats.breakpoints > 0 && (
                 <span className="stat-badge breakpoint">{graphStats.breakpoints} BP</span>
               )}
+              {isRunning && (
+                <span className="stat-badge running">
+                  <span className="pulse-dot" />
+                  {Math.round(progress * 100)}%
+                </span>
+              )}
             </div>
           </div>
           <div className="header-controls">
+            <ConnectionIcon connected={isConnected} />
             <button
-              className="icon-btn"
-              onClick={handleRunGraph}
+              className={`icon-btn stream-toggle ${useStreaming ? "active" : ""}`}
+              onClick={() => setUseStreaming(!useStreaming)}
+              title={useStreaming ? "Streaming Mode (WebSocket)" : "Batch Mode (HTTP)"}
+            >
+              <StreamIcon />
+            </button>
+            <div className="toolbar-divider" />
+            <button
+              className="icon-btn primary"
+              onClick={() => handleRunGraph("full")}
               disabled={isRunning || nodes.length === 0}
               title="Run Graph"
             >
@@ -719,7 +756,7 @@ const App = () => {
             </button>
             <button
               className="icon-btn"
-              onClick={handleRunSelection}
+              onClick={() => handleRunGraph("selection")}
               disabled={isRunning || graphStats.selection === 0}
               title={`Run Selection (${graphStats.selection})`}
             >
@@ -727,17 +764,16 @@ const App = () => {
             </button>
             <button
               className="icon-btn"
-              onClick={handleStep}
+              onClick={() => handleRunGraph("full", { max_steps: 1 })}
               disabled={isRunning || nodes.length === 0}
               title="Step"
             >
               <StepIcon />
             </button>
-            {lastError && <span className="error-indicator" title={lastError}>!</span>}
+            {error && <span className="error-indicator" title={error}>!</span>}
           </div>
         </header>
 
-        {/* Left Panel - Node Library */}
         <aside 
           className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
           style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
@@ -753,7 +789,6 @@ const App = () => {
           )}
         </aside>
         
-        {/* Left Panel Collapse Button - always visible */}
         <button
           className="panel-collapse-btn left"
           style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
@@ -763,7 +798,6 @@ const App = () => {
           {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </button>
 
-        {/* Right Panel - Logs & Inspector */}
         <aside 
           className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
           style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
@@ -777,17 +811,25 @@ const App = () => {
               <div className="right-panel-content">
                 <NodeInspector
                   node={selectedNode}
-                  onDeviceHintChange={handleDeviceHintChange}
                   onParamChange={handleParamChange}
                   onToggleBreakpoint={handleToggleBreakpoint}
                 />
-                <LogPanel trace={trace} units={units} outputs={outputs} error={lastError} />
+                <LogPanel 
+                  trace={trace} 
+                  outputs={outputs} 
+                  error={error}
+                  stats={stats}
+                  levels={levels}
+                  isRunning={isRunning}
+                  currentNodeId={currentNodeId}
+                  nodeStatuses={nodeStatuses}
+                  progress={progress}
+                />
               </div>
             </>
           )}
         </aside>
         
-        {/* Right Panel Collapse Button - always visible */}
         <button
           className="panel-collapse-btn right"
           style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
