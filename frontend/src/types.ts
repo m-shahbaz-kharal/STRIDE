@@ -44,5 +44,7 @@ export interface BlueprintNodeData {
   metadata?: NodeTypeDefinition;
   last_outputs?: Record<string, unknown>;
   last_device?: string;
+  width?: number;
+  height?: number;
 }
 

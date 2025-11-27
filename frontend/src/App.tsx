@@ -55,7 +55,82 @@ const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
   );
 };
 
+type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
+
+interface ResizeZoneProps {
+  corner: Corner;
+  isHovered: boolean;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
+const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown }: ResizeZoneProps) => {
+  if (!corner) return null;
+  
+  const isTop = corner.includes("top");
+  const isLeft = corner.includes("left");
+  
+  // Cursor based on corner
+  const cursor = (corner === "top-left" || corner === "bottom-right") ? "nwse-resize" : "nesw-resize";
+  
+  // Rotation for the L-shape to point outward from corner
+  const rotation = corner === "top-left" ? 0 :
+                   corner === "top-right" ? 90 :
+                   corner === "bottom-right" ? 180 : 270;
+
+  return (
+    <div
+      className={`resize-zone nodrag ${corner}`}
+      style={{
+        position: "absolute",
+        [isTop ? "top" : "bottom"]: "-2px",
+        [isLeft ? "left" : "right"]: "-2px",
+        width: "18px",
+        height: "18px",
+        cursor,
+        zIndex: 20,
+      }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onMouseDown={onMouseDown}
+    >
+      {isHovered && (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          style={{
+            position: "absolute",
+            top: "3px",
+            left: "3px",
+            transform: `rotate(${rotation}deg)`,
+            transformOrigin: "6px 6px",
+            pointerEvents: "none",
+          }}
+        >
+          {/* L-shaped stroke that matches the 6px border radius */}
+          <path
+            d="M 1 10 L 1 6 Q 1 1 6 1 L 10 1"
+            fill="none"
+            stroke="var(--accent-blue)"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </div>
+  );
+};
+
 const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
+  const [hoveredCorner, setHoveredCorner] = useState<Corner>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [nodeSize, setNodeSize] = useState({ width: data.width || 0, height: data.height || 0 });
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const startPosRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const resizeCornerRef = useRef<Corner>(null);
+
   const executed = Boolean(data.last_device);
   const statusClass = data.breakpoint
     ? "node-breakpoint"
@@ -63,8 +138,108 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
     ? "node-executed"
     : "";
 
+  const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {
+    if (!corner || !nodeRef.current) return;
+    
+    e.stopPropagation();
+    e.preventDefault();
+    // Use offsetWidth/offsetHeight - these give CSS dimensions before any transform (zoom)
+    const width = nodeRef.current.offsetWidth;
+    const height = nodeRef.current.offsetHeight;
+    startPosRef.current = { x: e.clientX, y: e.clientY, width, height };
+    resizeCornerRef.current = corner;
+    // Lock in current size immediately to prevent any jump
+    setNodeSize({ width, height });
+    setIsResizing(true);
+  }, []);
+
+  // Calculate minimum size based on content
+  const titleLength = data.displayName.length + data.nodeType.length;
+  const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
+  
+  // Min width: base + title chars (approx 7px per char) + padding for chips
+  const MIN_WIDTH = Math.max(180, 80 + titleLength * 7);
+  // Min height: header (40px) + ports (22px each) + padding
+  const MIN_HEIGHT = Math.max(80, 50 + maxPorts * 22);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const corner = resizeCornerRef.current;
+      if (!corner) return;
+      
+      const dx = e.clientX - startPosRef.current.x;
+      const dy = e.clientY - startPosRef.current.y;
+      
+      let newWidth = startPosRef.current.width;
+      let newHeight = startPosRef.current.height;
+      
+      // Natural resize: each corner only resizes in its outward direction
+      // bottom-right: positive dx/dy = bigger, negative = smaller (clamped to min)
+      // bottom-left: negative dx = bigger width, positive dy = bigger height
+      // top-right: positive dx = bigger width, negative dy = bigger height  
+      // top-left: negative dx/dy = bigger
+      
+      if (corner === "bottom-right") {
+        newWidth += dx;
+        newHeight += dy;
+      } else if (corner === "bottom-left") {
+        newWidth -= dx;
+        newHeight += dy;
+      } else if (corner === "top-right") {
+        newWidth += dx;
+        newHeight -= dy;
+      } else if (corner === "top-left") {
+        newWidth -= dx;
+        newHeight -= dy;
+      }
+      
+      newWidth = Math.max(MIN_WIDTH, newWidth);
+      newHeight = Math.max(MIN_HEIGHT, newHeight);
+      
+      setNodeSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      resizeCornerRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const sizeStyle = nodeSize.width > 0 && nodeSize.height > 0 
+    ? { width: nodeSize.width, height: nodeSize.height } 
+    : {};
+  
+  // Only bottom-right corner for intuitive resizing
+  const corners: Corner[] = ["bottom-right"];
+
   return (
-    <div className={`blueprint-node ${statusClass}`}>
+    <div 
+      ref={nodeRef}
+      className={`blueprint-node ${statusClass}`}
+      style={sizeStyle}
+    >
+      {/* Resize zones at each corner */}
+      {corners.map((corner) => (
+        <ResizeZone
+          key={corner}
+          corner={corner}
+          isHovered={hoveredCorner === corner}
+          onMouseEnter={() => setHoveredCorner(corner)}
+          onMouseLeave={() => !isResizing && setHoveredCorner(null)}
+          onMouseDown={(e) => handleResizeStart(corner, e)}
+        />
+      ))}
+      
       <div className="node-header">
         <div>
           <strong>{data.displayName}</strong>
@@ -183,8 +358,8 @@ const App = () => {
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<BlueprintNodeData>>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
 

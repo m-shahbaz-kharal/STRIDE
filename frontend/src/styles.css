@@ -926,8 +926,29 @@ body {
   border-radius: 6px;
   border: 1px solid var(--border-default);
   background: var(--bg-elevated);
-  min-width: 160px;
+  min-width: 180px;
+  min-height: 80px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: visible;
+}
+
+/* Corner Resize Zones */
+.resize-zone {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.resize-zone:hover {
+  opacity: 1;
+}
+
+.resize-zone svg {
+  filter: drop-shadow(0 0 2px rgba(74, 158, 255, 0.5));
+}
+
+.resize-zone:active svg path {
+  stroke: var(--accent-green);
 }
 
 .node-header {
