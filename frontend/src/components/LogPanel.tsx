@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { ExecutionStats, ExecutionTraceEntry, NodeExecutionStatus } from "../types";
 import ExecutionTimeline from "./ExecutionTimeline";
 import PerformanceDashboard from "./PerformanceDashboard";
@@ -18,6 +18,15 @@ type LogPanelProps = {
 
 type TabType = "outputs" | "timeline" | "performance";
 
+// Extract node_id from output key (format: "node_id.port_name")
+const extractNodeId = (outputKey: string): string | null => {
+  const lastDotIndex = outputKey.lastIndexOf(".");
+  if (lastDotIndex > 0) {
+    return outputKey.substring(0, lastDotIndex);
+  }
+  return null;
+};
+
 const LogPanel = ({ 
   trace, 
   outputs, 
@@ -35,6 +44,17 @@ const LogPanel = ({
   const outputEntries = Object.entries(outputs);
   const hasOutputs = outputEntries.length > 0;
   const hasTrace = trace.length > 0;
+
+  const handleOutputHover = useCallback((outputKey: string | null) => {
+    if (onHighlightNodes) {
+      if (outputKey) {
+        const nodeId = extractNodeId(outputKey);
+        onHighlightNodes(nodeId ? [nodeId] : []);
+      } else {
+        onHighlightNodes([]);
+      }
+    }
+  }, [onHighlightNodes]);
 
   return (
     <div className="log-panel">
@@ -108,7 +128,12 @@ const LogPanel = ({
             {hasOutputs ? (
               <div className="output-grid">
                 {outputEntries.map(([key, value]) => (
-                  <div key={key} className="output-item">
+                  <div 
+                    key={key} 
+                    className="output-item hoverable"
+                    onMouseEnter={() => handleOutputHover(key)}
+                    onMouseLeave={() => handleOutputHover(null)}
+                  >
                     <span className="output-item-key">{key}</span>
                     <span className="output-item-value" title={JSON.stringify(value)}>
                       {JSON.stringify(value)}

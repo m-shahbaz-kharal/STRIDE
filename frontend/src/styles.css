@@ -895,6 +895,16 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   font-size: 11px;
+  transition: all 0.15s ease;
+}
+
+.output-item.hoverable {
+  cursor: pointer;
+}
+
+.output-item.hoverable:hover {
+  background: rgba(57, 211, 232, 0.1);
+  border-color: var(--accent-cyan);
 }
 
 .output-item-key {
