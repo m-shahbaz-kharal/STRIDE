@@ -997,13 +997,13 @@ body {
 }
 
 .node-handle {
-  width: 10px !important;
-  height: 10px !important;
+  width: 5px !important;
+  height: 5px !important;
   border-radius: 50% !important;
   background: var(--accent-blue) !important;
-  border: 2px solid var(--bg-deep) !important;
+  border: none !important;
   position: absolute !important;
-  top: 50% !important;
+  top: 55% !important;
   transform: translateY(-50%) !important;
 }
 
