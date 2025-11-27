@@ -37,7 +37,7 @@ class BaseNumberNode(NodeBase):
 @register_node
 class ConstantNumberNode(BaseNumberNode):
     node_type = "constant.number"
-    display_name = "Constant"
+    display_name = "Number"
     description = "Always produces the configured scalar."
     icon = "math"
 

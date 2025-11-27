@@ -20,98 +20,25 @@ const ChevronIcon = ({ collapsed }: { collapsed: boolean }) => (
   </svg>
 );
 
-// Map node types to categories
-const getCategoryForNodeType = (nodeType: string): string => {
-  const typeMapping: Record<string, string> = {
-    // Math operations
-    "addition": "Math",
-    "subtraction": "Math",
-    "multiplication": "Math",
-    "division": "Math",
-    "power": "Math",
-    "sqrt": "Math",
-    "abs": "Math",
-    "mod": "Math",
-    "floor": "Math",
-    "ceil": "Math",
-    "round": "Math",
-    "min": "Math",
-    "max": "Math",
-    "clamp": "Math",
-    "lerp": "Math",
-    "sin": "Math",
-    "cos": "Math",
-    "tan": "Math",
-    
-    // Constants
-    "constant": "Constants",
-    "number": "Constants",
-    "integer": "Constants",
-    "float": "Constants",
-    "string": "Constants",
-    "boolean": "Constants",
-    "pi": "Constants",
-    "e": "Constants",
-    
-    // Logic
-    "compare": "Logic",
-    "and": "Logic",
-    "or": "Logic",
-    "not": "Logic",
-    "xor": "Logic",
-    "switch": "Logic",
-    "branch": "Logic",
-    "if": "Logic",
-    
-    // Flow control
-    "loop": "Flow",
-    "for": "Flow",
-    "while": "Flow",
-    "sequence": "Flow",
-    "parallel": "Flow",
-    
-    // Data
-    "array": "Data",
-    "dict": "Data",
-    "get": "Data",
-    "set": "Data",
-    "length": "Data",
-    
-    // Tensor operations
-    "tensor": "Tensor",
-    "reshape": "Tensor",
-    "transpose": "Tensor",
-    "matmul": "Tensor",
-    "conv": "Tensor",
-    "pool": "Tensor",
-    
-    // I/O
-    "input": "I/O",
-    "output": "I/O",
-    "print": "I/O",
-    "log": "I/O",
-    "load": "I/O",
-    "save": "I/O",
-  };
-  
-  // Try exact match first
-  if (typeMapping[nodeType.toLowerCase()]) {
-    return typeMapping[nodeType.toLowerCase()];
+// Parse node type to extract category and node name
+// e.g., "constant.number" -> { category: "Constant", nodeName: "Number" }
+// e.g., "math.add" -> { category: "Math", nodeName: "Add" }
+const parseNodeType = (nodeType: string): { category: string; nodeName: string } => {
+  const parts = nodeType.split(".");
+  if (parts.length >= 2) {
+    // Capitalize first letter of category
+    const category = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+    // Join remaining parts and capitalize
+    const nodeName = parts.slice(1).join(".").charAt(0).toUpperCase() + parts.slice(1).join(".").slice(1);
+    return { category, nodeName };
   }
-  
-  // Try partial match
-  const lowerType = nodeType.toLowerCase();
-  for (const [key, category] of Object.entries(typeMapping)) {
-    if (lowerType.includes(key)) {
-      return category;
-    }
-  }
-  
-  return "Other";
+  // Fallback for node types without dot notation
+  return { category: "Other", nodeName: nodeType };
 };
 
-// Category order priority
-const categoryOrder = ["Math", "Constants", "Logic", "Flow", "Data", "Tensor", "I/O", "Other"];
+const getCategoryForNodeType = (nodeType: string): string => {
+  return parseNodeType(nodeType).category;
+};
 
 const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
   const [query, setQuery] = useState("");
@@ -140,18 +67,12 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
       categories[category].push(nodeType);
     }
     
-    // Sort categories by priority order
-    const sortedCategories: [string, NodeTypeDefinition[]][] = [];
-    for (const cat of categoryOrder) {
-      if (categories[cat]) {
-        sortedCategories.push([cat, categories[cat]]);
-        delete categories[cat];
-      }
-    }
-    // Add remaining categories
-    for (const [cat, nodes] of Object.entries(categories)) {
-      sortedCategories.push([cat, nodes]);
-    }
+    // Sort categories alphabetically, with "Other" always at the end
+    const sortedCategories = Object.entries(categories).sort(([a], [b]) => {
+      if (a === "Other") return 1;
+      if (b === "Other") return -1;
+      return a.localeCompare(b);
+    });
     
     return sortedCategories;
   }, [filteredNodeTypes]);
