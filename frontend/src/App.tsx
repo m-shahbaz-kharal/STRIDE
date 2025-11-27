@@ -438,6 +438,11 @@ const App = () => {
     setSelectedNodeId(null);
   }, [selectedNodeIds, setEdges, setNodes]);
 
+  // Calculate actual panel widths for dynamic positioning
+  const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
+  const actualRightWidth = rightPanelCollapsed ? 0 : rightPanelWidth;
+  const collapseBtnWidth = 24; // Width of collapse button area
+
   return (
     <ReactFlowProvider>
       <div className="app-shell">
@@ -456,16 +461,26 @@ const App = () => {
             attributionPosition="bottom-left"
           >
             <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
-            <Controls showZoom showFitView showInteractive={false} position="bottom-left" />
+            <Controls 
+              showZoom 
+              showFitView 
+              showInteractive={false} 
+              position="bottom-left"
+              style={{ left: 10, bottom: 10 }}
+            />
             <MiniMap 
               nodeColor={(node) => (node.data?.breakpoint ? "#ff5555" : "#4a9eff")} 
               maskColor="rgba(0,0,0,0.8)"
-              style={{ backgroundColor: "rgba(20,25,35,0.9)" }}
+              style={{ 
+                backgroundColor: "rgba(20,25,35,0.9)",
+                right: 10,
+                bottom: 10
+              }}
             />
           </ReactFlow>
         </div>
 
-        {/* Overlay Header */}
+        {/* Overlay Header - fixed full width */}
         <header className="overlay-header">
           <div className="header-left">
             <h1>Graph</h1>
@@ -519,7 +534,7 @@ const App = () => {
         {/* Left Panel - Node Library */}
         <aside 
           className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
-          style={{ width: leftPanelCollapsed ? 32 : leftPanelWidth }}
+          style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
         >
           {!leftPanelCollapsed && (
             <>
@@ -530,19 +545,22 @@ const App = () => {
               />
             </>
           )}
-          <button
-            className="collapse-btn"
-            onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
-            title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
-          >
-            {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
-          </button>
         </aside>
+        
+        {/* Left Panel Collapse Button - always visible */}
+        <button
+          className="panel-collapse-btn left"
+          style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
+          onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
+          title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
+        >
+          {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
+        </button>
 
         {/* Right Panel - Logs & Inspector */}
         <aside 
           className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
-          style={{ width: rightPanelCollapsed ? 32 : rightPanelWidth }}
+          style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
         >
           {!rightPanelCollapsed && (
             <>
@@ -561,14 +579,17 @@ const App = () => {
               </div>
             </>
           )}
-          <button
-            className="collapse-btn"
-            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-            title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
-          >
-            {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
-          </button>
         </aside>
+        
+        {/* Right Panel Collapse Button - always visible */}
+        <button
+          className="panel-collapse-btn right"
+          style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
+          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+          title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
+        >
+          {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
+        </button>
       </div>
     </ReactFlowProvider>
   );

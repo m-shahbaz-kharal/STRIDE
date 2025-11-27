@@ -117,7 +117,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px 0 44px;
+  padding: 0 16px;
   background: linear-gradient(180deg, rgba(13, 17, 23, 0.95) 0%, rgba(13, 17, 23, 0.85) 100%);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: blur(8px);
@@ -164,7 +164,6 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-right: 44px;
 }
 
 .icon-btn {
@@ -258,6 +257,7 @@ body {
   border: 1px solid var(--border-default);
   z-index: 90;
   transition: width 0.2s ease;
+  overflow: hidden;
 }
 
 .side-panel.left-panel {
@@ -277,14 +277,16 @@ body {
 .side-panel.collapsed {
   background: transparent;
   border-color: transparent;
+  width: 0 !important;
 }
 
-.collapse-btn {
+/* Panel collapse buttons - positioned independently */
+.panel-collapse-btn {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 18px;
-  height: 48px;
+  width: 24px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -292,25 +294,24 @@ body {
   border: 1px solid var(--border-default);
   color: var(--text-muted);
   cursor: pointer;
-  z-index: 10;
-  transition: all 0.15s ease;
+  z-index: 95;
+  transition: left 0.2s ease, right 0.2s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.left-panel .collapse-btn {
-  right: -9px;
-  border-radius: 0 4px 4px 0;
+.panel-collapse-btn.left {
+  border-radius: 0 6px 6px 0;
   border-left: none;
 }
 
-.right-panel .collapse-btn {
-  left: -9px;
-  border-radius: 4px 0 0 4px;
+.panel-collapse-btn.right {
+  border-radius: 6px 0 0 6px;
   border-right: none;
 }
 
-.collapse-btn:hover {
+.panel-collapse-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: var(--border-emphasis);
 }
 
 .resize-handle {
