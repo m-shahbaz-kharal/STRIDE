@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Frontend build artifacts
+frontend/dist/
+frontend/node_modules/

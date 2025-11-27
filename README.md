@@ -17,18 +17,26 @@ conceptual architecture described in the project brief.
 
 ## Getting started
 
-1. Create a virtual environment (recommended) and install the backend:
+1. Create a virtual environment (recommended) and install the backend dependencies:
    ```bash
    cd backend
    python -m venv .venv
    .venv/Scripts/activate
    pip install -r requirements.txt
    ```
-2. Run the backend:
+2. Install the React frontend dependencies and run the dev server:
    ```bash
+   cd ../frontend
+   npm install
+   npm run dev
+   ```
+   The dev server proxies API calls to `http://127.0.0.1:8000` by default so you can iterate on the editor while the backend is running.
+3. For a production-backed experience, build the frontend bundle (this writes to `frontend/dist`) and then launch the backend so it can serve the static assets:
+   ```bash
+   npm run build
+   cd ../backend
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
-3. Open `http://127.0.0.1:8000` in your browser and click **Run sample graph**.
 
 You can also validate the runner directly:
 
@@ -38,18 +46,23 @@ cd backend
 python -m app.test_graph
 ```
 
+## Frontend experience
+
+- React + React Flow powers a Blueprint-style canvas with draggable nodes, typed ports, and an inspector panel that exposes device preference, params, and breakpoints.
+- Execution controls support Run Graph, Run Selection, and Step while capturing live logs, execution units, and tensor-like output summaries returned from the backend.
+- The palette is populated directly from the backend registry (`/api/node-types`) so the UI always reflects the nodes available to the scheduler, and every node highlights the last device/resolution it ran on for quick debugging.
+
+## Backend APIs
+
+- `GET /api/node-types` exposes every registered node’s metadata (ports, descriptions, param schema, defaults) so the frontend can render a consistent palette.
+- `POST /api/run-graph` still accepts a graph definition, but it also looks for two optional helpers: an embedded `options` object (`mode`, `target_nodes`, `breakpoints`, `max_steps`) and a `graph` wrapper. The executor now respects selection-only runs, breakpoints, and stepping hints from the UI.
+
 ## Architecture notes
 
-- **Execution plan**: The backend builds a topological order (Kahn's algorithm),
-  partitions nodes into device-aligned execution units, and logs the trace for
-  each node with the assigned device hint.
-- **Node model**: Each node declares `input_ports`, `output_ports`, and a
-  `forward()` implementation. The two constant nodes inherit from a shared
-  `BaseNumberNode`, while the addition node demonstrates a GPU hint.
-- **Device placement**: The scheduler honors explicit `device_hint` values
-  (`cpu` or `gpu`) and otherwise defaults to a heuristic (math nodes prefer GPU).
-- **Frontend to backend communication**: The browser POSTs JSON graphs, displays
-  the returned outputs, and exposes the execution trace to prove the pipeline.
+- **Execution plan**: The backend still topologically sorts nodes, but the planner can now restrict execution to a selection, honor breakpoints, and stop after a fixed number of steps thanks to the new executor options.
+- **Node metadata**: Each node class declares ports, documentation, and a parameter schema that feeds the frontend inspector (the node registry also returns schema defaults so the React Flow nodes are initialized sensibly).
+- **Device placement**: Explicit `device_hint` values (`cpu`, `gpu`) are honored while math nodes default to GPU. Nodes can be tagged with breakpoints from the UI, and the executor halts before hitting them.
+- **Frontend / backend surface**: The React UI POSTs `{"graph": {...}, "options": {...}}` to `/api/run-graph`, then displays the returned `outputs`, `trace`, and `units` (which describe the device-aligned execution chunks).
 
 ## Roadmap ideas
 

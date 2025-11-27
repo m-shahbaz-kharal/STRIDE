@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from .nodes import ExecutionContext, NodeBase, get_node
 
@@ -28,7 +28,7 @@ class ExecutionUnit:
 class GraphExecutor:
     """Minimal graph compiler/executor that respects simple device hints."""
 
-    def __init__(self, graph_definition: Dict[str, Any]) -> None:
+    def __init__(self, graph_definition: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -> None:
         self.definition = graph_definition
         self.nodes: Dict[str, NodeBase] = {}
         self.links: List[Link] = []
@@ -36,9 +36,11 @@ class GraphExecutor:
         self.execution_trace: List[Dict[str, Any]] = []
         self.execution_units: List[ExecutionUnit] = []
         self.outputs: Dict[str, Any] = {}
+        self.options: Dict[str, Any] = options or {}
         self._build_nodes()
         self._build_links()
         self._topo_order = self._topological_sort()
+        self._execution_order: List[str] = []
 
     def _build_nodes(self) -> None:
         for node_config in self.definition.get("nodes", []):
@@ -86,6 +88,28 @@ class GraphExecutor:
             raise GraphExecutionError("Graph contains a cycle or missing inputs")
         return order
 
+    def _expand_dependencies(self, node_ids: List[str]) -> Set[str]:
+        queue = deque(node_ids)
+        collected: Set[str] = set()
+        while queue:
+            current = queue.popleft()
+            if current in collected or current not in self.nodes:
+                continue
+            collected.add(current)
+            for link in self.input_map.get(current, {}).values():
+                if link.from_node not in collected:
+                    queue.append(link.from_node)
+        return collected
+
+    def _resolve_execution_order(self) -> List[str]:
+        mode = str(self.options.get("mode", "full")).lower()
+        if mode == "selection":
+            target_nodes = [node_id for node_id in (self.options.get("target_nodes") or []) if node_id in self.nodes]
+            if target_nodes:
+                allowed = self._expand_dependencies(target_nodes)
+                return [node_id for node_id in self._topo_order if node_id in allowed]
+        return list(self._topo_order)
+
     def _assign_device(self, node: NodeBase) -> str:
         hint = node.device_hint.lower() if isinstance(node.device_hint, str) else "auto"
         if hint in ("gpu", "cpu"):
@@ -99,7 +123,7 @@ class GraphExecutor:
         current_device: Optional[str] = None
         current_nodes: List[Dict[str, Any]] = []
 
-        for node_id in self._topo_order:
+        for node_id in self._execution_order:
             node = self.nodes[node_id]
             device = self._assign_device(node)
             if current_device is None or current_device != device:
@@ -129,10 +153,21 @@ class GraphExecutor:
         return inputs
 
     def run(self) -> Dict[str, Any]:
+        self._execution_order = self._resolve_execution_order()
+        self.execution_trace = []
+        self.outputs = {}
         self._build_execution_units()
         computed_values: Dict[str, Dict[str, Any]] = {}
+        executed_count = 0
+        max_steps = self.options.get("max_steps")
+        breakpoints: Set[str] = set(self.options.get("breakpoints") or [])
 
-        for node_id in self._topo_order:
+        for node_id in self._execution_order:
+            if max_steps is not None and executed_count >= max_steps:
+                break
+            if node_id in breakpoints:
+                break
+
             node = self.nodes[node_id]
             device = self._assign_device(node)
             inputs = self._gather_inputs(node_id, computed_values)
@@ -145,6 +180,7 @@ class GraphExecutor:
                     f"Node '{node_id}' output ports {node.output_ports} do not match produced {list(outputs.keys())}"
                 )
             computed_values[node_id] = outputs
+            executed_count += 1
             self.execution_trace.append(
                 {
                     "node_id": node_id,
@@ -170,7 +206,7 @@ class GraphExecutor:
             alias = entry.get("alias", f"{node_id}.{port}")
             node_outputs = computed_values.get(node_id)
             if not node_outputs or port not in node_outputs:
-                raise GraphExecutionError(f"Missing output for node '{node_id}' port '{port}'")
+                continue
             results[alias] = node_outputs[port]
         if not results:
             # fallback to expose everything if output list not provided

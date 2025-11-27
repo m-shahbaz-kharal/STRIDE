@@ -13,7 +13,7 @@ SAMPLE_GRAPH = {
         },
         {
             "id": "const_b",
-            "type": "mirror.number",
+            "type": "constant.number",
             "device_hint": "cpu",
             "params": {"value": 7},
         },

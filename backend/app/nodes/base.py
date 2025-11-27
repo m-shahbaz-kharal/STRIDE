@@ -21,6 +21,10 @@ class NodeBase(abc.ABC):
     """Minimal base for nodes with ports, params, and device hints."""
 
     node_type: str = "node.base"
+    display_name: str = "Node"
+    description: str = ""
+    icon: str = "node"
+    params_schema: Dict[str, Dict[str, Any]] = {}
     input_ports: List[str] = []
     output_ports: List[str] = []
 

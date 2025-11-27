@@ -9,6 +9,10 @@ from . import register_node
 @register_node
 class AdditionNode(NodeBase):
     node_type = "math.add"
+    display_name = "Add"
+    description = "Combines two numbers and favors GPU scheduling."
+    icon = "plus"
+    params_schema: Dict[str, Any] = {}
     input_ports = ["a", "b"]
     output_ports = ["sum"]
 
