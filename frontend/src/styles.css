@@ -983,6 +983,17 @@ body {
   gap: 6px;
   font-size: 11px;
   color: var(--text-secondary);
+  position: relative;
+  min-height: 18px;
+}
+
+.node-port-input {
+  padding-left: 6px;
+}
+
+.node-port-output {
+  padding-right: 6px;
+  justify-content: flex-end;
 }
 
 .node-handle {
@@ -991,6 +1002,17 @@ body {
   border-radius: 50% !important;
   background: var(--accent-blue) !important;
   border: 2px solid var(--bg-deep) !important;
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+.node-port-input .node-handle {
+  left: -5px !important;
+}
+
+.node-port-output .node-handle {
+  right: -5px !important;
 }
 
 .node-handle:hover {

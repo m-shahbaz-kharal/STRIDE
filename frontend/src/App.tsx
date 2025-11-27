@@ -47,13 +47,12 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
       <div className="node-ports">
         <div className="node-port-column">
           {data.input_ports.map((port, index) => (
-            <div key={`in-${port}-${index}`} className="node-port">
+            <div key={`in-${port}-${index}`} className="node-port node-port-input">
               <Handle
                 type="target"
                 position={Position.Left}
                 id={port}
                 className="node-handle"
-                style={{ top: 12 + index * 18 }}
               />
               <span>{port}</span>
             </div>
@@ -61,14 +60,13 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
         </div>
         <div className="node-port-column">
           {data.output_ports.map((port, index) => (
-            <div key={`out-${port}-${index}`} className="node-port">
+            <div key={`out-${port}-${index}`} className="node-port node-port-output">
               <span>{port}</span>
               <Handle
                 type="source"
                 position={Position.Right}
                 id={port}
                 className="node-handle"
-                style={{ top: 12 + index * 18 }}
               />
             </div>
           ))}
