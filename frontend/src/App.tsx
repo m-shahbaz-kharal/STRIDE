@@ -160,7 +160,7 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
   // Min width: base + title chars (approx 7px per char) + padding for chips
   const MIN_WIDTH = Math.max(180, 80 + titleLength * 7);
   // Min height: header (40px) + ports (22px each) + padding
-  const MIN_HEIGHT = Math.max(80, 50 + maxPorts * 22);
+  const MIN_HEIGHT = Math.max(80, 42 + maxPorts * 22);
 
   useEffect(() => {
     if (!isResizing) return;
