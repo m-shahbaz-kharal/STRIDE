@@ -466,15 +466,14 @@ const App = () => {
               showFitView 
               showInteractive={false} 
               position="bottom-left"
-              style={{ left: 10, bottom: 10 }}
+              style={{ left: actualLeftWidth}}
             />
             <MiniMap 
               nodeColor={(node) => (node.data?.breakpoint ? "#ff5555" : "#4a9eff")} 
               maskColor="rgba(0,0,0,0.8)"
               style={{ 
                 backgroundColor: "rgba(20,25,35,0.9)",
-                right: 10,
-                bottom: 10
+                right: actualRightWidth
               }}
             />
           </ReactFlow>
