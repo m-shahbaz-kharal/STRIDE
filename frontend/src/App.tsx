@@ -16,7 +16,6 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-import ExecutionControls from "./components/ExecutionControls";
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
@@ -90,6 +89,48 @@ const BlueprintNode = ({ data }: NodeProps<BlueprintNodeData>) => {
   );
 };
 
+// Play Icon SVG
+const PlayIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+// Step Icon SVG
+const StepIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+  </svg>
+);
+
+// Selection Run Icon SVG
+const SelectionIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2z" />
+    <path d="M10 8l6 4-6 4V8z" />
+  </svg>
+);
+
+// Delete Icon SVG
+const DeleteIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+  </svg>
+);
+
+// Chevron Icons
+const ChevronLeft = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+  </svg>
+);
+
+const ChevronRight = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" />
+  </svg>
+);
+
 const App = () => {
   const [nodeLibrary, setNodeLibrary] = useState<NodeTypeDefinition[]>([]);
   const [trace, setTrace] = useState<ExecutionTraceEntry[]>([]);
@@ -101,6 +142,18 @@ const App = () => {
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastRunMode, setLastRunMode] = useState<string>("");
   const nodeIdRef = useRef(1);
+
+  // Panel collapse states
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  
+  // Panel width states (for resizing)
+  const [leftPanelWidth, setLeftPanelWidth] = useState(260);
+  const [rightPanelWidth, setRightPanelWidth] = useState(300);
+  
+  // Resizing states
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<BlueprintNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
@@ -120,6 +173,39 @@ const App = () => {
         setNodeLibrary([]);
       });
   }, []);
+
+  // Handle mouse move for resizing
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizingLeft) {
+        const newWidth = Math.min(Math.max(180, e.clientX), 400);
+        setLeftPanelWidth(newWidth);
+      }
+      if (isResizingRight) {
+        const newWidth = Math.min(Math.max(200, window.innerWidth - e.clientX), 500);
+        setRightPanelWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingLeft(false);
+      setIsResizingRight(false);
+    };
+
+    if (isResizingLeft || isResizingRight) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizingLeft, isResizingRight]);
 
   const handleSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
@@ -323,7 +409,7 @@ const App = () => {
           {
             ...connection,
             animated: true,
-            style: { stroke: "#0f62fe" },
+            style: { stroke: "#4a9eff" },
           },
           existing
         )
@@ -355,95 +441,137 @@ const App = () => {
   return (
     <ReactFlowProvider>
       <div className="app-shell">
-        <header className="app-header">
-          <div>
-            <h1>LiGuard Graph Editor</h1>
-            <p>
-              Compose node graphs as you would in Unreal Blueprints or ComfyUI and execute them
-              against the Python runtime.
-            </p>
+        {/* Full-page ReactFlow Canvas */}
+        <div className="reactflow-fullpage">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={handleConnect}
+            onSelectionChange={handleSelectionChange}
+            nodeTypes={nodeTypes}
+            fitView
+            connectionLineStyle={{ stroke: "#4a9eff" }}
+            attributionPosition="bottom-left"
+          >
+            <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
+            <Controls showZoom showFitView showInteractive={false} position="bottom-left" />
+            <MiniMap 
+              nodeColor={(node) => (node.data?.breakpoint ? "#ff5555" : "#4a9eff")} 
+              maskColor="rgba(0,0,0,0.8)"
+              style={{ backgroundColor: "rgba(20,25,35,0.9)" }}
+            />
+          </ReactFlow>
+        </div>
+
+        {/* Overlay Header */}
+        <header className="overlay-header">
+          <div className="header-left">
+            <h1>Graph</h1>
+            <div className="header-stats">
+              <span className="stat-badge">{graphStats.nodes} nodes</span>
+              <span className="stat-badge">{graphStats.edges} edges</span>
+              {graphStats.breakpoints > 0 && (
+                <span className="stat-badge breakpoint">{graphStats.breakpoints} BP</span>
+              )}
+            </div>
           </div>
-          <div className="header-meta">
-            <span>Nodes: {graphStats.nodes}</span>
-            <span>Edges: {graphStats.edges}</span>
-            <span>Breakpoints: {graphStats.breakpoints}</span>
+          <div className="header-controls">
+            <button
+              className="icon-btn"
+              onClick={handleRunGraph}
+              disabled={isRunning || nodes.length === 0}
+              title="Run Graph"
+            >
+              <PlayIcon />
+              {isRunning && <span className="btn-spinner" />}
+            </button>
+            <button
+              className="icon-btn"
+              onClick={handleRunSelection}
+              disabled={isRunning || graphStats.selection === 0}
+              title={`Run Selection (${graphStats.selection})`}
+            >
+              <SelectionIcon />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={handleStep}
+              disabled={isRunning || nodes.length === 0}
+              title="Step"
+            >
+              <StepIcon />
+            </button>
+            <div className="toolbar-divider" />
+            <button
+              className="icon-btn danger"
+              onClick={handleDeleteSelected}
+              disabled={graphStats.selection === 0}
+              title="Delete Selected"
+            >
+              <DeleteIcon />
+            </button>
+            {lastError && <span className="error-indicator" title={lastError}>!</span>}
           </div>
         </header>
-        <div className="workspace">
-          <aside className="panel-col palette-col">
-            <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
-          </aside>
 
-          <section className="canvas-col">
-            <ExecutionControls
-              isRunning={isRunning}
-              selectionCount={graphStats.selection}
-              breakpointCount={graphStats.breakpoints}
-              onRunGraph={handleRunGraph}
-              onRunSelection={handleRunSelection}
-              onStep={handleStep}
-              lastRunMode={lastRunMode}
-            />
-            <div className="graph-toolbar">
-              <div className="graph-toolbar-meta">
-                <span>Selection: {graphStats.selection}</span>
-                <span>Breakpoints set: {graphStats.breakpoints}</span>
-                <span>Last run: {lastRunMode || "n/a"}</span>
-              </div>
-              <div className="toolbar-actions">
-                <button
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  disabled={graphStats.selection === 0}
-                >
-                  Delete Selected
-                </button>
-              </div>
-            </div>
-            <div className="reactflow-wrapper">
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={handleConnect}
-                onSelectionChange={handleSelectionChange}
-                nodeTypes={nodeTypes}
-                fitView
-                connectionLineStyle={{ stroke: "#0f62fe" }}
-                attributionPosition="bottom-left"
-              >
-                <Background gap={16} />
-                <Controls showZoom={false} />
-                <MiniMap nodeColor={(node) => (node.data?.breakpoint ? "#ff7a7a" : "#1f6feb")} />
-              </ReactFlow>
-            </div>
-            <div className="trace-hints">
-              <div>
-                <strong>Device planner</strong>
-                <p>Units: {units.length}</p>
-              </div>
-              <div>
-                <strong>Last error</strong>
-                <p>{lastError ?? "None"}</p>
-              </div>
-            </div>
-          </section>
+        {/* Left Panel - Node Library */}
+        <aside 
+          className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
+          style={{ width: leftPanelCollapsed ? 32 : leftPanelWidth }}
+        >
+          {!leftPanelCollapsed && (
+            <>
+              <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
+              <div 
+                className="resize-handle right"
+                onMouseDown={() => setIsResizingLeft(true)}
+              />
+            </>
+          )}
+          <button
+            className="collapse-btn"
+            onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
+            title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
+          >
+            {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
+          </button>
+        </aside>
 
-          <aside className="panel-col inspector-col">
-            <NodeInspector
-              node={selectedNode}
-              onDeviceHintChange={handleDeviceHintChange}
-              onParamChange={handleParamChange}
-              onToggleBreakpoint={handleToggleBreakpoint}
-            />
-            <LogPanel trace={trace} units={units} outputs={outputs} error={lastError} />
-          </aside>
-        </div>
+        {/* Right Panel - Logs & Inspector */}
+        <aside 
+          className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
+          style={{ width: rightPanelCollapsed ? 32 : rightPanelWidth }}
+        >
+          {!rightPanelCollapsed && (
+            <>
+              <div 
+                className="resize-handle left"
+                onMouseDown={() => setIsResizingRight(true)}
+              />
+              <div className="right-panel-content">
+                <NodeInspector
+                  node={selectedNode}
+                  onDeviceHintChange={handleDeviceHintChange}
+                  onParamChange={handleParamChange}
+                  onToggleBreakpoint={handleToggleBreakpoint}
+                />
+                <LogPanel trace={trace} units={units} outputs={outputs} error={lastError} />
+              </div>
+            </>
+          )}
+          <button
+            className="collapse-btn"
+            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+            title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
+          >
+            {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
+          </button>
+        </aside>
       </div>
     </ReactFlowProvider>
   );
 };
 
 export default App;
-

@@ -31,11 +31,9 @@ const NodeInspector = ({
 }: InspectorProps) => {
   if (!node) {
     return (
-      <div className="panel inspector-panel">
-        <div className="panel-header">
-          <h3>Node Inspector</h3>
-        </div>
-        <p className="panel-placeholder">Select a node to inspect its settings.</p>
+      <div className="inspector-panel">
+        <h3>Inspector</h3>
+        <p className="inspector-placeholder">Select a node to inspect</p>
       </div>
     );
   }
@@ -44,38 +42,34 @@ const NodeInspector = ({
   const schemaEntries = Object.entries(schema);
 
   return (
-    <div className="panel inspector-panel">
-      <div className="panel-header">
-        <div>
-          <h3>{node.data.displayName}</h3>
-          <p className="panel-subtitle">{node.data.nodeType}</p>
-        </div>
-      </div>
-      <p className="panel-description">{node.data.description}</p>
+    <div className="inspector-panel">
+      <h3>{node.data.displayName}</h3>
+      <div className="inspector-subtitle">{node.data.nodeType}</div>
 
       <div className="inspector-section">
-        <label htmlFor="device-hint">Device Hint</label>
-        <select
-          id="device-hint"
-          value={node.data.device_hint}
-          onChange={(event) => onDeviceHintChange(node.id, event.target.value)}
-        >
-          <option value="auto">Auto</option>
-          <option value="cpu">CPU</option>
-          <option value="gpu">GPU</option>
-        </select>
+        <h4>Device</h4>
+        <div className="inspector-field">
+          <select
+            id="device-hint"
+            value={node.data.device_hint}
+            onChange={(event) => onDeviceHintChange(node.id, event.target.value)}
+          >
+            <option value="auto">Auto</option>
+            <option value="cpu">CPU</option>
+            <option value="gpu">GPU</option>
+          </select>
+        </div>
       </div>
 
       {schemaEntries.length > 0 && (
         <div className="inspector-section">
-          <div className="inspector-section-header">
-            <h4>Parameters</h4>
-          </div>
+          <h4>Parameters</h4>
           {schemaEntries.map(([param, field]) => (
-            <label key={param} className="inspector-field">
-              <span>{field.label ?? param}</span>
+            <div key={param} className="inspector-field">
+              <label htmlFor={`param-${param}`}>{field.label ?? param}</label>
               {field.type === "select" && field.options ? (
                 <select
+                  id={`param-${param}`}
                   value={`${node.data.params[param] ?? field.default ?? ""}`}
                   onChange={(event) =>
                     onParamChange(node.id, param, parseParamValue(event.target.value, field))
@@ -89,6 +83,7 @@ const NodeInspector = ({
                 </select>
               ) : (
                 <input
+                  id={`param-${param}`}
                   type={field.type === "number" ? "number" : "text"}
                   value={`${node.data.params[param] ?? field.default ?? ""}`}
                   onChange={(event) =>
@@ -97,7 +92,7 @@ const NodeInspector = ({
                 />
               )}
               {field.description && <small>{field.description}</small>}
-            </label>
+            </div>
           ))}
         </div>
       )}
@@ -105,7 +100,7 @@ const NodeInspector = ({
       <div className="inspector-section">
         <button
           type="button"
-          className={node.data.breakpoint ? "ghost primary" : "ghost"}
+          className={`inspector-btn ${node.data.breakpoint ? "active" : ""}`}
           onClick={() => onToggleBreakpoint(node.id)}
         >
           {node.data.breakpoint ? "Clear Breakpoint" : "Set Breakpoint"}
@@ -114,16 +109,17 @@ const NodeInspector = ({
 
       {node.data.last_outputs && (
         <div className="inspector-section">
-          <div className="inspector-section-header">
-            <h4>Last Outputs</h4>
-          </div>
-          <ul className="inspector-list">
+          <h4>Last Outputs</h4>
+          <div className="inspector-outputs">
             {Object.entries(node.data.last_outputs).map(([key, value]) => (
-              <li key={key}>
-                <strong>{key}:</strong> {JSON.stringify(value)}
-              </li>
+              <div key={key} className="inspector-output-item">
+                <span className="inspector-output-key">{key}</span>
+                <span className="inspector-output-value" title={JSON.stringify(value)}>
+                  {JSON.stringify(value)}
+                </span>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>
@@ -131,4 +127,3 @@ const NodeInspector = ({
 };
 
 export default NodeInspector;
-

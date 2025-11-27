@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ExecutionTraceEntry, ExecutionUnit } from "../types";
 
 type LogPanelProps = {
@@ -8,74 +8,131 @@ type LogPanelProps = {
   error: string | null;
 };
 
-const LogPanel = ({ trace, units, outputs, error }: LogPanelProps) => (
-  <div className="panel log-panel">
-    <div className="panel-header">
-      <div>
-        <h3>Live Logs & Tensor Watch</h3>
-        <p>Trace your execution, inspect tensors, and keep an eye on units.</p>
-      </div>
-      {error && <span className="error-tag">{error}</span>}
-    </div>
+type TabType = "outputs" | "trace" | "units";
 
-    <section className="log-section">
-      <h4>Outputs</h4>
-      <div className="output-grid">
-        {Object.keys(outputs).length === 0 ? (
-          <span className="empty-state">No outputs captured yet.</span>
-        ) : (
-          Object.entries(outputs).map(([key, value]) => (
-            <div key={key} className="output-card">
-              <strong>{key}</strong>
-              <span>{JSON.stringify(value)}</span>
+const LogPanel = ({ trace, units, outputs, error }: LogPanelProps) => {
+  const [activeTab, setActiveTab] = useState<TabType>("outputs");
+
+  const outputEntries = Object.entries(outputs);
+  const hasOutputs = outputEntries.length > 0;
+  const hasTrace = trace.length > 0;
+  const hasUnits = units.length > 0;
+
+  return (
+    <div className="log-panel">
+      <div className="log-header">
+        <h3>Logs</h3>
+        {error && <span className="log-error-badge">Error</span>}
+      </div>
+
+      <div className="log-tabs">
+        <button
+          type="button"
+          className={`log-tab ${activeTab === "outputs" ? "active" : ""}`}
+          onClick={() => setActiveTab("outputs")}
+        >
+          Outputs {hasOutputs && `(${outputEntries.length})`}
+        </button>
+        <button
+          type="button"
+          className={`log-tab ${activeTab === "trace" ? "active" : ""}`}
+          onClick={() => setActiveTab("trace")}
+        >
+          Trace {hasTrace && `(${trace.length})`}
+        </button>
+        <button
+          type="button"
+          className={`log-tab ${activeTab === "units" ? "active" : ""}`}
+          onClick={() => setActiveTab("units")}
+        >
+          Units {hasUnits && `(${units.length})`}
+        </button>
+      </div>
+
+      <div className="log-content">
+        {activeTab === "outputs" && (
+          <div className="log-section">
+            {hasOutputs ? (
+              <div className="output-grid">
+                {outputEntries.map(([key, value]) => (
+                  <div key={key} className="output-item">
+                    <span className="output-item-key">{key}</span>
+                    <span className="output-item-value" title={JSON.stringify(value)}>
+                      {JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No outputs captured yet</div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "trace" && (
+          <div className="log-section">
+            {hasTrace ? (
+              <div className="trace-list">
+                {trace.map((entry) => (
+                  <div key={entry.node_id} className="trace-item">
+                    <div className="trace-item-header">
+                      <span className="trace-node-id">{entry.node_id}</span>
+                      <span className="trace-device">{entry.device}</span>
+                    </div>
+                    <div className="trace-outputs">
+                      → {JSON.stringify(entry.outputs)}
+                    </div>
+                    {entry.logs.length > 0 && entry.logs.map((log, index) => (
+                      <div key={`${entry.node_id}-log-${index}`} className="trace-log">
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No execution trace yet</div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "units" && (
+          <div className="log-section">
+            {hasUnits ? (
+              <div className="unit-list">
+                {units.map((unit, index) => (
+                  <div key={`${unit.device}-${index}`} className="unit-item">
+                    <div className="unit-item-header">
+                      <span className="unit-device">{unit.device}</span>
+                      <span className="unit-count">{unit.nodes.length} node(s)</span>
+                    </div>
+                    <div className="unit-nodes">
+                      {unit.nodes.map((node) => node.id).join(" → ")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">Planner hasn't run yet</div>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div className="log-section">
+            <div className="log-section-header">
+              <h4>Error</h4>
             </div>
-          ))
+            <div className="trace-item" style={{ borderColor: "rgba(248, 81, 73, 0.4)" }}>
+              <div className="trace-log" style={{ color: "#f85149", borderColor: "#f85149" }}>
+                {error}
+              </div>
+            </div>
+          </div>
         )}
       </div>
-    </section>
-
-    <section className="log-section">
-      <h4>Execution Units</h4>
-      <div className="unit-list">
-        {units.map((unit, index) => (
-          <div key={`${unit.device}-${index}`} className="unit-card">
-            <div className="unit-card-header">
-              <span>{unit.device.toUpperCase()}</span>
-              <span>{unit.nodes.length} node(s)</span>
-            </div>
-            <small>{unit.nodes.map((node) => node.id).join(" → ")}</small>
-          </div>
-        ))}
-        {units.length === 0 && <span className="empty-state">Planner hasn't run yet.</span>}
-      </div>
-    </section>
-
-    <section className="log-section">
-      <h4>Trace</h4>
-      <div className="trace-list">
-        {trace.map((entry) => (
-          <div key={entry.node_id} className="trace-entry">
-            <div className="trace-header">
-              <strong>{entry.node_id}</strong>
-              <span>{entry.device}</span>
-            </div>
-            <div className="trace-body">
-              <p>
-                <em>Outputs:</em> {JSON.stringify(entry.outputs)}
-              </p>
-              {entry.logs.map((log, index) => (
-                <p key={`${entry.node_id}-log-${index}`} className="trace-log">
-                  {log}
-                </p>
-              ))}
-            </div>
-          </div>
-        ))}
-        {trace.length === 0 && <span className="empty-state">No execution trace yet.</span>}
-      </div>
-    </section>
-  </div>
-);
+    </div>
+  );
+};
 
 export default LogPanel;
-
