@@ -124,7 +124,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 8px;
   background: linear-gradient(180deg, rgba(13, 17, 23, 0.95) 0%, rgba(13, 17, 23, 0.85) 100%);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: blur(8px);
