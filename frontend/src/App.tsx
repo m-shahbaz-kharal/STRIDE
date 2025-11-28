@@ -451,8 +451,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   }, []);
 
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
+  // Calculate min dimensions based on content
+  // Header ~36px, each port row ~24px, padding ~16px
   const MIN_WIDTH = 160;
-  const MIN_HEIGHT = Math.max(90, 52 + maxPorts * 24);
+  const MIN_HEIGHT = 52 + maxPorts * 24;
 
   useEffect(() => {
     if (!isResizing) return;
@@ -501,9 +503,14 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     };
   }, [isResizing, MIN_HEIGHT, MIN_WIDTH]);
 
-  const sizeStyle = nodeSize.width > 0 && nodeSize.height > 0 
-    ? { width: nodeSize.width, height: nodeSize.height } 
-    : {};
+  // Apply calculated min dimensions, with explicit size only if user has resized
+  const sizeStyle: React.CSSProperties = {
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
+    ...(nodeSize.width > 0 && nodeSize.height > 0 
+      ? { width: nodeSize.width, height: nodeSize.height } 
+      : {})
+  };
   
   const corners: Corner[] = ["bottom-right"];
 
@@ -1077,10 +1084,7 @@ const App = () => {
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
       
-      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 160;
-      const initialHeight = Math.max(90, 52 + maxPorts * 24);
-      
+      // Don't set initial width/height - let nodes auto-size based on content
       const payload: Node<BlueprintNodeData> = {
         id,
         type: "blueprint",
@@ -1097,14 +1101,12 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
-          width: initialWidth,
-          height: initialHeight,
           executionLogs: [],
         },
       };
       setNodes((existing) => existing.concat(payload));
     },
-    [handleDeleteNode, handleRunFromNode, nodes.length, setNodes]
+    [handleDeleteNode, handleRunFromNode, handleClearNodeCache, nodes.length, setNodes]
   );
 
   // Update existing nodes with the run handler

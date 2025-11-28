@@ -1758,8 +1758,8 @@ body {
   border-radius: 6px;
   border: 1px solid var(--border-default);
   background: var(--bg-elevated);
-  min-width: 160px;
-  min-height: 90px;
+  /* min-width and min-height are set dynamically via inline styles based on content */
+  width: fit-content;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   position: relative;
   overflow: visible;
