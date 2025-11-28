@@ -267,6 +267,16 @@ body {
   background: rgba(248, 81, 73, 0.1);
 }
 
+.icon-btn.clear-cache-btn {
+  color: var(--text-tertiary);
+}
+
+.icon-btn.clear-cache-btn:hover:not(:disabled) {
+  background: rgba(255, 166, 87, 0.15);
+  border-color: rgba(255, 166, 87, 0.4);
+  color: #ffa657;
+}
+
 .icon-btn svg {
   width: 16px;
   height: 16px;
@@ -1932,6 +1942,15 @@ body {
 .node-action-btn.run-btn:hover {
   background: rgba(63, 185, 80, 0.2);
   color: var(--accent-green);
+}
+
+.node-action-btn.clear-cache-btn {
+  color: #ffa657;
+}
+
+.node-action-btn.clear-cache-btn:hover {
+  background: rgba(255, 166, 87, 0.2);
+  color: #ffb86c;
 }
 
 .node-delete-btn {

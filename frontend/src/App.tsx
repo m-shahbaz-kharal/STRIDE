@@ -521,6 +521,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     data.onRunSelection?.(id);
   };
 
+  const handleClearNodeCache = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    data.onClearCache?.(id);
+  };
+
   return (
     <div 
       ref={nodeRef}
@@ -581,6 +586,17 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               <path d="M8 5v14l11-7z" />
             </svg>
           </button>
+          {data.last_outputs && (
+            <button
+              className="node-action-btn clear-cache-btn nodrag"
+              onClick={handleClearNodeCache}
+              title="Clear cached output"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+              </svg>
+            </button>
+          )}
           <button
             className="node-delete-btn nodrag"
             onClick={(e) => {
@@ -644,6 +660,12 @@ const StreamIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" opacity="0.3" />
     <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" />
+  </svg>
+);
+
+const ClearCacheIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4zM6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9z" />
   </svg>
 );
 
@@ -818,30 +840,48 @@ const App = () => {
     return dependentIds;
   }, [edges, nodes]);
 
-  // Update edges for running state (animated flow) - only for running nodes
+  // Update edges for running state (animated flow) - only for edges where source has no cached output
   useEffect(() => {
     setEdges((existing) =>
       existing.map((edge) => {
-        const isInRunningSet = runningNodeIds.has(edge.source) || runningNodeIds.has(edge.target);
-        const shouldAnimate = isRunning && isInRunningSet;
+        // Find the source node to check if it has cached output
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
+        
+        // Edge should only animate if:
+        // 1. Graph is running
+        // 2. The target node is in the running set (needs this edge's data)
+        // 3. The source node does NOT have cached output (data needs to be computed)
+        const targetInRunningSet = runningNodeIds.has(edge.target);
+        const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
+        
+        // Determine edge color
+        let strokeColor = "#4a9eff"; // default
+        if (isRunning && targetInRunningSet) {
+          if (sourceHasCachedOutput) {
+            // Source already computed - show green solid line
+            strokeColor = "var(--accent-green)";
+          } else if (nodeStatuses.get(edge.source) === "completed") {
+            // Source just completed - show green
+            strokeColor = "var(--accent-green)";
+          } else {
+            // Source still computing - show blue animated
+            strokeColor = "var(--accent-blue)";
+          }
+        }
         
         return {
           ...edge,
           animated: shouldAnimate,
           style: {
             ...edge.style,
-            stroke: shouldAnimate 
-              ? nodeStatuses.get(edge.source) === "completed" 
-                ? "var(--accent-green)" 
-                : "var(--accent-blue)"
-              : "#4a9eff",
-            strokeWidth: shouldAnimate ? 2.5 : 2,
-            strokeDasharray: shouldAnimate ? undefined : undefined,
+            stroke: strokeColor,
+            strokeWidth: (isRunning && targetInRunningSet) ? 2.5 : 2,
           },
         };
       })
     );
-  }, [isRunning, nodeStatuses, runningNodeIds, setEdges]);
+  }, [isRunning, nodeStatuses, runningNodeIds, nodes, setEdges]);
 
   const handleSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
@@ -983,12 +1023,48 @@ const App = () => {
     handleRunGraph("selection", [nodeId]);
   }, [handleRunGraph]);
 
+  // Handle clearing cache for a single node
+  const handleClearNodeCache = useCallback((nodeId: string) => {
+    setNodes((existing) =>
+      existing.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                last_outputs: undefined,
+                executionStatus: undefined,
+                executionDuration: undefined,
+                executionLogs: [],
+              },
+            }
+          : node
+      )
+    );
+  }, [setNodes]);
+
   // Clear running node set when execution completes
   useEffect(() => {
     if (!isRunning) {
       setRunningNodeIds(new Set());
     }
   }, [isRunning]);
+
+  // Clear all cached outputs from nodes
+  const handleClearCache = useCallback(() => {
+    setNodes((existing) =>
+      existing.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          last_outputs: undefined,
+          executionStatus: undefined,
+          executionDuration: undefined,
+          executionLogs: [],
+        },
+      }))
+    );
+  }, [setNodes]);
 
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
@@ -1019,6 +1095,7 @@ const App = () => {
           metadata: nodeType,
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -1038,10 +1115,11 @@ const App = () => {
           ...node.data,
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
         },
       }))
     );
-  }, [handleDeleteNode, handleRunFromNode, setNodes]);
+  }, [handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
 
   const graphStats = useMemo(
     () => ({
@@ -1156,6 +1234,14 @@ const App = () => {
               title={useStreaming ? "Streaming Mode (WebSocket)" : "Batch Mode (HTTP)"}
             >
               <StreamIcon />
+            </button>
+            <button
+              className="icon-btn clear-cache-btn"
+              onClick={handleClearCache}
+              disabled={isRunning}
+              title="Clear Cached Outputs"
+            >
+              <ClearCacheIcon />
             </button>
             <div className="toolbar-divider" />
             <button
