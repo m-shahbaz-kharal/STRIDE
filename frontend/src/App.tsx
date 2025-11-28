@@ -32,6 +32,81 @@ import {
 // Right panel tab type
 type RightPanelTab = "inspector" | "execution";
 
+// Helper: Check if a line segment intersects a rectangle
+const lineIntersectsRect = (
+  x1: number, y1: number, x2: number, y2: number,
+  rx: number, ry: number, rw: number, rh: number
+): boolean => {
+  // Check if either endpoint is inside the rectangle
+  const pointInRect = (px: number, py: number) =>
+    px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
+  
+  if (pointInRect(x1, y1) || pointInRect(x2, y2)) return true;
+  
+  // Check line intersection with each edge of the rectangle
+  const lineIntersectsLine = (
+    ax1: number, ay1: number, ax2: number, ay2: number,
+    bx1: number, by1: number, bx2: number, by2: number
+  ): boolean => {
+    const denom = (by2 - by1) * (ax2 - ax1) - (bx2 - bx1) * (ay2 - ay1);
+    if (Math.abs(denom) < 0.0001) return false;
+    
+    const ua = ((bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)) / denom;
+    const ub = ((ax2 - ax1) * (ay1 - by1) - (ay2 - ay1) * (ax1 - bx1)) / denom;
+    
+    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+  };
+  
+  // Check all four edges of rectangle
+  return (
+    lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) || // top
+    lineIntersectsLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh) || // bottom
+    lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) || // left
+    lineIntersectsLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) // right
+  );
+};
+
+// Helper: Sample points along a bezier curve and check if any segment intersects the rect
+const bezierIntersectsRect = (
+  sourceX: number, sourceY: number,
+  targetX: number, targetY: number,
+  rx: number, ry: number, rw: number, rh: number
+): boolean => {
+  // Calculate control points for bezier (similar to ReactFlow's default)
+  const centerX = (sourceX + targetX) / 2;
+  const cp1x = centerX;
+  const cp1y = sourceY;
+  const cp2x = centerX;
+  const cp2y = targetY;
+  
+  // Sample the bezier curve and check line segments
+  const samples = 20;
+  let prevX = sourceX;
+  let prevY = sourceY;
+  
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const mt3 = mt2 * mt;
+    
+    // Cubic bezier formula
+    const x = mt3 * sourceX + 3 * mt2 * t * cp1x + 3 * mt * t2 * cp2x + t3 * targetX;
+    const y = mt3 * sourceY + 3 * mt2 * t * cp1y + 3 * mt * t2 * cp2y + t3 * targetY;
+    
+    if (lineIntersectsRect(prevX, prevY, x, y, rx, ry, rw, rh)) {
+      return true;
+    }
+    
+    prevX = x;
+    prevY = y;
+  }
+  
+  return false;
+};
+
 // Value Preview Popup Component
 interface ValuePopupProps {
   value: unknown;
@@ -360,7 +435,7 @@ const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
   }
 };
 
-// Custom Edge with delete button, hover and selection states
+// Custom Edge with delete button, hover, selection, and preview states
 const CustomEdge = ({
   id,
   sourceX,
@@ -372,6 +447,7 @@ const CustomEdge = ({
   style = {},
   markerEnd,
   selected,
+  data,
 }: EdgeProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const { setEdges } = useReactFlow();
@@ -390,20 +466,25 @@ const CustomEdge = ({
     setEdges((edges) => edges.filter((edge) => edge.id !== id));
   };
 
+  // Check if edge is in preview mode (during selection drag)
+  const isPreview = data?.isPreview ?? false;
+
   // Determine stroke color and width based on state
   const baseStroke = (style as React.CSSProperties)?.stroke || "#4a9eff";
   const strokeColor = selected 
     ? "var(--selection-yellow)" 
-    : isHovered 
-      ? "var(--selection-yellow-light)" 
-      : baseStroke;
-  const strokeWidth = selected ? 3 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
+    : isPreview
+      ? "var(--selection-yellow)"
+      : isHovered 
+        ? "var(--selection-yellow-light)" 
+        : baseStroke;
+  const strokeWidth = selected ? 3 : isPreview ? 2.5 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
 
   return (
     <g
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`custom-edge ${selected ? "selected" : ""} ${isHovered ? "hovered" : ""}`}
+      className={`custom-edge ${selected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isPreview ? "preview" : ""}`}
     >
       {/* Invisible wider path for easier interaction */}
       <path
@@ -421,11 +502,11 @@ const CustomEdge = ({
           ...style, 
           stroke: strokeColor,
           strokeWidth,
-          transition: "stroke 0.15s ease, stroke-width 0.15s ease",
+          transition: "stroke 0.1s ease, stroke-width 0.1s ease",
         }}
         markerEnd={markerEnd}
       />
-      {(isHovered || selected) && (
+      {(isHovered || selected) && !isPreview && (
         <g
           transform={`translate(${labelX - 8}, ${labelY - 8})`}
           onClick={handleDeleteEdge}
@@ -744,6 +825,12 @@ const App = () => {
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
 
+  // Custom selection box tracking for edge intersection selection
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [previewEdgeIds, setPreviewEdgeIds] = useState<string[]>([]); // Edges highlighted during selection drag
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
@@ -914,6 +1001,99 @@ const App = () => {
     []
   );
 
+  // Find edges that intersect with the selection box (in flow coordinates)
+  const findIntersectingEdges = useCallback((
+    box: { startX: number; startY: number; endX: number; endY: number },
+    viewport: { x: number; y: number; zoom: number }
+  ): string[] => {
+    // Convert screen coordinates to flow coordinates
+    const toFlowCoord = (screenX: number, screenY: number) => ({
+      x: (screenX - viewport.x) / viewport.zoom,
+      y: (screenY - viewport.y) / viewport.zoom,
+    });
+    
+    const start = toFlowCoord(box.startX, box.startY);
+    const end = toFlowCoord(box.endX, box.endY);
+    
+    const rx = Math.min(start.x, end.x);
+    const ry = Math.min(start.y, end.y);
+    const rw = Math.abs(end.x - start.x);
+    const rh = Math.abs(end.y - start.y);
+    
+    // Skip if box is too small
+    if (rw < 5 && rh < 5) return [];
+    
+    const intersectingEdgeIds: string[] = [];
+    
+    edges.forEach((edge) => {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      const targetNode = nodes.find((n) => n.id === edge.target);
+      
+      if (!sourceNode || !targetNode) return;
+      
+      // Calculate edge endpoints (approximate - right side of source, left side of target)
+      const sourceX = sourceNode.position.x + (sourceNode.width || 160);
+      const sourceY = sourceNode.position.y + (sourceNode.height || 80) / 2;
+      const targetX = targetNode.position.x;
+      const targetY = targetNode.position.y + (targetNode.height || 80) / 2;
+      
+      // Check if the bezier curve intersects the selection box
+      if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
+        intersectingEdgeIds.push(edge.id);
+      }
+    });
+    
+    return intersectingEdgeIds;
+  }, [edges, nodes]);
+
+  // Get viewport from ReactFlow DOM
+  const getViewport = useCallback(() => {
+    const wrapper = reactFlowWrapper.current;
+    if (wrapper) {
+      const rfInstance = wrapper.querySelector('.react-flow__viewport');
+      if (rfInstance) {
+        const transform = rfInstance.getAttribute('style');
+        const match = transform?.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/);
+        if (match) {
+          return {
+            x: parseFloat(match[1]),
+            y: parseFloat(match[2]),
+            zoom: parseFloat(match[3]),
+          };
+        }
+      }
+    }
+    return { x: 0, y: 0, zoom: 1 };
+  }, []);
+
+  // Update preview edges during selection drag
+  const updatePreviewEdges = useCallback((box: { startX: number; startY: number; endX: number; endY: number }) => {
+    const viewport = getViewport();
+    const intersectingEdges = findIntersectingEdges(box, viewport);
+    setPreviewEdgeIds(intersectingEdges);
+  }, [getViewport, findIntersectingEdges]);
+
+  // Handle selection end - finalize edge selection
+  const handleSelectionEnd = useCallback(() => {
+    if (previewEdgeIds.length > 0) {
+      // Add preview edges to selection
+      setSelectedEdgeIds((prev) => {
+        const combined = new Set([...prev, ...previewEdgeIds]);
+        return Array.from(combined);
+      });
+      // Also update the edges' selected state
+      setEdges((eds) =>
+        eds.map((e) => ({
+          ...e,
+          selected: previewEdgeIds.includes(e.id) || e.selected,
+        }))
+      );
+    }
+    setSelectionBox(null);
+    setPreviewEdgeIds([]);
+    setIsSelecting(false);
+  }, [previewEdgeIds, setEdges]);
+
   useEffect(() => {
     if (selectedNodeId && !nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(null);
@@ -964,6 +1144,19 @@ const App = () => {
       }))
     );
   }, [highlightedNodeIds, setNodes]);
+
+  // Update edges with preview state during selection drag
+  useEffect(() => {
+    setEdges((existing) =>
+      existing.map((edge) => ({
+        ...edge,
+        data: {
+          ...edge.data,
+          isPreview: previewEdgeIds.includes(edge.id),
+        },
+      }))
+    );
+  }, [previewEdgeIds, setEdges]);
 
   const buildGraphPayload = useCallback(
     (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
@@ -1388,10 +1581,60 @@ const App = () => {
   const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
   const actualRightWidth = rightPanelCollapsed ? 0 : rightPanelWidth;
 
+  // Track selection box via mouse events
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Only track left mouse button for selection
+    if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const target = e.target as HTMLElement;
+      // Only start selection on the pane background
+      if (target.classList.contains('react-flow__pane')) {
+        const rect = reactFlowWrapper.current?.getBoundingClientRect();
+        if (rect) {
+          setIsSelecting(true);
+          setSelectionBox({
+            startX: e.clientX - rect.left,
+            startY: e.clientY - rect.top,
+            endX: e.clientX - rect.left,
+            endY: e.clientY - rect.top,
+          });
+        }
+      }
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isSelecting && selectionBox) {
+      const rect = reactFlowWrapper.current?.getBoundingClientRect();
+      if (rect) {
+        const newBox = {
+          ...selectionBox,
+          endX: e.clientX - rect.left,
+          endY: e.clientY - rect.top,
+        };
+        setSelectionBox(newBox);
+        // Update preview edges in real-time
+        updatePreviewEdges(newBox);
+      }
+    }
+  }, [isSelecting, selectionBox, updatePreviewEdges]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isSelecting) {
+      handleSelectionEnd();
+    }
+  }, [isSelecting, handleSelectionEnd]);
+
   return (
     <ReactFlowProvider>
       <div className="app-shell">
-        <div className="reactflow-fullpage">
+        <div 
+          className="reactflow-fullpage"
+          ref={reactFlowWrapper}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -1408,6 +1651,9 @@ const App = () => {
             selectionOnDrag
             panOnDrag={[1, 2]}
             selectNodesOnDrag
+            edgesFocusable
+            edgesUpdatable
+            elementsSelectable
           >
             <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
             <Controls 
