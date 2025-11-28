@@ -462,7 +462,6 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /*padding-left: 4px;*/
 }
 
 /* ========== Right Panel Tabs ========== */
@@ -581,7 +580,6 @@ body {
   flex-direction: column;
   overflow: hidden;
   padding: 12px;
-  /* padding-right: 16px; */
 }
 
 .palette-header {
