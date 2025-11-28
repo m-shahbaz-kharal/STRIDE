@@ -16,6 +16,7 @@ import ReactFlow, {
   useNodesState,
   useReactFlow,
   SelectionMode,
+  ReactFlowInstance,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -801,6 +802,7 @@ const App = () => {
   // Popup states
   const [valuePopup, setValuePopup] = useState<{ value: unknown; title: string } | null>(null);
   const [logsPopup, setLogsPopup] = useState<{ nodeId: string; nodeName: string; logs: string[] } | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Set global popup functions
   useEffect(() => {
@@ -1656,6 +1658,76 @@ const App = () => {
     }
   }, [isSelecting, handleSelectionEnd]);
 
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+
+      const typeData = event.dataTransfer.getData("application/reactflow");
+      if (typeof typeData === "undefined" || !typeData) {
+        return;
+      }
+
+      const nodeType: NodeTypeDefinition = JSON.parse(typeData);
+
+      // check if the dropped element is valid
+      if (typeof nodeType === "undefined" || !nodeType) {
+        return;
+      }
+
+      const position = reactFlowInstance?.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      if (!position) return;
+
+      takeSnapshot();
+
+      const params: Record<string, unknown> = {};
+      const defaults = nodeType.params_defaults ?? {};
+      for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
+        params[key] = schema.default ?? defaults[key] ?? "";
+      }
+
+      const id = `node-${nodeIdRef.current++}`;
+
+      // Calculate initial size based on ports
+      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const initialWidth = 160;
+      const initialHeight = 52 + maxPorts * 24;
+
+      const newNode: Node<BlueprintNodeData> = {
+        id,
+        type: "blueprint",
+        position,
+        data: {
+          displayName: nodeType.display_name,
+          nodeType: nodeType.node_type,
+          description: nodeType.description,
+          input_ports: nodeType.input_ports,
+          output_ports: nodeType.output_ports,
+          params,
+          breakpoint: false,
+          metadata: nodeType,
+          onDelete: handleDeleteNode,
+          onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
+          width: initialWidth,
+          height: initialHeight,
+          executionLogs: [],
+        },
+      };
+
+      setNodes((nds) => nds.concat(newNode));
+    },
+    [reactFlowInstance, setNodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache]
+  );
+
   return (
     <ReactFlowProvider>
       <div className="app-shell">
@@ -1666,12 +1738,15 @@ const App = () => {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onInit={setReactFlowInstance}
             onConnect={handleConnect}
             onNodeDragStart={() => takeSnapshot()}
             onSelectionDragStart={() => takeSnapshot()}

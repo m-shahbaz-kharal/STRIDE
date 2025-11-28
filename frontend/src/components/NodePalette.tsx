@@ -8,11 +8,11 @@ type NodePaletteProps = {
 
 // Category icon component
 const ChevronIcon = ({ collapsed }: { collapsed: boolean }) => (
-  <svg 
-    className="category-icon" 
-    width="12" 
-    height="12" 
-    viewBox="0 0 24 24" 
+  <svg
+    className="category-icon"
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
     fill="currentColor"
     style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
   >
@@ -58,7 +58,7 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
   // Group nodes by category
   const categorizedNodes = useMemo(() => {
     const categories: Record<string, NodeTypeDefinition[]> = {};
-    
+
     for (const nodeType of filteredNodeTypes) {
       const category = getCategoryForNodeType(nodeType.node_type);
       if (!categories[category]) {
@@ -66,14 +66,14 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
       }
       categories[category].push(nodeType);
     }
-    
+
     // Sort categories alphabetically, with "Other" always at the end
     const sortedCategories = Object.entries(categories).sort(([a], [b]) => {
       if (a === "Other") return 1;
       if (b === "Other") return -1;
       return a.localeCompare(b);
     });
-    
+
     return sortedCategories;
   }, [filteredNodeTypes]);
 
@@ -127,6 +127,11 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
                     className="palette-item"
                     onClick={() => onAddNode(nodeType)}
                     title={nodeType.description}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("application/reactflow", JSON.stringify(nodeType));
+                      event.dataTransfer.effectAllowed = "move";
+                    }}
                   >
                     <span className="palette-item-name">{nodeType.display_name}</span>
                     <span className="palette-item-add">+</span>
