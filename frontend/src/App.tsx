@@ -664,13 +664,6 @@ const PlayIcon = () => (
   </svg>
 );
 
-const StreamIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" opacity="0.3" />
-    <path d="M4 6h2v12H4zm14 0h2v12h-2zM9 6h2v12H9zm5-4h2v20h-2z" />
-  </svg>
-);
-
 const ClearCacheIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4zM6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9z" />
@@ -705,7 +698,7 @@ const App = () => {
   const [nodeLibrary, setNodeLibrary] = useState<NodeTypeDefinition[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [useStreaming, setUseStreaming] = useState(true);
+  const [useStreaming] = useState(true);
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
   const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
   const nodeIdRef = useRef(1);
@@ -1084,7 +1077,11 @@ const App = () => {
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
       
-      // Don't set initial width/height - let nodes auto-size based on content
+      // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
+      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const initialWidth = 160;
+      const initialHeight = 52 + maxPorts * 24;
+      
       const payload: Node<BlueprintNodeData> = {
         id,
         type: "blueprint",
@@ -1101,6 +1098,8 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          width: initialWidth,
+          height: initialHeight,
           executionLogs: [],
         },
       };
@@ -1213,6 +1212,19 @@ const App = () => {
               }}
             />
           </ReactFlow>
+          <div 
+            className="editor-top-controls"
+            style={{ right: actualRightWidth + 10 }}
+          >
+            <button
+              className="editor-control-btn"
+              onClick={handleClearCache}
+              disabled={isRunning}
+              title="Clear Cached Outputs"
+            >
+              <ClearCacheIcon />
+            </button>
+          </div>
         </div>
 
         <header className="overlay-header">
@@ -1231,22 +1243,6 @@ const App = () => {
           </div>
           <div className="header-controls">
             <ConnectionIcon connected={isConnected} />
-            <button
-              className={`icon-btn stream-toggle ${useStreaming ? "active" : ""}`}
-              onClick={() => setUseStreaming(!useStreaming)}
-              title={useStreaming ? "Streaming Mode (WebSocket)" : "Batch Mode (HTTP)"}
-            >
-              <StreamIcon />
-            </button>
-            <button
-              className="icon-btn clear-cache-btn"
-              onClick={handleClearCache}
-              disabled={isRunning}
-              title="Clear Cached Outputs"
-            >
-              <ClearCacheIcon />
-            </button>
-            <div className="toolbar-divider" />
             <button
               className="icon-btn primary"
               onClick={() => handleRunGraph("full")}
