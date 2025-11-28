@@ -23,6 +23,7 @@ import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
 import { useGraphExecution } from "./hooks/useGraphExecution";
+import { useUndoRedo } from "./hooks/useUndoRedo";
 import {
   BlueprintNodeData,
   NodeExecutionStatus,
@@ -40,9 +41,9 @@ const lineIntersectsRect = (
   // Check if either endpoint is inside the rectangle
   const pointInRect = (px: number, py: number) =>
     px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
-  
+
   if (pointInRect(x1, y1) || pointInRect(x2, y2)) return true;
-  
+
   // Check line intersection with each edge of the rectangle
   const lineIntersectsLine = (
     ax1: number, ay1: number, ax2: number, ay2: number,
@@ -50,13 +51,13 @@ const lineIntersectsRect = (
   ): boolean => {
     const denom = (by2 - by1) * (ax2 - ax1) - (bx2 - bx1) * (ay2 - ay1);
     if (Math.abs(denom) < 0.0001) return false;
-    
+
     const ua = ((bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)) / denom;
     const ub = ((ax2 - ax1) * (ay1 - by1) - (ay2 - ay1) * (ax1 - bx1)) / denom;
-    
+
     return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
   };
-  
+
   // Check all four edges of rectangle
   return (
     lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) || // top
@@ -78,12 +79,12 @@ const bezierIntersectsRect = (
   const cp1y = sourceY;
   const cp2x = centerX;
   const cp2y = targetY;
-  
+
   // Sample the bezier curve and check line segments
   const samples = 20;
   let prevX = sourceX;
   let prevY = sourceY;
-  
+
   for (let i = 1; i <= samples; i++) {
     const t = i / samples;
     const t2 = t * t;
@@ -91,19 +92,19 @@ const bezierIntersectsRect = (
     const mt = 1 - t;
     const mt2 = mt * mt;
     const mt3 = mt2 * mt;
-    
+
     // Cubic bezier formula
     const x = mt3 * sourceX + 3 * mt2 * t * cp1x + 3 * mt * t2 * cp2x + t3 * targetX;
     const y = mt3 * sourceY + 3 * mt2 * t * cp1y + 3 * mt * t2 * cp2y + t3 * targetY;
-    
+
     if (lineIntersectsRect(prevX, prevY, x, y, rx, ry, rw, rh)) {
       return true;
     }
-    
+
     prevX = x;
     prevY = y;
   }
-  
+
   return false;
 };
 
@@ -341,7 +342,7 @@ const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
   };
 
   return (
-    <span 
+    <span
       className={`node-output-value ${isLong ? "expandable" : ""}`}
       onClick={handleClick}
       title={isLong ? "Click to view full value" : formatted}
@@ -363,13 +364,13 @@ interface ResizeZoneProps {
 
 const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown }: ResizeZoneProps) => {
   if (!corner) return null;
-  
+
   const isTop = corner.includes("top");
   const isLeft = corner.includes("left");
   const cursor = (corner === "top-left" || corner === "bottom-right") ? "nwse-resize" : "nesw-resize";
   const rotation = corner === "top-left" ? 0 :
-                   corner === "top-right" ? 90 :
-                   corner === "bottom-right" ? 180 : 270;
+    corner === "top-right" ? 90 :
+      corner === "bottom-right" ? 180 : 270;
 
   // Position zone mostly outside the node - only activates at corner or slightly outside
   const zoneSize = 16;
@@ -451,7 +452,7 @@ const CustomEdge = ({
 }: EdgeProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const { setEdges } = useReactFlow();
-  
+
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -471,12 +472,12 @@ const CustomEdge = ({
 
   // Determine stroke color and width based on state
   const baseStroke = (style as React.CSSProperties)?.stroke || "#4a9eff";
-  const strokeColor = selected 
-    ? "var(--selection-yellow)" 
+  const strokeColor = selected
+    ? "var(--selection-yellow)"
     : isPreview
       ? "var(--selection-yellow)"
-      : isHovered 
-        ? "var(--selection-yellow-light)" 
+      : isHovered
+        ? "var(--selection-yellow-light)"
         : baseStroke;
   const strokeWidth = selected ? 3 : isPreview ? 2.5 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
 
@@ -498,8 +499,8 @@ const CustomEdge = ({
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
-        style={{ 
-          ...style, 
+        style={{
+          ...style,
           stroke: strokeColor,
           strokeWidth,
           transition: "stroke 0.1s ease, stroke-width 0.1s ease",
@@ -546,7 +547,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
   const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {
     if (!corner || !nodeRef.current) return;
-    
+
     e.stopPropagation();
     e.preventDefault();
     const width = nodeRef.current.offsetWidth;
@@ -570,15 +571,15 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     const handleMouseMove = (e: MouseEvent) => {
       const corner = resizeCornerRef.current;
       if (!corner) return;
-      
+
       // Adjust delta by zoom level so resize matches mouse position exactly
       const zoom = zoomRef.current;
       const dx = (e.clientX - startPosRef.current.x) / zoom;
       const dy = (e.clientY - startPosRef.current.y) / zoom;
-      
+
       let newWidth = startPosRef.current.width;
       let newHeight = startPosRef.current.height;
-      
+
       if (corner === "bottom-right") {
         newWidth += dx;
         newHeight += dy;
@@ -592,10 +593,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         newWidth -= dx;
         newHeight -= dy;
       }
-      
+
       newWidth = Math.max(MIN_WIDTH, newWidth);
       newHeight = Math.max(MIN_HEIGHT, newHeight);
-      
+
       setNodeSize({ width: newWidth, height: newHeight });
     };
 
@@ -606,7 +607,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
-    
+
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
@@ -617,11 +618,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const sizeStyle: React.CSSProperties = {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
-    ...(nodeSize.width > 0 && nodeSize.height > 0 
-      ? { width: nodeSize.width, height: nodeSize.height } 
+    ...(nodeSize.width > 0 && nodeSize.height > 0
+      ? { width: nodeSize.width, height: nodeSize.height }
       : {})
   };
-  
+
   const corners: Corner[] = ["bottom-right"];
 
   const handleViewLogs = (e: React.MouseEvent) => {
@@ -644,7 +645,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   };
 
   return (
-    <div 
+    <div
       ref={nodeRef}
       className={`blueprint-node ${statusClass} ${highlightClass}`}
       style={sizeStyle}
@@ -653,7 +654,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       {data.executionStatus === "running" && (
         <div className="node-execution-ring" />
       )}
-      
+
       {corners.map((corner) => (
         <ResizeZone
           key={corner}
@@ -664,7 +665,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           onMouseDown={(e) => handleResizeStart(corner, e)}
         />
       ))}
-      
+
       <div className="node-header">
         <div className="node-title-section">
           <strong>{data.displayName}</strong>
@@ -834,6 +835,14 @@ const App = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
+  // Undo/Redo hook
+  const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo({
+    nodes,
+    edges,
+    setNodes,
+    setEdges,
+  });
+
   // Use the execution hook
   const {
     isConnected,
@@ -900,12 +909,12 @@ const App = () => {
   // Update node execution states when nodeStatuses change
   useEffect(() => {
     if (nodeStatuses.size === 0 && !isRunning) return;
-    
+
     setNodes((existing) =>
       existing.map((node) => {
         const status = nodeStatuses.get(node.id);
         const traceEntry = trace.find((t) => t.node_id === node.id);
-        
+
         return {
           ...node,
           data: {
@@ -954,14 +963,14 @@ const App = () => {
         // Find the source node to check if it has cached output
         const sourceNode = nodes.find((n) => n.id === edge.source);
         const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
-        
+
         // Edge should only animate if:
         // 1. Graph is running
         // 2. The target node is in the running set (needs this edge's data)
         // 3. The source node does NOT have cached output (data needs to be computed)
         const targetInRunningSet = runningNodeIds.has(edge.target);
         const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
-        
+
         // Determine edge color
         let strokeColor = "#4a9eff"; // default
         if (isRunning && targetInRunningSet) {
@@ -976,7 +985,7 @@ const App = () => {
             strokeColor = "var(--accent-blue)";
           }
         }
-        
+
         return {
           ...edge,
           animated: shouldAnimate,
@@ -1011,38 +1020,38 @@ const App = () => {
       x: (screenX - viewport.x) / viewport.zoom,
       y: (screenY - viewport.y) / viewport.zoom,
     });
-    
+
     const start = toFlowCoord(box.startX, box.startY);
     const end = toFlowCoord(box.endX, box.endY);
-    
+
     const rx = Math.min(start.x, end.x);
     const ry = Math.min(start.y, end.y);
     const rw = Math.abs(end.x - start.x);
     const rh = Math.abs(end.y - start.y);
-    
+
     // Skip if box is too small
     if (rw < 5 && rh < 5) return [];
-    
+
     const intersectingEdgeIds: string[] = [];
-    
+
     edges.forEach((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
       const targetNode = nodes.find((n) => n.id === edge.target);
-      
+
       if (!sourceNode || !targetNode) return;
-      
+
       // Calculate edge endpoints (approximate - right side of source, left side of target)
       const sourceX = sourceNode.position.x + (sourceNode.width || 160);
       const sourceY = sourceNode.position.y + (sourceNode.height || 80) / 2;
       const targetX = targetNode.position.x;
       const targetY = targetNode.position.y + (targetNode.height || 80) / 2;
-      
+
       // Check if the bezier curve intersects the selection box
       if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
         intersectingEdgeIds.push(edge.id);
       }
     });
-    
+
     return intersectingEdgeIds;
   }, [edges, nodes]);
 
@@ -1167,7 +1176,7 @@ const App = () => {
       }));
 
       const linkPayload = edges
-        .filter((edge): edge is typeof edge & { sourceHandle: string; targetHandle: string } => 
+        .filter((edge): edge is typeof edge & { sourceHandle: string; targetHandle: string } =>
           Boolean(edge.sourceHandle) && Boolean(edge.targetHandle))
         .map((edge) => ({
           from_node: edge.source,
@@ -1200,10 +1209,10 @@ const App = () => {
       if (isRunning || nodes.length === 0) return;
 
       // Determine which nodes will be running
-      const runNodes = mode === "full" 
+      const runNodes = mode === "full"
         ? new Set(nodes.map((n) => n.id))
         : getDependentNodes(targetNodes || selectedNodeIds);
-      
+
       setRunningNodeIds(runNodes);
 
       const payload = buildGraphPayload(mode, targetNodes || (mode === "selection" ? selectedNodeIds : undefined), extras);
@@ -1250,21 +1259,21 @@ const App = () => {
         console.error("Failed to clear backend cache for node type:", e);
       }
     }
-    
+
     // Clear frontend state
     setNodes((existing) =>
       existing.map((n) =>
         n.id === nodeId
           ? {
-              ...n,
-              data: {
-                ...n.data,
-                last_outputs: undefined,
-                executionStatus: undefined,
-                executionDuration: undefined,
-                executionLogs: [],
-              },
-            }
+            ...n,
+            data: {
+              ...n.data,
+              last_outputs: undefined,
+              executionStatus: undefined,
+              executionDuration: undefined,
+              executionLogs: [],
+            },
+          }
           : n
       )
     );
@@ -1311,22 +1320,24 @@ const App = () => {
   // Delete selected nodes and edges
   const handleDeleteSelected = useCallback(() => {
     if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
-    
+
+    takeSnapshot();
+
     // Delete selected nodes
     if (selectedNodeIds.length > 0) {
       setNodes((current) => current.filter((node) => !selectedNodeIds.includes(node.id)));
     }
-    
+
     // Delete selected edges AND edges connected to deleted nodes
     setEdges((current) =>
       current.filter(
-        (edge) => 
+        (edge) =>
           !selectedEdgeIds.includes(edge.id) &&
-          !selectedNodeIds.includes(edge.source) && 
+          !selectedNodeIds.includes(edge.source) &&
           !selectedNodeIds.includes(edge.target)
       )
     );
-    
+
     setSelectedNodeIds([]);
     setSelectedEdgeIds([]);
     setSelectedNodeId(null);
@@ -1335,6 +1346,8 @@ const App = () => {
   // Duplicate selected nodes (no edges - edges can only be deleted)
   const handleDuplicateSelected = useCallback(() => {
     if (selectedNodeIds.length === 0) return;
+
+    takeSnapshot();
 
     const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
     const newNodes: Node<BlueprintNodeData>[] = [];
@@ -1378,6 +1391,8 @@ const App = () => {
   // Paste from clipboard (nodes only, no edges)
   const handlePaste = useCallback(() => {
     if (!clipboard || clipboard.length === 0) return;
+
+    takeSnapshot();
 
     const newNodes: Node<BlueprintNodeData>[] = [];
 
@@ -1470,6 +1485,20 @@ const App = () => {
         handlePaste();
         return;
       }
+
+      // Ctrl+Z - Undo
+      if (isCtrlOrCmd && !event.shiftKey && event.key === "z") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+
+      // Ctrl+Shift+Z or Ctrl+Y - Redo
+      if ((isCtrlOrCmd && event.shiftKey && event.key === "z") || (isCtrlOrCmd && event.key === "y")) {
+        event.preventDefault();
+        redo();
+        return;
+      }
     };
 
     document.addEventListener("keydown", handleKeyDown);
@@ -1478,6 +1507,7 @@ const App = () => {
 
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
+      takeSnapshot();
       const params: Record<string, unknown> = {};
       const defaults = nodeType.params_defaults ?? {};
       for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
@@ -1485,12 +1515,12 @@ const App = () => {
       }
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
-      
+
       // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
       const initialWidth = 160;
       const initialHeight = 52 + maxPorts * 24;
-      
+
       const payload: Node<BlueprintNodeData> = {
         id,
         type: "blueprint",
@@ -1544,7 +1574,7 @@ const App = () => {
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
       if (!connection.sourceHandle || !connection.targetHandle) return;
-      
+
       // Check for duplicate edges (same source, target, sourceHandle, targetHandle)
       const isDuplicate = edges.some(
         (edge) =>
@@ -1553,10 +1583,12 @@ const App = () => {
           edge.sourceHandle === connection.sourceHandle &&
           edge.targetHandle === connection.targetHandle
       );
-      
+
       if (isDuplicate) {
         return; // Don't add duplicate edge
       }
+
+      takeSnapshot();
 
       setEdges((existing) =>
         addEdge(
@@ -1627,7 +1659,7 @@ const App = () => {
   return (
     <ReactFlowProvider>
       <div className="app-shell">
-        <div 
+        <div
           className="reactflow-fullpage"
           ref={reactFlowWrapper}
           onMouseDown={handleMouseDown}
@@ -1641,6 +1673,8 @@ const App = () => {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={handleConnect}
+            onNodeDragStart={() => takeSnapshot()}
+            onSelectionDragStart={() => takeSnapshot()}
             onSelectionChange={handleSelectionChange}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
@@ -1656,23 +1690,23 @@ const App = () => {
             elementsSelectable
           >
             <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
-            <Controls 
-              showZoom 
-              showFitView 
-              showInteractive={false} 
+            <Controls
+              showZoom
+              showFitView
+              showInteractive={false}
               position="bottom-left"
               style={{ left: actualLeftWidth }}
             />
-            <MiniMap 
+            <MiniMap
               nodeColor={(node) => {
                 const status = nodeStatuses.get(node.id);
                 if (status === "running") return "#58a6ff";
                 if (status === "completed") return "#3fb950";
                 if (status === "error") return "#f85149";
                 return "#4a9eff";
-              }} 
+              }}
               maskColor="rgba(0,0,0,0.8)"
-              style={{ 
+              style={{
                 backgroundColor: "rgba(20,25,35,0.9)",
                 right: actualRightWidth,
               }}
@@ -1719,21 +1753,21 @@ const App = () => {
           </div>
         </header>
 
-        <aside 
+        <aside
           className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
           style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
         >
           {!leftPanelCollapsed && (
             <>
               <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
-              <div 
+              <div
                 className="resize-handle right"
                 onMouseDown={() => setIsResizingLeft(true)}
               />
             </>
           )}
         </aside>
-        
+
         <button
           className="panel-collapse-btn left"
           style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
@@ -1743,13 +1777,13 @@ const App = () => {
           {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </button>
 
-        <aside 
+        <aside
           className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
           style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
         >
           {!rightPanelCollapsed && (
             <>
-              <div 
+              <div
                 className="resize-handle left"
                 onMouseDown={() => setIsResizingRight(true)}
               />
@@ -1762,7 +1796,7 @@ const App = () => {
                     onClick={() => setRightPanelTab("inspector")}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                     </svg>
                     Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
                   </button>
@@ -1772,7 +1806,7 @@ const App = () => {
                     onClick={() => setRightPanelTab("execution")}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z"/>
+                      <path d="M8 5v14l11-7z" />
                     </svg>
                     Execution {trace.length > 0 && `(${trace.length})`}
                   </button>
@@ -1798,7 +1832,7 @@ const App = () => {
                             title="Duplicate (Ctrl+D)"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
                             </svg>
                             Duplicate
                           </button>
@@ -1809,7 +1843,7 @@ const App = () => {
                             title="Copy (Ctrl+C)"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
                             </svg>
                             Copy
                           </button>
@@ -1822,7 +1856,7 @@ const App = () => {
                         title="Delete (Del)"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
                         </svg>
                         Delete
                       </button>
@@ -1845,9 +1879,9 @@ const App = () => {
                     />
                   )}
                   {rightPanelTab === "execution" && (
-                    <LogPanel 
-                      trace={trace} 
-                      outputs={outputs} 
+                    <LogPanel
+                      trace={trace}
+                      outputs={outputs}
                       error={error}
                       stats={stats}
                       levels={levels}
@@ -1863,7 +1897,7 @@ const App = () => {
             </>
           )}
         </aside>
-        
+
         <button
           className="panel-collapse-btn right"
           style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
