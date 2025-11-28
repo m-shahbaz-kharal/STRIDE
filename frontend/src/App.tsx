@@ -292,15 +292,19 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
                    corner === "top-right" ? 90 :
                    corner === "bottom-right" ? 180 : 270;
 
+  // Position zone mostly outside the node - only activates at corner or slightly outside
+  const zoneSize = 16;
+  const zoneOffset = corner === "bottom-right" ? `-${zoneSize - 4}px` : "-2px";
+
   return (
     <div
       className={`resize-zone nodrag ${corner}`}
       style={{
         position: "absolute",
-        [isTop ? "top" : "bottom"]: "-2px",
-        [isLeft ? "left" : "right"]: "-2px",
-        width: "18px",
-        height: "18px",
+        [isTop ? "top" : "bottom"]: zoneOffset,
+        [isLeft ? "left" : "right"]: zoneOffset,
+        width: `${zoneSize}px`,
+        height: `${zoneSize}px`,
         cursor,
         zIndex: 20,
       }}
@@ -315,8 +319,9 @@ const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown
           viewBox="0 0 12 12"
           style={{
             position: "absolute",
-            top: "3px",
-            left: "3px",
+            // Position icon outside the node corner
+            top: corner === "bottom-right" ? "2px" : "3px",
+            left: corner === "bottom-right" ? "2px" : "3px",
             transform: `rotate(${rotation}deg)`,
             transformOrigin: "6px 6px",
             pointerEvents: "none",
