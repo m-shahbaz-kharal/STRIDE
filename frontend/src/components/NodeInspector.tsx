@@ -5,7 +5,6 @@ import { BlueprintNodeData, ParamSchemaField } from "../types";
 type InspectorProps = {
   node?: Node<BlueprintNodeData>;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
-  onToggleBreakpoint: (nodeId: string) => void;
 };
 
 const parseParamValue = (
@@ -25,7 +24,6 @@ const parseParamValue = (
 const NodeInspector = ({
   node,
   onParamChange,
-  onToggleBreakpoint,
 }: InspectorProps) => {
   if (!node) {
     return (
@@ -79,16 +77,6 @@ const NodeInspector = ({
           ))}
         </div>
       )}
-
-      <div className="inspector-section">
-        <button
-          type="button"
-          className={`inspector-btn ${node.data.breakpoint ? "active" : ""}`}
-          onClick={() => onToggleBreakpoint(node.id)}
-        >
-          {node.data.breakpoint ? "Clear Breakpoint" : "Set Breakpoint"}
-        </button>
-      </div>
 
       {node.data.last_outputs && (
         <div className="inspector-section">

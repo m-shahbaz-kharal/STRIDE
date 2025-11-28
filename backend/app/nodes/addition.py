@@ -21,7 +21,15 @@ class AdditionNode(NodeBase):
     ) -> Dict[str, Any]:
         a_value = inputs.get("a")
         b_value = inputs.get("b")
+        
+        # Sample logs for demonstration
+        ctx.log(f"[AdditionNode] Starting addition operation")
+        ctx.log(f"[AdditionNode] Input a = {a_value} (type: {type(a_value).__name__})")
+        ctx.log(f"[AdditionNode] Input b = {b_value} (type: {type(b_value).__name__})")
+        
         result = a_value + b_value
-        ctx.log(f"{self.id} added {a_value} + {b_value} -> {result}")
+        
+        ctx.log(f"[AdditionNode] Computed: {a_value} + {b_value} = {result}")
+        ctx.log(f"[AdditionNode] Operation completed successfully")
+        
         return {"sum": result}
-

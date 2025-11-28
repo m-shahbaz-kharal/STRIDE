@@ -107,10 +107,12 @@ export interface BlueprintNodeData {
   width?: number;
   height?: number;
   onDelete?: (nodeId: string) => void;
+  onRunSelection?: (nodeId: string) => void;
   // Execution state
   executionStatus?: NodeExecutionStatus;
   executionProgress?: number;
   executionDuration?: number;
+  executionLogs?: string[];
   // Highlight state (for hover interactions from timeline/performance panels)
   isHighlighted?: boolean;
 }
