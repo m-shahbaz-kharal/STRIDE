@@ -741,11 +741,8 @@ const App = () => {
   // Right panel tab state
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
 
-  // Clipboard state for copy/paste
-  const [clipboard, setClipboard] = useState<{
-    nodes: Node<BlueprintNodeData>[];
-    edges: { source: string; target: string; sourceHandle: string; targetHandle: string }[];
-  } | null>(null);
+  // Clipboard state for copy/paste (nodes only, no edges)
+  const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -1142,18 +1139,16 @@ const App = () => {
     setSelectedNodeId(null);
   }, [selectedNodeIds, selectedEdgeIds, setNodes, setEdges]);
 
-  // Duplicate selected nodes
+  // Duplicate selected nodes (no edges - edges can only be deleted)
   const handleDuplicateSelected = useCallback(() => {
     if (selectedNodeIds.length === 0) return;
 
     const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
-    const idMap = new Map<string, string>();
     const newNodes: Node<BlueprintNodeData>[] = [];
 
     // Create new nodes with offset positions
     selectedNodes.forEach((node) => {
       const newId = `node-${nodeIdRef.current++}`;
-      idMap.set(node.id, newId);
       newNodes.push({
         ...node,
         id: newId,
@@ -1172,56 +1167,29 @@ const App = () => {
       });
     });
 
-    // Find edges between selected nodes and duplicate them
-    const selectedEdges = edges.filter(
-      (edge) => selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)
-    );
-    const newEdges = selectedEdges.map((edge) => ({
-      ...edge,
-      id: `edge-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      source: idMap.get(edge.source) || edge.source,
-      target: idMap.get(edge.target) || edge.target,
-    }));
-
     setNodes((current) => [...current, ...newNodes]);
-    setEdges((current) => [...current, ...newEdges]);
 
     // Select the new nodes
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
+  }, [selectedNodeIds, nodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
 
-  // Copy selected nodes to clipboard (edges between selected nodes are automatically included)
+  // Copy selected nodes to clipboard (no edges - edges can only be deleted)
   const handleCopy = useCallback(() => {
     if (selectedNodeIds.length === 0) return; // Only copy if nodes are selected
     const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
-    // Include edges that connect selected nodes
-    const selectedEdgesData = edges
-      .filter(
-        (edge) =>
-          selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)
-      )
-      .filter((edge) => edge.sourceHandle && edge.targetHandle)
-      .map((edge) => ({
-        source: edge.source,
-        target: edge.target,
-        sourceHandle: edge.sourceHandle!,
-        targetHandle: edge.targetHandle!,
-      }));
-    setClipboard({ nodes: selectedNodes, edges: selectedEdgesData });
-  }, [selectedNodeIds, nodes, edges]);
+    setClipboard(selectedNodes);
+  }, [selectedNodeIds, nodes]);
 
-  // Paste from clipboard
+  // Paste from clipboard (nodes only, no edges)
   const handlePaste = useCallback(() => {
-    if (!clipboard || clipboard.nodes.length === 0) return;
+    if (!clipboard || clipboard.length === 0) return;
 
-    const idMap = new Map<string, string>();
     const newNodes: Node<BlueprintNodeData>[] = [];
 
-    clipboard.nodes.forEach((node) => {
+    clipboard.forEach((node) => {
       const newId = `node-${nodeIdRef.current++}`;
-      idMap.set(node.id, newId);
       newNodes.push({
         ...node,
         id: newId,
@@ -1240,25 +1208,13 @@ const App = () => {
       });
     });
 
-    const newEdges = clipboard.edges.map((edge) => ({
-      id: `edge-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      source: idMap.get(edge.source) || edge.source,
-      target: idMap.get(edge.target) || edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      type: "default",
-      animated: false,
-      style: { stroke: "#4a9eff", strokeWidth: 2 },
-    }));
-
     setNodes((current) => [...current, ...newNodes]);
-    setEdges((current) => [...current, ...newEdges]);
 
     // Select the new nodes
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
+  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
 
   // Select all nodes and edges
   const handleSelectAll = useCallback(() => {
