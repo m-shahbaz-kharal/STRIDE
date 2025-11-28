@@ -403,22 +403,20 @@ const CustomEdge = ({
       />
       {isHovered && (
         <g
-          transform={`translate(${labelX - 10}, ${labelY - 10})`}
+          transform={`translate(${labelX - 7}, ${labelY - 7})`}
           onClick={handleDeleteEdge}
           style={{ cursor: "pointer" }}
         >
           <circle
-            r="10"
-            cx="10"
-            cy="10"
-            fill="var(--bg-elevated)"
-            stroke="var(--accent-red)"
-            strokeWidth="1.5"
+            r="7"
+            cx="7"
+            cy="7"
+            fill="var(--accent-blue)"
           />
           <path
-            d="M6 6L14 14M14 6L6 14"
-            stroke="var(--accent-red)"
-            strokeWidth="2"
+            d="M4.5 4.5L9.5 9.5M9.5 4.5L4.5 9.5"
+            stroke="white"
+            strokeWidth="1.5"
             strokeLinecap="round"
           />
         </g>
