@@ -1192,16 +1192,15 @@ const App = () => {
     setSelectedNodeId(newIds[0] ?? null);
   }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
 
-  // Copy selected nodes and edges to clipboard
+  // Copy selected nodes to clipboard (edges between selected nodes are automatically included)
   const handleCopy = useCallback(() => {
-    if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
+    if (selectedNodeIds.length === 0) return; // Only copy if nodes are selected
     const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
-    // Include edges that connect selected nodes OR are explicitly selected
+    // Include edges that connect selected nodes
     const selectedEdgesData = edges
       .filter(
         (edge) =>
-          (selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)) ||
-          selectedEdgeIds.includes(edge.id)
+          selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)
       )
       .filter((edge) => edge.sourceHandle && edge.targetHandle)
       .map((edge) => ({
@@ -1211,7 +1210,7 @@ const App = () => {
         targetHandle: edge.targetHandle!,
       }));
     setClipboard({ nodes: selectedNodes, edges: selectedEdgesData });
-  }, [selectedNodeIds, selectedEdgeIds, nodes, edges]);
+  }, [selectedNodeIds, nodes, edges]);
 
   // Paste from clipboard
   const handlePaste = useCallback(() => {
@@ -1284,7 +1283,7 @@ const App = () => {
 
       const isCtrlOrCmd = event.ctrlKey || event.metaKey;
 
-      // Delete selected nodes
+      // Delete selected nodes and edges
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         handleDeleteSelected();
@@ -1298,17 +1297,21 @@ const App = () => {
         return;
       }
 
-      // Ctrl+D - Duplicate
+      // Ctrl+D - Duplicate (only for nodes)
       if (isCtrlOrCmd && event.key === "d") {
         event.preventDefault();
-        handleDuplicateSelected();
+        if (selectedNodeIds.length > 0) {
+          handleDuplicateSelected();
+        }
         return;
       }
 
-      // Ctrl+C - Copy
+      // Ctrl+C - Copy (only for nodes)
       if (isCtrlOrCmd && event.key === "c") {
         event.preventDefault();
-        handleCopy();
+        if (selectedNodeIds.length > 0) {
+          handleCopy();
+        }
         return;
       }
 
@@ -1322,7 +1325,7 @@ const App = () => {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleDeleteSelected, handleSelectAll, handleDuplicateSelected, handleCopy, handlePaste]);
+  }, [handleDeleteSelected, handleSelectAll, handleDuplicateSelected, handleCopy, handlePaste, selectedNodeIds]);
 
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
@@ -1583,28 +1586,33 @@ const App = () => {
                       {" "}selected
                     </span>
                     <div className="toolbar-actions">
-                      <button
-                        type="button"
-                        className="toolbar-btn"
-                        onClick={handleDuplicateSelected}
-                        title="Duplicate (Ctrl+D)"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-                        </svg>
-                        Duplicate
-                      </button>
-                      <button
-                        type="button"
-                        className="toolbar-btn"
-                        onClick={handleCopy}
-                        title="Copy (Ctrl+C)"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-                        </svg>
-                        Copy
-                      </button>
+                      {/* Only show duplicate/copy for nodes */}
+                      {selectedNodeIds.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            className="toolbar-btn"
+                            onClick={handleDuplicateSelected}
+                            title="Duplicate (Ctrl+D)"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                            </svg>
+                            Duplicate
+                          </button>
+                          <button
+                            type="button"
+                            className="toolbar-btn"
+                            onClick={handleCopy}
+                            title="Copy (Ctrl+C)"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                            </svg>
+                            Copy
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         className="toolbar-btn danger"
