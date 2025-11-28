@@ -30,6 +30,11 @@
   --accent-purple: #a371f7;
   --accent-cyan: #39d3e8;
   
+  /* Selection colors - Yellow */
+  --selection-yellow: #f0c000;
+  --selection-yellow-light: rgba(240, 192, 0, 0.6);
+  --selection-yellow-bg: rgba(240, 192, 0, 0.1);
+  
   /* Status colors */
   --status-running: #58a6ff;
   --status-success: #3fb950;
@@ -2483,34 +2488,63 @@ body {
   background: rgba(57, 211, 232, 0.1);
 }
 
-/* Selection styles */
+/* Blueprint node hover state (shows thin yellow border) */
+.blueprint-node {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Selection styles - Yellow */
 .react-flow__node.selected .blueprint-node {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4);
+  border-color: var(--selection-yellow) !important;
+  box-shadow: 0 0 0 2px rgba(240, 192, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4) !important;
 }
 
-/* Selection box (drag to select) */
+/* Node hover effect - thin yellow border */
+.react-flow__node:not(.selected):hover .blueprint-node {
+  border-color: var(--selection-yellow-light) !important;
+  box-shadow: 0 0 0 1px rgba(240, 192, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Selection box (drag to select) - yellow and disappears after selection */
 .react-flow__selection {
-  background: rgba(74, 158, 255, 0.08) !important;
-  border: 1px solid var(--accent-blue) !important;
+  background: rgba(240, 192, 0, 0.08) !important;
+  border: 1px dashed var(--selection-yellow) !important;
   border-radius: 4px !important;
 }
 
+/* Hide the selection rectangle after nodes are selected */
 .react-flow__nodesselection-rect {
-  background: rgba(74, 158, 255, 0.05) !important;
-  border: 1px dashed var(--accent-blue) !important;
-  border-radius: 4px !important;
+  display: none !important;
+}
+
+/* Edge selection styles */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--selection-yellow) !important;
+  stroke-width: 3px !important;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--selection-yellow-light) !important;
 }
 
 /* Edge styles */
 .react-flow__edge-path {
   stroke-width: 2px;
-  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
 }
 
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--accent-green) !important;
-  stroke-width: 3px;
+/* Custom edge delete button */
+.custom-edge circle {
+  transition: fill 0.15s ease, transform 0.15s ease;
+}
+
+.custom-edge.hovered circle,
+.custom-edge.selected circle {
+  filter: drop-shadow(0 0 4px var(--selection-yellow));
+}
+
+.custom-edge circle:hover {
+  transform: scale(1.1);
 }
 
 /* Attribution */

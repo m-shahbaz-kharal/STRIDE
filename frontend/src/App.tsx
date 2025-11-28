@@ -360,7 +360,7 @@ const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
   }
 };
 
-// Custom Edge with delete button
+// Custom Edge with delete button, hover and selection states
 const CustomEdge = ({
   id,
   sourceX,
@@ -371,7 +371,7 @@ const CustomEdge = ({
   targetPosition,
   style = {},
   markerEnd,
-  data,
+  selected,
 }: EdgeProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const { setEdges } = useReactFlow();
@@ -390,10 +390,20 @@ const CustomEdge = ({
     setEdges((edges) => edges.filter((edge) => edge.id !== id));
   };
 
+  // Determine stroke color and width based on state
+  const baseStroke = (style as React.CSSProperties)?.stroke || "#4a9eff";
+  const strokeColor = selected 
+    ? "var(--selection-yellow)" 
+    : isHovered 
+      ? "var(--selection-yellow-light)" 
+      : baseStroke;
+  const strokeWidth = selected ? 3 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
+
   return (
     <g
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      className={`custom-edge ${selected ? "selected" : ""} ${isHovered ? "hovered" : ""}`}
     >
       {/* Invisible wider path for easier interaction */}
       <path
@@ -407,25 +417,30 @@ const CustomEdge = ({
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
-        style={style}
+        style={{ 
+          ...style, 
+          stroke: strokeColor,
+          strokeWidth,
+          transition: "stroke 0.15s ease, stroke-width 0.15s ease",
+        }}
         markerEnd={markerEnd}
       />
-      {isHovered && (
+      {(isHovered || selected) && (
         <g
-          transform={`translate(${labelX - 7}, ${labelY - 7})`}
+          transform={`translate(${labelX - 8}, ${labelY - 8})`}
           onClick={handleDeleteEdge}
           style={{ cursor: "pointer" }}
         >
           <circle
-            r="7"
-            cx="7"
-            cy="7"
-            fill="var(--accent-blue)"
+            r="8"
+            cx="8"
+            cy="8"
+            fill={selected ? "var(--selection-yellow)" : "var(--selection-yellow-light)"}
           />
           <path
-            d="M4.5 4.5L9.5 9.5M9.5 4.5L4.5 9.5"
-            stroke="white"
-            strokeWidth="1.5"
+            d="M5 5L11 11M11 5L5 11"
+            stroke="var(--bg-deep)"
+            strokeWidth="2"
             strokeLinecap="round"
           />
         </g>
@@ -694,6 +709,7 @@ const ConnectionIcon = ({ connected }: { connected: boolean }) => (
 const App = () => {
   const [nodeLibrary, setNodeLibrary] = useState<NodeTypeDefinition[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [useStreaming] = useState(true);
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
@@ -893,7 +909,9 @@ const App = () => {
   const handleSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
       const nodeIds = (params.nodes ?? []).map((node) => node.id);
+      const edgeIds = (params.edges ?? []).map((edge) => edge.id);
       setSelectedNodeIds(nodeIds);
+      setSelectedEdgeIds(edgeIds);
       setSelectedNodeId(nodeIds[0] ?? null);
     },
     []
@@ -1100,18 +1118,29 @@ const App = () => {
     }
   }, [handleClearCache]);
 
-  // Delete selected nodes
+  // Delete selected nodes and edges
   const handleDeleteSelected = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
-    setNodes((current) => current.filter((node) => !selectedNodeIds.includes(node.id)));
+    if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
+    
+    // Delete selected nodes
+    if (selectedNodeIds.length > 0) {
+      setNodes((current) => current.filter((node) => !selectedNodeIds.includes(node.id)));
+    }
+    
+    // Delete selected edges AND edges connected to deleted nodes
     setEdges((current) =>
       current.filter(
-        (edge) => !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
+        (edge) => 
+          !selectedEdgeIds.includes(edge.id) &&
+          !selectedNodeIds.includes(edge.source) && 
+          !selectedNodeIds.includes(edge.target)
       )
     );
+    
     setSelectedNodeIds([]);
+    setSelectedEdgeIds([]);
     setSelectedNodeId(null);
-  }, [selectedNodeIds, setNodes, setEdges]);
+  }, [selectedNodeIds, selectedEdgeIds, setNodes, setEdges]);
 
   // Duplicate selected nodes
   const handleDuplicateSelected = useCallback(() => {
@@ -1163,26 +1192,26 @@ const App = () => {
     setSelectedNodeId(newIds[0] ?? null);
   }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
 
-  // Copy selected nodes to clipboard
+  // Copy selected nodes and edges to clipboard
   const handleCopy = useCallback(() => {
-    if (selectedNodeIds.length === 0) return;
+    if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
     const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
-    const selectedEdges = edges
+    // Include edges that connect selected nodes OR are explicitly selected
+    const selectedEdgesData = edges
       .filter(
         (edge) =>
-          selectedNodeIds.includes(edge.source) &&
-          selectedNodeIds.includes(edge.target) &&
-          edge.sourceHandle &&
-          edge.targetHandle
+          (selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)) ||
+          selectedEdgeIds.includes(edge.id)
       )
+      .filter((edge) => edge.sourceHandle && edge.targetHandle)
       .map((edge) => ({
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle!,
         targetHandle: edge.targetHandle!,
       }));
-    setClipboard({ nodes: selectedNodes, edges: selectedEdges });
-  }, [selectedNodeIds, nodes, edges]);
+    setClipboard({ nodes: selectedNodes, edges: selectedEdgesData });
+  }, [selectedNodeIds, selectedEdgeIds, nodes, edges]);
 
   // Paste from clipboard
   const handlePaste = useCallback(() => {
@@ -1232,14 +1261,17 @@ const App = () => {
     setSelectedNodeId(newIds[0] ?? null);
   }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
 
-  // Select all nodes
+  // Select all nodes and edges
   const handleSelectAll = useCallback(() => {
-    const allIds = nodes.map((n) => n.id);
-    setSelectedNodeIds(allIds);
-    setSelectedNodeId(allIds[0] ?? null);
+    const allNodeIds = nodes.map((n) => n.id);
+    const allEdgeIds = edges.map((e) => e.id);
+    setSelectedNodeIds(allNodeIds);
+    setSelectedEdgeIds(allEdgeIds);
+    setSelectedNodeId(allNodeIds[0] ?? null);
     // Also update ReactFlow's internal selection state
     setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
-  }, [nodes, setNodes]);
+    setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
+  }, [nodes, edges, setNodes, setEdges]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1542,10 +1574,13 @@ const App = () => {
                 </div>
 
                 {/* Multi-selection toolbar */}
-                {selectedNodeIds.length > 1 && (
+                {(selectedNodeIds.length > 1 || selectedEdgeIds.length > 0) && (
                   <div className="multi-select-toolbar">
                     <span className="selection-count">
-                      {selectedNodeIds.length} nodes selected
+                      {selectedNodeIds.length > 0 && `${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""}`}
+                      {selectedNodeIds.length > 0 && selectedEdgeIds.length > 0 && ", "}
+                      {selectedEdgeIds.length > 0 && `${selectedEdgeIds.length} edge${selectedEdgeIds.length !== 1 ? "s" : ""}`}
+                      {" "}selected
                     </span>
                     <div className="toolbar-actions">
                       <button
