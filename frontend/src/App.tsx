@@ -437,6 +437,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const nodeRef = useRef<HTMLDivElement>(null);
   const startPosRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const resizeCornerRef = useRef<Corner>(null);
+  const zoomRef = useRef(1);
+  const { getZoom } = useReactFlow();
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
   const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
@@ -451,9 +453,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     const height = nodeRef.current.offsetHeight;
     startPosRef.current = { x: e.clientX, y: e.clientY, width, height };
     resizeCornerRef.current = corner;
+    zoomRef.current = getZoom(); // Capture zoom level at resize start
     setNodeSize({ width, height });
     setIsResizing(true);
-  }, []);
+  }, [getZoom]);
 
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
   // Calculate min dimensions based on content
@@ -468,8 +471,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       const corner = resizeCornerRef.current;
       if (!corner) return;
       
-      const dx = e.clientX - startPosRef.current.x;
-      const dy = e.clientY - startPosRef.current.y;
+      // Adjust delta by zoom level so resize matches mouse position exactly
+      const zoom = zoomRef.current;
+      const dx = (e.clientX - startPosRef.current.x) / zoom;
+      const dy = (e.clientY - startPosRef.current.y) / zoom;
       
       let newWidth = startPosRef.current.width;
       let newHeight = startPosRef.current.height;
