@@ -15,6 +15,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  SelectionMode,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -27,6 +28,9 @@ import {
   NodeExecutionStatus,
   NodeTypeDefinition,
 } from "./types";
+
+// Right panel tab type
+type RightPanelTab = "inspector" | "execution";
 
 // Value Preview Popup Component
 interface ValuePopupProps {
@@ -718,6 +722,15 @@ const App = () => {
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
+  // Right panel tab state
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
+
+  // Clipboard state for copy/paste
+  const [clipboard, setClipboard] = useState<{
+    nodes: Node<BlueprintNodeData>[];
+    edges: { source: string; target: string; sourceHandle: string; targetHandle: string }[];
+  } | null>(null);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
@@ -1087,6 +1100,198 @@ const App = () => {
     }
   }, [handleClearCache]);
 
+  // Delete selected nodes
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+    setNodes((current) => current.filter((node) => !selectedNodeIds.includes(node.id)));
+    setEdges((current) =>
+      current.filter(
+        (edge) => !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
+      )
+    );
+    setSelectedNodeIds([]);
+    setSelectedNodeId(null);
+  }, [selectedNodeIds, setNodes, setEdges]);
+
+  // Duplicate selected nodes
+  const handleDuplicateSelected = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+
+    const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+    const idMap = new Map<string, string>();
+    const newNodes: Node<BlueprintNodeData>[] = [];
+
+    // Create new nodes with offset positions
+    selectedNodes.forEach((node) => {
+      const newId = `node-${nodeIdRef.current++}`;
+      idMap.set(node.id, newId);
+      newNodes.push({
+        ...node,
+        id: newId,
+        position: { x: node.position.x + 50, y: node.position.y + 50 },
+        selected: false,
+        data: {
+          ...node.data,
+          last_outputs: undefined,
+          executionStatus: undefined,
+          executionDuration: undefined,
+          executionLogs: [],
+          onDelete: handleDeleteNode,
+          onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
+        },
+      });
+    });
+
+    // Find edges between selected nodes and duplicate them
+    const selectedEdges = edges.filter(
+      (edge) => selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)
+    );
+    const newEdges = selectedEdges.map((edge) => ({
+      ...edge,
+      id: `edge-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      source: idMap.get(edge.source) || edge.source,
+      target: idMap.get(edge.target) || edge.target,
+    }));
+
+    setNodes((current) => [...current, ...newNodes]);
+    setEdges((current) => [...current, ...newEdges]);
+
+    // Select the new nodes
+    const newIds = newNodes.map((n) => n.id);
+    setSelectedNodeIds(newIds);
+    setSelectedNodeId(newIds[0] ?? null);
+  }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
+
+  // Copy selected nodes to clipboard
+  const handleCopy = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+    const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+    const selectedEdges = edges
+      .filter(
+        (edge) =>
+          selectedNodeIds.includes(edge.source) &&
+          selectedNodeIds.includes(edge.target) &&
+          edge.sourceHandle &&
+          edge.targetHandle
+      )
+      .map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle!,
+        targetHandle: edge.targetHandle!,
+      }));
+    setClipboard({ nodes: selectedNodes, edges: selectedEdges });
+  }, [selectedNodeIds, nodes, edges]);
+
+  // Paste from clipboard
+  const handlePaste = useCallback(() => {
+    if (!clipboard || clipboard.nodes.length === 0) return;
+
+    const idMap = new Map<string, string>();
+    const newNodes: Node<BlueprintNodeData>[] = [];
+
+    clipboard.nodes.forEach((node) => {
+      const newId = `node-${nodeIdRef.current++}`;
+      idMap.set(node.id, newId);
+      newNodes.push({
+        ...node,
+        id: newId,
+        position: { x: node.position.x + 80, y: node.position.y + 80 },
+        selected: false,
+        data: {
+          ...node.data,
+          last_outputs: undefined,
+          executionStatus: undefined,
+          executionDuration: undefined,
+          executionLogs: [],
+          onDelete: handleDeleteNode,
+          onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
+        },
+      });
+    });
+
+    const newEdges = clipboard.edges.map((edge) => ({
+      id: `edge-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      source: idMap.get(edge.source) || edge.source,
+      target: idMap.get(edge.target) || edge.target,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      type: "default",
+      animated: false,
+      style: { stroke: "#4a9eff", strokeWidth: 2 },
+    }));
+
+    setNodes((current) => [...current, ...newNodes]);
+    setEdges((current) => [...current, ...newEdges]);
+
+    // Select the new nodes
+    const newIds = newNodes.map((n) => n.id);
+    setSelectedNodeIds(newIds);
+    setSelectedNodeId(newIds[0] ?? null);
+  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]);
+
+  // Select all nodes
+  const handleSelectAll = useCallback(() => {
+    const allIds = nodes.map((n) => n.id);
+    setSelectedNodeIds(allIds);
+    setSelectedNodeId(allIds[0] ?? null);
+    // Also update ReactFlow's internal selection state
+    setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
+  }, [nodes, setNodes]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        return;
+      }
+
+      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+      // Delete selected nodes
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      // Ctrl+A - Select all
+      if (isCtrlOrCmd && event.key === "a") {
+        event.preventDefault();
+        handleSelectAll();
+        return;
+      }
+
+      // Ctrl+D - Duplicate
+      if (isCtrlOrCmd && event.key === "d") {
+        event.preventDefault();
+        handleDuplicateSelected();
+        return;
+      }
+
+      // Ctrl+C - Copy
+      if (isCtrlOrCmd && event.key === "c") {
+        event.preventDefault();
+        handleCopy();
+        return;
+      }
+
+      // Ctrl+V - Paste
+      if (isCtrlOrCmd && event.key === "v") {
+        event.preventDefault();
+        handlePaste();
+        return;
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleDeleteSelected, handleSelectAll, handleDuplicateSelected, handleCopy, handlePaste]);
+
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
       const params: Record<string, unknown> = {};
@@ -1184,9 +1389,9 @@ const App = () => {
     [edges, setEdges]
   );
 
-  const selectedNode = useMemo(
-    () => nodes.find((node) => node.id === selectedNodeId),
-    [nodes, selectedNodeId]
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
+    [nodes, selectedNodeIds]
   );
 
   const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
@@ -1208,6 +1413,10 @@ const App = () => {
             fitView
             connectionLineStyle={{ stroke: "#4a9eff" }}
             attributionPosition="bottom-left"
+            selectionMode={SelectionMode.Partial}
+            selectionOnDrag
+            panOnDrag={[1, 2]}
+            selectNodesOnDrag
           >
             <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
             <Controls 
@@ -1308,22 +1517,103 @@ const App = () => {
                 onMouseDown={() => setIsResizingRight(true)}
               />
               <div className="right-panel-content">
-                <NodeInspector
-                  node={selectedNode}
-                  onParamChange={handleParamChange}
-                />
-                <LogPanel 
-                  trace={trace} 
-                  outputs={outputs} 
-                  error={error}
-                  stats={stats}
-                  levels={levels}
-                  isRunning={isRunning}
-                  currentNodeId={currentNodeId}
-                  nodeStatuses={nodeStatuses}
-                  progress={progress}
-                  onHighlightNodes={handleHighlightNodes}
-                />
+                {/* Right panel tabs */}
+                <div className="right-panel-tabs">
+                  <button
+                    type="button"
+                    className={`right-panel-tab ${rightPanelTab === "inspector" ? "active" : ""}`}
+                    onClick={() => setRightPanelTab("inspector")}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </svg>
+                    Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
+                  </button>
+                  <button
+                    type="button"
+                    className={`right-panel-tab ${rightPanelTab === "execution" ? "active" : ""}`}
+                    onClick={() => setRightPanelTab("execution")}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    Execution {trace.length > 0 && `(${trace.length})`}
+                  </button>
+                </div>
+
+                {/* Multi-selection toolbar */}
+                {selectedNodeIds.length > 1 && (
+                  <div className="multi-select-toolbar">
+                    <span className="selection-count">
+                      {selectedNodeIds.length} nodes selected
+                    </span>
+                    <div className="toolbar-actions">
+                      <button
+                        type="button"
+                        className="toolbar-btn"
+                        onClick={handleDuplicateSelected}
+                        title="Duplicate (Ctrl+D)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                        </svg>
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="toolbar-btn"
+                        onClick={handleCopy}
+                        title="Copy (Ctrl+C)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                        </svg>
+                        Copy
+                      </button>
+                      <button
+                        type="button"
+                        className="toolbar-btn danger"
+                        onClick={handleDeleteSelected}
+                        title="Delete (Del)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                        </svg>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab content */}
+                <div className="right-panel-tab-content">
+                  {rightPanelTab === "inspector" && (
+                    <NodeInspector
+                      nodes={selectedNodes}
+                      onParamChange={handleParamChange}
+                      onDelete={handleDeleteNode}
+                      onDuplicate={(nodeId) => {
+                        setSelectedNodeIds([nodeId]);
+                        setSelectedNodeId(nodeId);
+                        setTimeout(() => handleDuplicateSelected(), 0);
+                      }}
+                    />
+                  )}
+                  {rightPanelTab === "execution" && (
+                    <LogPanel 
+                      trace={trace} 
+                      outputs={outputs} 
+                      error={error}
+                      stats={stats}
+                      levels={levels}
+                      isRunning={isRunning}
+                      currentNodeId={currentNodeId}
+                      nodeStatuses={nodeStatuses}
+                      progress={progress}
+                      onHighlightNodes={handleHighlightNodes}
+                    />
+                  )}
+                </div>
               </div>
             </>
           )}
