@@ -663,12 +663,6 @@ const PlayIcon = () => (
   </svg>
 );
 
-const ClearCacheIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4zM6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9z" />
-  </svg>
-);
-
 const ChevronLeft = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
     <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
@@ -1023,25 +1017,37 @@ const App = () => {
     handleRunGraph("selection", [nodeId]);
   }, [handleRunGraph]);
 
-  // Handle clearing cache for a single node
-  const handleClearNodeCache = useCallback((nodeId: string) => {
+  // Handle clearing cache for a single node (also clears backend cache for that node type)
+  const handleClearNodeCache = useCallback(async (nodeId: string) => {
+    // Find the node to get its type
+    const node = nodes.find((n) => n.id === nodeId);
+    if (node) {
+      // Clear backend cache for this node type
+      try {
+        await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
+      } catch (e) {
+        console.error("Failed to clear backend cache for node type:", e);
+      }
+    }
+    
+    // Clear frontend state
     setNodes((existing) =>
-      existing.map((node) =>
-        node.id === nodeId
+      existing.map((n) =>
+        n.id === nodeId
           ? {
-              ...node,
+              ...n,
               data: {
-                ...node.data,
+                ...n.data,
                 last_outputs: undefined,
                 executionStatus: undefined,
                 executionDuration: undefined,
                 executionLogs: [],
               },
             }
-          : node
+          : n
       )
     );
-  }, [setNodes]);
+  }, [nodes, setNodes]);
 
   // Clear running node set when execution completes
   useEffect(() => {
@@ -1226,19 +1232,6 @@ const App = () => {
               }}
             />
           </ReactFlow>
-          <div 
-            className="editor-top-controls"
-            style={{ right: actualRightWidth + 10 }}
-          >
-            <button
-              className="editor-control-btn"
-              onClick={handleClearCache}
-              disabled={isRunning}
-              title="Clear Cached Outputs"
-            >
-              <ClearCacheIcon />
-            </button>
-          </div>
         </div>
 
         <header className="overlay-header">

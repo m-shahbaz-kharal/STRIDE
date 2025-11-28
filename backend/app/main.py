@@ -78,6 +78,13 @@ async def clear_cache() -> Dict[str, Any]:
     return {"cleared": cleared, "message": f"Cleared {cleared} cached entries"}
 
 
+@app.post("/api/cache/clear/{node_type:path}")
+async def clear_cache_by_type(node_type: str) -> Dict[str, Any]:
+    """Clear the execution cache for a specific node type."""
+    cleared = GraphExecutor.clear_cache_by_type(node_type)
+    return {"cleared": cleared, "node_type": node_type, "message": f"Cleared {cleared} cached entries for {node_type}"}
+
+
 @app.get("/api/cache/stats")
 async def get_cache_stats() -> Dict[str, Any]:
     """Get cache statistics."""

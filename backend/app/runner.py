@@ -96,12 +96,28 @@ class GraphExecutor:
     # Value: cached outputs dict
     _global_cache: Dict[str, Dict[str, Any]] = {}
 
+    # Maps cache_key -> node_type for selective clearing
+    _cache_metadata: Dict[str, str] = {}
+
     @classmethod
     def clear_cache(cls) -> int:
         """Clear the global execution cache. Returns number of entries cleared."""
         count = len(cls._global_cache)
         cls._global_cache.clear()
+        cls._cache_metadata.clear()
         return count
+
+    @classmethod
+    def clear_cache_by_type(cls, node_type: str) -> int:
+        """Clear cache entries for a specific node type. Returns number of entries cleared."""
+        keys_to_remove = [
+            key for key, cached_type in cls._cache_metadata.items()
+            if cached_type == node_type
+        ]
+        for key in keys_to_remove:
+            cls._global_cache.pop(key, None)
+            cls._cache_metadata.pop(key, None)
+        return len(keys_to_remove)
 
     @classmethod
     def get_cache_size(cls) -> int:
@@ -161,6 +177,9 @@ class GraphExecutor:
             return
         cache_key = self._compute_cache_key(node_id, inputs)
         self._global_cache[cache_key] = outputs
+        # Store metadata for selective clearing
+        node = self.nodes[node_id]
+        self._cache_metadata[cache_key] = node.type
 
     def _build_nodes(self) -> None:
         for node_config in self.definition.get("nodes", []):
