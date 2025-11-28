@@ -34,12 +34,14 @@ export interface ExecutionTraceEntry {
   logs: string[];
   duration_ms?: number;
   level?: number;
+  from_cache?: boolean;
 }
 
 export interface ExecutionStats {
   total_nodes: number;
   executed_nodes: number;
   skipped_nodes: number;
+  cached_nodes: number;
   error_nodes: number;
   total_time_ms: number;
   node_time_ms: number;
@@ -60,6 +62,7 @@ export interface ExecutionEvent {
     | "node_queued"
     | "node_started"
     | "node_completed"
+    | "node_cached"
     | "node_error"
     | "complete"
     | "result"
@@ -77,6 +80,7 @@ export interface ExecutionEvent {
   progress?: number;
   total_nodes?: number;
   completed_nodes?: number;
+  from_cache?: boolean;
   execution_plan?: ExecutionPlanNode[];
   levels?: string[][];
   // For result event

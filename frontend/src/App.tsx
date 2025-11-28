@@ -1066,6 +1066,21 @@ const App = () => {
     );
   }, [setNodes]);
 
+  // Clear the backend execution cache
+  const handleClearBackendCache = useCallback(async () => {
+    try {
+      const response = await fetch("/api/cache/clear", { method: "POST" });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Cleared ${data.cleared} cached entries`);
+        // Also clear frontend state
+        handleClearCache();
+      }
+    } catch (e) {
+      console.error("Failed to clear backend cache:", e);
+    }
+  }, [handleClearCache]);
+
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
       const params: Record<string, unknown> = {};
@@ -1250,6 +1265,16 @@ const App = () => {
             >
               <PlayIcon />
               {isRunning && <span className="btn-spinner" />}
+            </button>
+            <button
+              className="icon-btn clear-cache-btn"
+              onClick={handleClearBackendCache}
+              disabled={isRunning}
+              title="Clear Backend Cache"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z" />
+              </svg>
             </button>
             {error && <span className="error-indicator" title={error}>!</span>}
           </div>

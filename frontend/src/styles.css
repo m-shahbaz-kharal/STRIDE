@@ -1539,6 +1539,11 @@ body {
   border: 1px solid rgba(248, 81, 73, 0.2);
 }
 
+.stat-item.cached {
+  background: rgba(255, 166, 87, 0.1);
+  border: 1px solid rgba(255, 166, 87, 0.2);
+}
+
 .stat-item .stat-value {
   font-size: 16px;
   font-weight: 600;
@@ -1564,6 +1569,27 @@ body {
 
 .stat-item.error .stat-value {
   color: var(--accent-red);
+}
+
+.stat-item.cached .stat-value {
+  color: #ffa657;
+}
+
+.cache-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  margin-left: 6px;
+  border-radius: 3px;
+  background: rgba(255, 166, 87, 0.2);
+  color: #ffa657;
+  vertical-align: middle;
+}
+
+.slowest-item.from-cache {
+  opacity: 0.7;
 }
 
 .parallelism-visual {

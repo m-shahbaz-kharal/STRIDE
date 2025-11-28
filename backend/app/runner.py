@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 import uuid
 from collections import defaultdict, deque
@@ -45,12 +47,13 @@ class NodeExecutionResult:
     duration_ms: float = 0.0
     error: Optional[str] = None
     level: int = 0  # Topological level for parallel execution
+    from_cache: bool = False  # Whether result came from cache
 
 
 @dataclass
 class ExecutionEvent:
     """Event emitted during graph execution for real-time updates."""
-    event_type: str  # "start", "node_queued", "node_started", "node_completed", "node_error", "complete"
+    event_type: str  # "start", "node_queued", "node_started", "node_completed", "node_skipped", "node_error", "complete"
     execution_id: str
     timestamp: float
     node_id: Optional[str] = None
@@ -64,6 +67,7 @@ class ExecutionEvent:
     progress: Optional[float] = None  # 0.0 to 1.0
     total_nodes: Optional[int] = None
     completed_nodes: Optional[int] = None
+    from_cache: Optional[bool] = None  # Whether result came from cache
     # Execution plan info (sent at start)
     execution_plan: Optional[List[Dict[str, Any]]] = None
     levels: Optional[List[List[str]]] = None
@@ -75,6 +79,7 @@ class ExecutionStats:
     total_nodes: int = 0
     executed_nodes: int = 0
     skipped_nodes: int = 0
+    cached_nodes: int = 0  # Nodes that used cached results
     error_nodes: int = 0
     total_time_ms: float = 0.0
     node_time_ms: float = 0.0  # Sum of individual node times
@@ -84,7 +89,24 @@ class ExecutionStats:
 
 
 class GraphExecutor:
-    """High-performance graph executor with level-based parallel execution."""
+    """High-performance graph executor with level-based parallel execution and caching."""
+
+    # Class-level cache shared across all executor instances
+    # Key: cache_key (hash of node type + params + inputs)
+    # Value: cached outputs dict
+    _global_cache: Dict[str, Dict[str, Any]] = {}
+
+    @classmethod
+    def clear_cache(cls) -> int:
+        """Clear the global execution cache. Returns number of entries cleared."""
+        count = len(cls._global_cache)
+        cls._global_cache.clear()
+        return count
+
+    @classmethod
+    def get_cache_size(cls) -> int:
+        """Get the current number of cached entries."""
+        return len(cls._global_cache)
 
     def __init__(self, graph_definition: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -> None:
         self.definition = graph_definition
@@ -105,11 +127,40 @@ class GraphExecutor:
         self._total_execution_time_ms: float = 0.0  # Actual wall-clock time
         self._max_parallelism: int = 0
         
+        # Caching options
+        self._use_cache = self.options.get("use_cache", True)
+        
         self._build_nodes()
         self._build_links()
         self._topo_order = self._topological_sort()
         self._compute_levels()
         self._execution_order: List[str] = []
+
+    def _compute_cache_key(self, node_id: str, inputs: Dict[str, Any]) -> str:
+        """Compute a unique cache key for a node based on its type, params, and inputs."""
+        node = self.nodes[node_id]
+        key_data = {
+            "type": node.type,
+            "params": node.params,
+            "inputs": inputs,
+        }
+        # Create a stable hash from the key data
+        key_str = json.dumps(key_data, sort_keys=True, default=str)
+        return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+
+    def _try_get_cached(self, node_id: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Try to get cached outputs for a node. Returns None if not cached."""
+        if not self._use_cache:
+            return None
+        cache_key = self._compute_cache_key(node_id, inputs)
+        return self._global_cache.get(cache_key)
+
+    def _cache_outputs(self, node_id: str, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
+        """Cache the outputs for a node."""
+        if not self._use_cache:
+            return
+        cache_key = self._compute_cache_key(node_id, inputs)
+        self._global_cache[cache_key] = outputs
 
     def _build_nodes(self) -> None:
         for node_config in self.definition.get("nodes", []):
@@ -237,7 +288,7 @@ class GraphExecutor:
         return inputs
 
     def _execute_node(self, node_id: str) -> NodeExecutionResult:
-        """Execute a single node synchronously."""
+        """Execute a single node synchronously, using cache if available."""
         node = self.nodes[node_id]
         level = self._node_levels.get(node_id, 0)
         start_time = time.perf_counter()
@@ -247,6 +298,29 @@ class GraphExecutor:
             if inputs is None:
                 raise GraphExecutionError(f"Node '{node_id}' could not resolve inputs")
             
+            # Check cache first
+            cached_outputs = self._try_get_cached(node_id, inputs)
+            if cached_outputs is not None:
+                end_time = time.perf_counter()
+                duration_ms = (end_time - start_time) * 1000
+                
+                self._computed_values[node_id] = cached_outputs
+                self._node_status[node_id] = NodeStatus.COMPLETED
+                
+                return NodeExecutionResult(
+                    node_id=node_id,
+                    node_type=node.type,
+                    status=NodeStatus.COMPLETED,
+                    outputs=cached_outputs,
+                    logs=[f"[CACHED] Skipped execution, using cached result"],
+                    start_time=start_time,
+                    end_time=end_time,
+                    duration_ms=duration_ms,
+                    level=level,
+                    from_cache=True,
+                )
+            
+            # Not cached - execute the node
             ctx = ExecutionContext()
             outputs = node.forward(inputs, ctx)
             
@@ -257,6 +331,9 @@ class GraphExecutor:
             
             end_time = time.perf_counter()
             duration_ms = (end_time - start_time) * 1000
+            
+            # Cache the results
+            self._cache_outputs(node_id, inputs, outputs)
             
             self._computed_values[node_id] = outputs
             self._node_status[node_id] = NodeStatus.COMPLETED
@@ -271,6 +348,7 @@ class GraphExecutor:
                 end_time=end_time,
                 duration_ms=duration_ms,
                 level=level,
+                from_cache=False,
             )
             
         except Exception as e:
@@ -285,6 +363,7 @@ class GraphExecutor:
                 duration_ms=(end_time - start_time) * 1000,
                 error=str(e),
                 level=level,
+                from_cache=False,
             )
 
     async def _execute_node_async(self, node_id: str) -> NodeExecutionResult:
@@ -330,6 +409,7 @@ class GraphExecutor:
                 "logs": r.logs,
                 "duration_ms": r.duration_ms,
                 "level": r.level,
+                "from_cache": r.from_cache,
             }
             for r in self.execution_trace
         ]
@@ -408,6 +488,7 @@ class GraphExecutor:
                 "logs": r.logs,
                 "duration_ms": r.duration_ms,
                 "level": r.level,
+                "from_cache": r.from_cache,
             }
             for r in self.execution_trace
         ]
@@ -536,11 +617,12 @@ class GraphExecutor:
                         progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                         total_nodes=total_nodes,
                         completed_nodes=completed_nodes,
+                        from_cache=result.from_cache,
                     )
                     should_break = True
                 else:
                     yield ExecutionEvent(
-                        event_type="node_completed",
+                        event_type="node_completed" if not result.from_cache else "node_cached",
                         execution_id=self.execution_id,
                         timestamp=time.time(),
                         node_id=result.node_id,
@@ -553,6 +635,7 @@ class GraphExecutor:
                         progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                         total_nodes=total_nodes,
                         completed_nodes=completed_nodes,
+                        from_cache=result.from_cache,
                     )
             else:
                 # Multiple nodes - execute in parallel and stream results as they complete
@@ -590,11 +673,12 @@ class GraphExecutor:
                                 progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                                 total_nodes=total_nodes,
                                 completed_nodes=completed_nodes,
+                                from_cache=result.from_cache,
                             )
                             should_break = True
                         else:
                             yield ExecutionEvent(
-                                event_type="node_completed",
+                                event_type="node_completed" if not result.from_cache else "node_cached",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
                                 node_id=result.node_id,
@@ -607,6 +691,7 @@ class GraphExecutor:
                                 progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                                 total_nodes=total_nodes,
                                 completed_nodes=completed_nodes,
+                                from_cache=result.from_cache,
                             )
             
             if should_break:
@@ -648,9 +733,11 @@ class GraphExecutor:
     def _calculate_stats(self, total_time_ms: float, max_parallelism: int = 1) -> ExecutionStats:
         """Calculate execution statistics."""
         node_time_ms = sum(r.duration_ms for r in self.execution_trace)
-        executed = len([r for r in self.execution_trace if r.status == NodeStatus.COMPLETED])
+        completed = [r for r in self.execution_trace if r.status == NodeStatus.COMPLETED]
+        cached = len([r for r in completed if r.from_cache])
+        executed = len(completed) - cached  # Actually executed (not from cache)
         errors = len([r for r in self.execution_trace if r.status == NodeStatus.ERROR])
-        skipped = len(self._execution_order) - executed - errors
+        skipped = len(self._execution_order) - len(completed) - errors
         
         parallel_efficiency = node_time_ms / total_time_ms if total_time_ms > 0 else 1.0
         levels_executed = len(set(r.level for r in self.execution_trace))
@@ -659,6 +746,7 @@ class GraphExecutor:
             total_nodes=len(self._execution_order),
             executed_nodes=executed,
             skipped_nodes=skipped,
+            cached_nodes=cached,
             error_nodes=errors,
             total_time_ms=total_time_ms,
             node_time_ms=node_time_ms,

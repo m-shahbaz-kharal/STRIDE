@@ -109,6 +109,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           break;
 
         case "node_completed":
+        case "node_cached":
           if (data.node_id) {
             setNodeStatuses((prev) => {
               const newMap = new Map(prev);
@@ -124,6 +125,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
                 logs: data.logs ?? [],
                 duration_ms: data.duration_ms,
                 level: data.level,
+                from_cache: data.from_cache,
               },
             ]);
           }

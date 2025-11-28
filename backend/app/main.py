@@ -71,6 +71,19 @@ async def get_execution_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/cache/clear")
+async def clear_cache() -> Dict[str, Any]:
+    """Clear the execution cache."""
+    cleared = GraphExecutor.clear_cache()
+    return {"cleared": cleared, "message": f"Cleared {cleared} cached entries"}
+
+
+@app.get("/api/cache/stats")
+async def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics."""
+    return {"size": GraphExecutor.get_cache_size()}
+
+
 def serialize_event(event) -> str:
     """Serialize an ExecutionEvent to JSON."""
     data = {
@@ -82,7 +95,7 @@ def serialize_event(event) -> str:
     optional_fields = [
         "node_id", "node_type", "status", "outputs", "logs",
         "duration_ms", "error", "level", "progress", "total_nodes",
-        "completed_nodes", "execution_plan", "levels"
+        "completed_nodes", "execution_plan", "levels", "from_cache"
     ]
     
     for field in optional_fields:
@@ -125,6 +138,7 @@ async def websocket_run_graph(websocket: WebSocket):
                             "logs": r.logs,
                             "duration_ms": r.duration_ms,
                             "level": r.level,
+                            "from_cache": r.from_cache,
                         }
                         for r in graph_executor.execution_trace
                     ],

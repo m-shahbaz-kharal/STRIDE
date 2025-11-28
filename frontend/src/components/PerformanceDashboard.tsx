@@ -122,6 +122,12 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
                 <div className="stat-value">{stats.executed_nodes}</div>
                 <div className="stat-label">Nodes Executed</div>
               </div>
+              {stats.cached_nodes > 0 && (
+                <div className="stat-item cached">
+                  <div className="stat-value">{stats.cached_nodes}</div>
+                  <div className="stat-label">From Cache</div>
+                </div>
+              )}
               <div className="stat-item">
                 <div className="stat-value">{stats.levels_executed}</div>
                 <div className="stat-label">Levels</div>
@@ -204,13 +210,16 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
                 {slowestNodes.map((entry, index) => (
                   <div 
                     key={entry.node_id} 
-                    className="slowest-item hoverable"
+                    className={`slowest-item hoverable${entry.from_cache ? " from-cache" : ""}`}
                     onMouseEnter={() => handleNodeHover(entry.node_id)}
                     onMouseLeave={() => handleNodeHover(null)}
                   >
                     <div className="slowest-rank">{index + 1}</div>
                     <div className="slowest-info">
-                      <div className="slowest-name">{entry.node_id}</div>
+                      <div className="slowest-name">
+                        {entry.node_id}
+                        {entry.from_cache && <span className="cache-badge">cached</span>}
+                      </div>
                       <div className="slowest-type">{entry.type}</div>
                     </div>
                     <div className="slowest-time">{formatDuration(entry.duration_ms ?? 0)}</div>
