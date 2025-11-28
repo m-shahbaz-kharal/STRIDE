@@ -571,19 +571,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           <span className="node-type-label">{data.nodeType}</span>
         </div>
         <div className="node-header-right">
-          {data.executionStatus === "running" && (
-            <span className="node-status-chip running">
-              <span className="status-dot pulse" />
-              RUN
-            </span>
-          )}
           {data.executionStatus === "queued" && (
             <span className="node-status-chip queued">QUEUE</span>
-          )}
-          {data.executionDuration !== undefined && data.executionStatus === "completed" && (
-            <span className="node-timing-chip" title={`Execution time: ${data.executionDuration.toFixed(1)}ms`}>
-              {data.executionDuration < 1 ? "<1" : data.executionDuration.toFixed(0)}ms
-            </span>
           )}
           <button
             className="node-action-btn nodrag"
