@@ -563,6 +563,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           {data.executionStatus === "queued" && (
             <span className="node-status-chip queued">QUEUE</span>
           )}
+          {data.executionDuration !== undefined && data.executionStatus === "completed" && (
+            <span className="node-timing-chip" title={`Execution time: ${data.executionDuration.toFixed(1)}ms`}>
+              {data.executionDuration < 1 ? "<1" : data.executionDuration.toFixed(0)}ms
+            </span>
+          )}
           <button
             className="node-action-btn nodrag"
             onClick={handleViewLogs}
@@ -572,16 +577,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
             </svg>
           </button>
-          <button
-            className="node-action-btn run-btn nodrag"
-            onClick={handleRunNode}
-            title="Run from this node"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </button>
-          {data.last_outputs && (
+          {data.last_outputs ? (
             <button
               className="node-action-btn clear-cache-btn nodrag"
               onClick={handleClearNodeCache}
@@ -589,6 +585,16 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="node-action-btn run-btn nodrag"
+              onClick={handleRunNode}
+              title="Run from this node"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
               </svg>
             </button>
           )}
