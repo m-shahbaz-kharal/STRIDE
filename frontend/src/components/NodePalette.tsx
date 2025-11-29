@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { NodeTypeDefinition } from "../types";
+import NodePreview from "./NodePreview";
 
 type NodePaletteProps = {
   nodeTypes: NodeTypeDefinition[];
@@ -43,6 +44,8 @@ const getCategoryForNodeType = (nodeType: string): string => {
 const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
   const [query, setQuery] = useState("");
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [hoveredNode, setHoveredNode] = useState<NodeTypeDefinition | null>(null);
+  const dragPreviewRef = useRef<HTMLDivElement>(null);
 
   const filteredNodeTypes = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -126,11 +129,18 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
                     type="button"
                     className="palette-item"
                     onClick={() => onAddNode(nodeType)}
+                    onMouseEnter={() => setHoveredNode(nodeType)}
+                    onMouseLeave={() => setHoveredNode(null)}
                     title={nodeType.description}
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.setData("application/reactflow", JSON.stringify(nodeType));
                       event.dataTransfer.effectAllowed = "move";
+
+                      // Set custom drag image if available
+                      if (dragPreviewRef.current) {
+                        event.dataTransfer.setDragImage(dragPreviewRef.current, 10, 10);
+                      }
                     }}
                   >
                     <span className="palette-item-name">{nodeType.display_name}</span>
@@ -149,6 +159,21 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
             No nodes match "{query.trim()}"
           </p>
         )}
+      </div>
+
+      {/* Hidden drag preview container */}
+      <div
+        style={{
+          position: "absolute",
+          top: -1000,
+          left: -1000,
+          pointerEvents: "none",
+          zIndex: -1
+        }}
+      >
+        <div ref={dragPreviewRef}>
+          {hoveredNode && <NodePreview nodeType={hoveredNode} />}
+        </div>
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ import "reactflow/dist/style.css";
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
+import SmartConnectModal from "./components/SmartConnectModal";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import {
@@ -803,6 +804,25 @@ const App = () => {
   const [valuePopup, setValuePopup] = useState<{ value: unknown; title: string } | null>(null);
   const [logsPopup, setLogsPopup] = useState<{ nodeId: string; nodeName: string; logs: string[] } | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  // Smart Connect state
+  const [connectStartParams, setConnectStartParams] = useState<{
+    nodeId: string | null;
+    handleId: string | null;
+    handleType: "source" | "target" | null;
+  } | null>(null);
+
+  const [smartConnectMenu, setSmartConnectMenu] = useState<{
+    isOpen: boolean;
+    position: { x: number; y: number };
+    flowPosition: { x: number; y: number };
+    source: { nodeId: string; handleId: string; type: "source" | "target" } | null;
+  }>({
+    isOpen: false,
+    position: { x: 0, y: 0 },
+    flowPosition: { x: 0, y: 0 },
+    source: null,
+  });
 
   // Set global popup functions
   useEffect(() => {
@@ -1607,6 +1627,167 @@ const App = () => {
     [edges, setEdges]
   );
 
+  // Helper to calculate handle position for smart connect line
+  const getHandlePosition = useCallback((nodeId: string, handleId: string, type: "source" | "target") => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return null;
+
+    const isInput = type === "target";
+    const ports = isInput ? node.data.input_ports : node.data.output_ports;
+    const index = ports.indexOf(handleId);
+
+    if (index === -1) return null;
+
+    // Matches BlueprintNode layout constants
+    // Header ~50px (8px pad + ~27px content + 6px pad + 1px border + 8px margin)
+    // Each port row: 20px height + 6px gap = 26px stride
+    // Handle is centered in row (+10px)
+    const yOffset = 50 + index * 26 + 10;
+
+    // Use measured width if available, otherwise fallback
+    const nodeWidth = node.width ?? 160;
+
+    return {
+      x: node.position.x + (isInput ? 0 : nodeWidth),
+      y: node.position.y + yOffset,
+    };
+  }, [nodes]);
+
+  const onConnectStart = useCallback((_: unknown, { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
+    setConnectStartParams({ nodeId, handleId, handleType });
+  }, []);
+
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement;
+      const isPane = target.classList.contains("react-flow__pane");
+
+      if (isPane && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
+        const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
+
+        const position = reactFlowInstance.screenToFlowPosition({
+          x: clientX,
+          y: clientY,
+        });
+
+        setSmartConnectMenu({
+          isOpen: true,
+          position: { x: clientX, y: clientY },
+          flowPosition: position,
+          source: {
+            nodeId: connectStartParams.nodeId,
+            handleId: connectStartParams.handleId,
+            type: connectStartParams.handleType || "source",
+          },
+        });
+      }
+
+      setConnectStartParams(null);
+    },
+    [connectStartParams, reactFlowInstance]
+  );
+
+  const handleSmartConnectSelect = useCallback(
+    (nodeType: NodeTypeDefinition) => {
+      if (!smartConnectMenu.source) return;
+
+      takeSnapshot();
+
+      const { flowPosition, source } = smartConnectMenu;
+      const newId = `node-${nodeIdRef.current++}`;
+
+      // Create new node
+      const params: Record<string, unknown> = {};
+      const defaults = nodeType.params_defaults ?? {};
+      for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
+        params[key] = schema.default ?? defaults[key] ?? "";
+      }
+
+      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const initialWidth = 160;
+      const initialHeight = 52 + maxPorts * 24;
+
+      // Calculate position to align the connecting handle with the drop location
+      let xOffset = 0;
+      let yOffset = 0;
+
+      // Header ~50px, Port stride ~26px, Handle center +10px
+      // We connect to the first port (index 0) by default
+      const portYOffset = 50 + 0 * 26 + 10;
+
+      if (source.type === "source") {
+        // Dragging from Source (Output) -> Connect to New Node's Input (Left side)
+        xOffset = 0;
+        yOffset = portYOffset;
+      } else {
+        // Dragging from Target (Input) -> Connect to New Node's Output (Right side)
+        xOffset = initialWidth;
+        yOffset = portYOffset;
+      }
+
+      const newNode: Node<BlueprintNodeData> = {
+        id: newId,
+        type: "blueprint",
+        position: { x: flowPosition.x - xOffset, y: flowPosition.y - yOffset },
+        data: {
+          displayName: nodeType.display_name,
+          nodeType: nodeType.node_type,
+          description: nodeType.description,
+          input_ports: nodeType.input_ports,
+          output_ports: nodeType.output_ports,
+          params,
+          breakpoint: false,
+          metadata: nodeType,
+          onDelete: handleDeleteNode,
+          onRunSelection: handleRunFromNode,
+          onClearCache: handleClearNodeCache,
+          width: initialWidth,
+          height: initialHeight,
+          executionLogs: [],
+        },
+      };
+
+      setNodes((nds) => nds.concat(newNode));
+
+      // Create connection
+      // If dragging from source (output), connect to first input of new node
+      // If dragging from target (input), connect from first output of new node
+      let sourceId, sourceHandle, targetId, targetHandle;
+
+      if (source.type === "source") {
+        sourceId = source.nodeId;
+        sourceHandle = source.handleId;
+        targetId = newId;
+        targetHandle = nodeType.input_ports[0]; // Connect to first input
+      } else {
+        sourceId = newId;
+        sourceHandle = nodeType.output_ports[0]; // Connect from first output
+        targetId = source.nodeId;
+        targetHandle = source.handleId;
+      }
+
+      if (sourceHandle && targetHandle) {
+        setEdges((eds) =>
+          addEdge(
+            {
+              source: sourceId,
+              sourceHandle: sourceHandle,
+              target: targetId,
+              targetHandle: targetHandle,
+              type: "default",
+              animated: false,
+              style: { stroke: "#4a9eff", strokeWidth: 2 },
+            },
+            eds
+          )
+        );
+      }
+
+      setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
+    },
+    [smartConnectMenu, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]
+  );
+
   const selectedNodes = useMemo(
     () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
     [nodes, selectedNodeIds]
@@ -1748,6 +1929,8 @@ const App = () => {
             onEdgesChange={onEdgesChange}
             onInit={setReactFlowInstance}
             onConnect={handleConnect}
+            onConnectStart={onConnectStart}
+            onConnectEnd={onConnectEnd}
             onNodeDragStart={() => takeSnapshot()}
             onSelectionDragStart={() => takeSnapshot()}
             onSelectionChange={handleSelectionChange}
@@ -2000,8 +2183,72 @@ const App = () => {
             onClose={() => setLogsPopup(null)}
           />
         )}
+
+        {/* Smart Connect Line */}
+        {smartConnectMenu.isOpen && smartConnectMenu.source && (
+          <svg
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+              zIndex: 999,
+              overflow: "visible",
+            }}
+          >
+            {(() => {
+              const startFlow = getHandlePosition(
+                smartConnectMenu.source.nodeId,
+                smartConnectMenu.source.handleId,
+                smartConnectMenu.source.type
+              );
+              if (!startFlow || !reactFlowInstance) return null;
+
+              // Convert start point to screen coordinates
+              const start = reactFlowInstance.flowToScreenPosition(startFlow);
+              const end = smartConnectMenu.position;
+
+              const isSource = smartConnectMenu.source.type === "source";
+              const startX = start.x;
+              const startY = start.y;
+              const endX = end.x;
+              const endY = end.y;
+
+              const dist = Math.abs(endX - startX) * 0.5;
+              const cp1x = isSource ? startX + dist : startX - dist;
+              const cp1y = startY;
+              const cp2x = isSource ? endX - dist : endX + dist;
+              const cp2y = endY;
+
+              const path = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+
+              return (
+                <path
+                  d={path}
+                  stroke="#4a9eff"
+                  strokeWidth="2"
+                  fill="none"
+                  strokeDasharray="5,5"
+                  className="smart-connect-line"
+                />
+              );
+            })()}
+          </svg>
+        )}
+
+        {/* Smart Connect Modal */}
+        <SmartConnectModal
+          isOpen={smartConnectMenu.isOpen}
+          position={smartConnectMenu.position}
+          onClose={() => setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }))}
+          onSelect={handleSmartConnectSelect}
+          nodeTypes={nodeLibrary}
+          sourceHandleType={smartConnectMenu.source?.type}
+        />
       </div>
-    </ReactFlowProvider>
+    </ReactFlowProvider >
   );
 };
 
