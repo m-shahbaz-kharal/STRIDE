@@ -1612,19 +1612,25 @@ const App = () => {
 
       takeSnapshot();
 
-      setEdges((existing) =>
-        addEdge(
+      setEdges((existing) => {
+        // Remove any existing edge that connects to the same target handle
+        const filtered = existing.filter(
+          (edge) =>
+            !(edge.target === connection.target && edge.targetHandle === connection.targetHandle)
+        );
+
+        return addEdge(
           {
             ...connection,
             type: "default",
             animated: false,
             style: { stroke: "#4a9eff", strokeWidth: 2 },
           },
-          existing
-        )
-      );
+          filtered
+        );
+      });
     },
-    [edges, setEdges]
+    [edges, setEdges, takeSnapshot]
   );
 
   // Helper to calculate handle position for smart connect line
