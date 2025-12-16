@@ -844,6 +844,9 @@ const App = () => {
 
   // Right panel tab state
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
+  
+  // Header tab state
+  const [headerTab, setHeaderTab] = useState<"graph-editor" | "outputs">("graph-editor");
 
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
@@ -1980,17 +1983,30 @@ const App = () => {
 
         <header className="overlay-header">
           <div className="header-left">
-            <h1>LiGuard Graph</h1>
-            <div className="header-stats">
-              <span className="stat-badge">{graphStats.nodes} nodes</span>
-              <span className="stat-badge">{graphStats.edges} edges</span>
-              {isRunning && (
+            <div className="header-tabs">
+              <button
+                type="button"
+                className={`header-tab ${headerTab === "graph-editor" ? "active" : ""}`}
+                onClick={() => setHeaderTab("graph-editor")}
+              >
+                Graph Editor
+              </button>
+              <button
+                type="button"
+                className={`header-tab ${headerTab === "outputs" ? "active" : ""}`}
+                onClick={() => setHeaderTab("outputs")}
+              >
+                Outputs
+              </button>
+            </div>
+            {headerTab === "graph-editor" && isRunning && (
+              <div className="header-stats">
                 <span className="stat-badge running">
                   <span className="pulse-dot" />
                   {Math.round(progress * 100)}%
                 </span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <div className="header-controls">
             <ConnectionIcon connected={isConnected} />
