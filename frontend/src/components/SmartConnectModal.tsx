@@ -35,6 +35,7 @@ const SmartConnectModal = ({
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const modalRef = useRef<HTMLDivElement>(null);
 
     // Parse and prioritize nodes
     const filteredNodes = useMemo(() => {
@@ -116,6 +117,23 @@ const SmartConnectModal = ({
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [isOpen, filteredNodes, selectedIndex, onSelect, onClose]);
 
+    // Close when clicking outside the modal
+    useEffect(() => {
+        if (!isOpen) return;
+        const handler = (e: MouseEvent | TouchEvent) => {
+            const target = e.target as Node | null;
+            if (modalRef.current && target instanceof Node && !modalRef.current.contains(target as Node)) {
+                onClose();
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        document.addEventListener("touchstart", handler);
+        return () => {
+            document.removeEventListener("mousedown", handler);
+            document.removeEventListener("touchstart", handler);
+        };
+    }, [isOpen, onClose]);
+
     // Scroll selected item into view
     useEffect(() => {
         if (listRef.current) {
@@ -175,6 +193,7 @@ const SmartConnectModal = ({
                 top,
                 zIndex: 1000,
             }}
+            ref={modalRef}
             onClick={(e) => e.stopPropagation()}
         >
             <div className="smart-connect-header">

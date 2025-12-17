@@ -1470,7 +1470,7 @@ const App = () => {
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [selectedNodeIds, nodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
+  }, [selectedNodeIds, nodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
 
   // Copy selected nodes to clipboard (no edges - edges can only be deleted)
   const handleCopy = useCallback(() => {
@@ -1514,7 +1514,7 @@ const App = () => {
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
+  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
 
   // Select all nodes and edges
   const handleSelectAll = useCallback(() => {
@@ -1637,7 +1637,7 @@ const App = () => {
       };
       setNodes((existing) => existing.concat(payload));
     },
-    [handleDeleteNode, handleRunFromNode, handleClearNodeCache, nodes.length, setNodes]
+    [handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, nodes.length, setNodes]
   );
 
   // Update existing nodes with the run handler
@@ -1864,7 +1864,7 @@ const App = () => {
 
       setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
     },
-    [smartConnectMenu, handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes, setEdges]
+    [smartConnectMenu, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes, setEdges]
   );
 
   const selectedNodes = useMemo(
@@ -1977,6 +1977,7 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          onInterrupt: handleInterruptNode,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -1985,7 +1986,7 @@ const App = () => {
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance, setNodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache]
+    [reactFlowInstance, setNodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode]
   );
 
   return (

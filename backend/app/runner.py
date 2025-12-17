@@ -494,7 +494,6 @@ class GraphExecutor:
         self._cancel_all = False
         self._cancelled_nodes.clear()
         self._running_tasks = {}
-        self._running_tasks = {}
         
         executed_count = 0
         max_steps = self.options.get("max_steps")
