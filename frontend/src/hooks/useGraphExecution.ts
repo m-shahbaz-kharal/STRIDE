@@ -36,8 +36,8 @@ interface UseGraphExecutionReturn {
   currentNodeId: string | null;
   progress: number;
   executionId: string | null;
-  runGraph: (payload: GraphPayload) => void;
-  runGraphSync: (payload: GraphPayload) => Promise<ExecutionResult>;
+  runGraph: (payload: GraphPayload, runNodeIds?: string[]) => void;
+  runGraphSync: (payload: GraphPayload, runNodeIds?: string[]) => Promise<ExecutionResult>;
   clearResults: () => void;
 }
 
@@ -51,9 +51,10 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pendingPayloadRef = useRef<GraphPayload | null>(null);
+  const activeRunRef = useRef(false);
 
   const [isConnected, setIsConnected] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
+  const [activeRuns, setActiveRuns] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [trace, setTrace] = useState<ExecutionTraceEntry[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
@@ -164,7 +165,8 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "complete":
           setCurrentNodeId(null);
           setProgress(1);
-          setIsRunning(false);
+          activeRunRef.current = false;
+          setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
 
         case "result":
@@ -172,15 +174,17 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           if (data.outputs) setOutputs(data.outputs as Record<string, unknown>);
           if (data.stats) setStats(data.stats);
           if (data.levels) setLevels(data.levels as string[][]);
-          setIsRunning(false);
           setCurrentNodeId(null);
           setProgress(1);
+          activeRunRef.current = false;
+          setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
 
         case "error":
           setError(data.error ?? "Unknown error");
-          setIsRunning(false);
           setCurrentNodeId(null);
+          activeRunRef.current = false;
+          setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
       }
     } catch (e) {
@@ -200,6 +204,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       ws.onopen = () => {
         setIsConnected(true);
         setError(null);
+        activeRunRef.current = false;
         
         if (pendingPayloadRef.current) {
           ws.send(JSON.stringify(pendingPayloadRef.current));
@@ -210,6 +215,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       ws.onclose = () => {
         setIsConnected(false);
         wsRef.current = null;
+        if (activeRunRef.current) {
+          activeRunRef.current = false;
+          setActiveRuns(0);
+          setError((prev) => prev ?? "Connection closed during execution");
+        }
         
         reconnectTimeoutRef.current = window.setTimeout(() => {
           connect();
@@ -218,6 +228,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
 
       ws.onerror = () => {
         setIsConnected(false);
+        if (activeRunRef.current) {
+          activeRunRef.current = false;
+          setActiveRuns((prev) => Math.max(0, prev - 1));
+          setError("WebSocket connection error");
+        }
       };
 
       ws.onmessage = handleMessage;
@@ -243,15 +258,20 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   }, [connect]);
 
   // Run graph via WebSocket
-  const runGraph = useCallback((payload: GraphPayload) => {
-    setIsRunning(true);
+  const runGraph = useCallback((payload: GraphPayload, runNodeIds: string[] = []) => {
+    setActiveRuns((prev) => prev + 1);
     setError(null);
     setTrace([]);
     setOutputs({});
     setStats(null);
     setProgress(0);
     setCurrentNodeId(null);
-    setNodeStatuses(new Map());
+    setNodeStatuses((prev) => {
+      const updated = new Map(prev);
+      runNodeIds.forEach((id) => updated.set(id, "running"));
+      return updated;
+    });
+    activeRunRef.current = true;
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(payload));
@@ -262,13 +282,18 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   }, [connect]);
 
   // Run graph via HTTP (fallback)
-  const runGraphSync = useCallback(async (payload: GraphPayload): Promise<ExecutionResult> => {
-    setIsRunning(true);
+  const runGraphSync = useCallback(async (payload: GraphPayload, runNodeIds: string[] = []): Promise<ExecutionResult> => {
+    setActiveRuns((prev) => prev + 1);
     setError(null);
     setTrace([]);
     setOutputs({});
     setStats(null);
     setProgress(0);
+    setNodeStatuses((prev) => {
+      const updated = new Map(prev);
+      runNodeIds.forEach((id) => updated.set(id, "running"));
+      return updated;
+    });
 
     try {
       const response = await fetch("/api/run-graph-async", {
@@ -290,10 +315,15 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       setLevels(data.levels ?? []);
       setProgress(1);
 
-      const statuses = new Map<string, NodeExecutionStatus>();
+      const statuses = new Map<string, NodeExecutionStatus>(nodeStatuses);
       for (const entry of data.trace ?? []) {
         statuses.set(entry.node_id, "completed");
       }
+      runNodeIds.forEach((id) => {
+        if (!statuses.has(id)) {
+          statuses.set(id, "completed");
+        }
+      });
       setNodeStatuses(statuses);
 
       return data;
@@ -302,9 +332,9 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       setError(message);
       throw e;
     } finally {
-      setIsRunning(false);
+      setActiveRuns((prev) => Math.max(0, prev - 1));
     }
-  }, []);
+  }, [nodeStatuses]);
 
   // Clear results
   const clearResults = useCallback(() => {
@@ -317,11 +347,13 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setProgress(0);
     setError(null);
     setExecutionId(null);
+    activeRunRef.current = false;
+    setActiveRuns(0);
   }, []);
 
   return {
     isConnected,
-    isRunning,
+    isRunning: activeRuns > 0,
     error,
     trace,
     outputs,

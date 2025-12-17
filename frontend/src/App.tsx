@@ -565,8 +565,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
   // Calculate min dimensions based on content
   // Header ~36px, each port row ~24px, padding ~16px
-  const MIN_WIDTH = 160;
-  const MIN_HEIGHT = 52 + maxPorts * 24;
+  const MIN_WIDTH = 200;
+  const MIN_HEIGHT = 64 + maxPorts * 26;
 
   useEffect(() => {
     if (!isResizing) return;
@@ -1258,14 +1258,18 @@ const App = () => {
 
   const handleRunGraph = useCallback(
     async (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
-      if (isRunning || nodes.length === 0) return;
+      if (nodes.length === 0) return;
 
       // Determine which nodes will be running
       const runNodes = mode === "full"
         ? new Set(nodes.map((n) => n.id))
         : getDependentNodes(targetNodes || selectedNodeIds);
 
-      setRunningNodeIds(runNodes);
+      setRunningNodeIds((prev) => {
+        const merged = new Set(prev);
+        runNodes.forEach((id) => merged.add(id));
+        return merged;
+      });
 
       const payload = buildGraphPayload(mode, targetNodes || (mode === "selection" ? selectedNodeIds : undefined), extras);
 
@@ -1281,11 +1285,13 @@ const App = () => {
         }))
       );
 
-      if (useStreaming && isConnected) {
-        runGraph(payload);
+      const runIds = Array.from(runNodes);
+
+      if (useStreaming && isConnected && !isRunning) {
+        runGraph(payload, runIds);
       } else {
         try {
-          await runGraphSync(payload);
+          await runGraphSync(payload, runIds);
         } catch {
           // Error handled by hook
         }
@@ -1337,6 +1343,20 @@ const App = () => {
       setRunningNodeIds(new Set());
     }
   }, [isRunning]);
+
+  // Trim running set as nodes finish to keep animation focused
+  useEffect(() => {
+    if (nodeStatuses.size === 0) return;
+    setRunningNodeIds((prev) => {
+      const next = new Set(prev);
+      nodeStatuses.forEach((status, nodeId) => {
+        if (status === "completed" || status === "skipped" || status === "error") {
+          next.delete(nodeId);
+        }
+      });
+      return next;
+    });
+  }, [nodeStatuses]);
 
   // Clear all cached outputs from nodes
   const handleClearCache = useCallback(() => {
@@ -1590,8 +1610,8 @@ const App = () => {
 
       // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 160;
-      const initialHeight = 52 + maxPorts * 24;
+      const initialWidth = 200;
+      const initialHeight = 64 + maxPorts * 26;
 
       const payload: Node<BlueprintNodeData> = {
         id,
@@ -1703,7 +1723,7 @@ const App = () => {
     const yOffset = 50 + index * 26 + 10;
 
     // Use measured width if available, otherwise fallback
-    const nodeWidth = node.width ?? 160;
+    const nodeWidth = node.width ?? 200;
 
     return {
       x: node.position.x + (isInput ? 0 : nodeWidth),
@@ -1762,8 +1782,8 @@ const App = () => {
       }
 
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 160;
-      const initialHeight = 52 + maxPorts * 24;
+      const initialWidth = 200;
+      const initialHeight = 64 + maxPorts * 26;
 
       // Calculate position to align the connecting handle with the drop location
       let xOffset = 0;
@@ -1938,8 +1958,8 @@ const App = () => {
 
       // Calculate initial size based on ports
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 160;
-      const initialHeight = 52 + maxPorts * 24;
+      const initialWidth = 200;
+      const initialHeight = 64 + maxPorts * 26;
 
       const newNode: Node<BlueprintNodeData> = {
         id,
@@ -2069,7 +2089,7 @@ const App = () => {
             <button
               className="icon-btn primary"
               onClick={() => handleRunGraph("full")}
-              disabled={isRunning || nodes.length === 0}
+              disabled={nodes.length === 0}
               title="Run Graph"
             >
               <PlayIcon />
