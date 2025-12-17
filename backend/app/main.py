@@ -7,11 +7,12 @@ from typing import Any, Dict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .nodes import list_node_types
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
+from .nodes.camera import STREAM_MANAGER
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
@@ -89,6 +90,51 @@ async def clear_cache_by_type(node_type: str) -> Dict[str, Any]:
 async def get_cache_stats() -> Dict[str, Any]:
     """Get cache statistics."""
     return {"size": GraphExecutor.get_cache_size()}
+
+
+@app.get("/api/streams/{stream_id}/frame")
+async def get_stream_frame(stream_id: str) -> Response:
+    """Fetch the latest JPEG frame for a running stream."""
+    try:
+        worker = STREAM_MANAGER.get_stream(stream_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    frame = worker.latest_frame(timeout=0.1)
+    if frame is None:
+        return Response(status_code=204)
+
+    import cv2
+
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    ok, buffer = cv2.imencode(".jpg", frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to encode frame")
+    return StreamingResponse(
+        iter([buffer.tobytes()]),
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+    )
+
+
+@app.post("/api/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: str) -> Dict[str, Any]:
+    """Cancel an in-flight execution."""
+    cancelled = GraphExecutor.cancel_execution(execution_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Execution not found or already finished")
+    return {"execution_id": execution_id, "cancelled": cancelled}
+
+
+@app.post("/api/executions/{execution_id}/cancel/{node_id}")
+async def cancel_node(execution_id: str, node_id: str) -> Dict[str, Any]:
+    """Cancel a specific node inside an in-flight execution."""
+    cancelled = GraphExecutor.cancel_node(execution_id, node_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Execution not found or already finished")
+    return {"execution_id": execution_id, "node_id": node_id, "cancelled": cancelled}
 
 
 def serialize_event(event) -> str:

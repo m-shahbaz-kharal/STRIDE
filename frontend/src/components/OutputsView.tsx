@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Node } from "reactflow";
 import { BlueprintNodeData } from "../types";
 
@@ -8,6 +8,8 @@ interface OutputsViewProps {
 }
 
 const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
+  const [refreshToken, setRefreshToken] = useState(0);
+
   const formatValue = (val: unknown): string => {
     if (val === null) return "null";
     if (val === undefined) return "undefined";
@@ -17,11 +19,12 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
   };
 
   // Find all display nodes and their outputs
-  const { displayOutputs, valueOutputs } = useMemo(() => {
+  const { displayOutputs, valueOutputs, streamIds } = useMemo(() => {
     const displayNodes = nodes.filter((node) => node.data.nodeType === "display.image");
 
     const images: Array<{ nodeId: string; nodeName: string; image: string }> = [];
     const values: Array<{ key: string; value: unknown }> = [];
+    const streams: string[] = [];
 
     for (const node of displayNodes) {
       const nodeOutputs = node.data.last_outputs;
@@ -44,13 +47,24 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
           nodeName: key,
           image: value,
         });
+      } else if (key.toLowerCase().includes("stream_id") && typeof value === "string") {
+        streams.push(value);
       } else {
         values.push({ key, value });
       }
     }
 
-    return { displayOutputs: images, valueOutputs: values };
+    return { displayOutputs: images, valueOutputs: values, streamIds: streams };
   }, [nodes, outputs]);
+
+  // Heartbeat to refresh live stream images
+  useEffect(() => {
+    if (streamIds.length === 0) return;
+    const interval = window.setInterval(() => {
+      setRefreshToken((prev) => prev + 1);
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [streamIds]);
 
   if (displayOutputs.length === 0 && valueOutputs.length === 0) {
     return (
@@ -104,6 +118,36 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
         </>
       )}
 
+      {streamIds.length > 0 && (
+        <>
+          <div className="outputs-header">
+            <h2>Live Streams</h2>
+            <span className="outputs-count">{streamIds.length}</span>
+          </div>
+          <div className="outputs-grid">
+            {streamIds.map((id) => (
+              <div key={id} className="output-item live">
+                <div className="output-item-header">
+                  <span className="output-item-title">Stream {id}</span>
+                  <span className="output-item-id">camera.stream_start</span>
+                </div>
+                <div className="output-item-image-container">
+                  <img
+                    src={`/api/streams/${id}/frame?ts=${refreshToken}`}
+                    alt="Live stream"
+                    className="output-item-image"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.opacity = "0.5";
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {valueOutputs.length > 0 && (
         <>
           <div className="outputs-header">
@@ -127,4 +171,3 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
 };
 
 export default OutputsView;
-

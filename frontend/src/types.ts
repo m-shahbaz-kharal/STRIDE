@@ -113,6 +113,7 @@ export interface BlueprintNodeData {
   onDelete?: (nodeId: string) => void;
   onRunSelection?: (nodeId: string) => void;
   onClearCache?: (nodeId: string) => void;
+  onInterrupt?: (nodeId: string) => void;
   // Execution state
   executionStatus?: NodeExecutionStatus;
   executionProgress?: number;

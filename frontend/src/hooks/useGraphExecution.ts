@@ -110,10 +110,13 @@ export function useGraphExecution(): UseGraphExecutionReturn {
 
         case "node_completed":
         case "node_cached":
+        case "node_skipped":
           if (data.node_id) {
             setNodeStatuses((prev) => {
               const newMap = new Map(prev);
-              newMap.set(data.node_id!, "completed");
+              const newStatus: NodeExecutionStatus =
+                data.event_type === "node_skipped" ? "skipped" : "completed";
+              newMap.set(data.node_id!, newStatus);
               return newMap;
             });
             setTrace((prev) => [
@@ -161,6 +164,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "complete":
           setCurrentNodeId(null);
           setProgress(1);
+          setIsRunning(false);
           break;
 
         case "result":

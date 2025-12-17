@@ -368,6 +368,17 @@ body {
   color: #ffa657;
 }
 
+.icon-btn.danger {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.3);
+  color: var(--accent-red);
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: rgba(248, 81, 73, 0.5);
+}
+
 .icon-btn svg {
   width: 16px;
   height: 16px;
@@ -2455,6 +2466,11 @@ body {
   color: var(--text-primary);
 }
 
+.node-action-btn.danger:hover {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--accent-red);
+}
+
 .node-action-btn.run-btn:hover {
   background: rgba(63, 185, 80, 0.2);
   color: var(--accent-green);
@@ -3183,6 +3199,10 @@ body {
   color: var(--text-secondary);
   font-size: 14px;
   text-align: center;
+}
+
+.output-item.live .output-item-image {
+  object-fit: cover;
 }
 
 .outputs-values-grid {

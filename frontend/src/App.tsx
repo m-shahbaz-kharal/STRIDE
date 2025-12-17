@@ -642,6 +642,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     data.onRunSelection?.(id);
   };
 
+  const handleInterruptNode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    data.onInterrupt?.(id);
+  };
+
   const handleClearNodeCache = (e: React.MouseEvent) => {
     e.stopPropagation();
     data.onClearCache?.(id);
@@ -687,27 +692,47 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
             </svg>
           </button>
-          {data.last_outputs ? (
-            <button
-              className="node-action-btn clear-cache-btn nodrag"
-              onClick={handleClearNodeCache}
-              title="Clear cached output"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              className="node-action-btn run-btn nodrag"
-              onClick={handleRunNode}
-              title="Run from this node"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </button>
-          )}
+          {(() => {
+            const isActive = data.executionStatus === "running" || data.executionStatus === "queued";
+            const wasInterrupted = data.executionStatus === "skipped" || data.executionStatus === "error";
+            if (isActive) {
+              return (
+                <button
+                  className="node-action-btn danger nodrag"
+                  onClick={handleInterruptNode}
+                  title="Interrupt node"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
+                  </svg>
+                </button>
+              );
+            }
+            if (data.last_outputs && !wasInterrupted) {
+              return (
+                <button
+                  className="node-action-btn clear-cache-btn nodrag"
+                  onClick={handleClearNodeCache}
+                  title="Clear cached output"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+                  </svg>
+                </button>
+              );
+            }
+            return (
+              <button
+                className="node-action-btn run-btn nodrag"
+                onClick={handleRunNode}
+                title="Run from this node"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </button>
+            );
+          })()}
           <button
             className="node-delete-btn nodrag"
             onClick={(e) => {
@@ -881,6 +906,7 @@ const App = () => {
     nodeStatuses,
     currentNodeId,
     progress,
+    executionId,
     runGraph,
     runGraphSync,
   } = useGraphExecution();
@@ -1343,6 +1369,24 @@ const App = () => {
     }
   }, [handleClearCache]);
 
+  const handleInterruptAll = useCallback(async () => {
+    if (!executionId) return;
+    try {
+      await fetch(`/api/executions/${executionId}/cancel`, { method: "POST" });
+    } catch (e) {
+      console.error("Failed to interrupt execution:", e);
+    }
+  }, [executionId]);
+
+  const handleInterruptNode = useCallback(async (nodeId: string) => {
+    if (!executionId) return;
+    try {
+      await fetch(`/api/executions/${executionId}/cancel/${nodeId}`, { method: "POST" });
+    } catch (e) {
+      console.error("Failed to interrupt node:", e);
+    }
+  }, [executionId]);
+
   // Delete selected nodes and edges
   const handleDeleteSelected = useCallback(() => {
     if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
@@ -1395,6 +1439,7 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          onInterrupt: handleInterruptNode,
         },
       });
     });
@@ -1438,6 +1483,7 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          onInterrupt: handleInterruptNode,
         },
       });
     });
@@ -1563,6 +1609,7 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          onInterrupt: handleInterruptNode,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -1583,10 +1630,11 @@ const App = () => {
           onDelete: handleDeleteNode,
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
+          onInterrupt: handleInterruptNode,
         },
       }))
     );
-  }, [handleDeleteNode, handleRunFromNode, handleClearNodeCache, setNodes]);
+  }, [handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
 
   const graphStats = useMemo(
     () => ({
@@ -1754,6 +1802,7 @@ const App = () => {
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
+          onInterrupt: handleInterruptNode,
         },
       };
 
@@ -2025,6 +2074,16 @@ const App = () => {
             >
               <PlayIcon />
               {isRunning && <span className="btn-spinner" />}
+            </button>
+            <button
+              className="icon-btn danger"
+              onClick={handleInterruptAll}
+              disabled={!isRunning || !executionId}
+              title="Interrupt all running nodes"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
+              </svg>
             </button>
             <button
               className="icon-btn clear-cache-btn"
