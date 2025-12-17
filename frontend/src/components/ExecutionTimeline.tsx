@@ -69,6 +69,11 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
     });
   }, [trace, currentNodeId, nodeStatuses]);
 
+  const cacheRate = useMemo(() => {
+    if (!stats || stats.total_nodes === 0) return null;
+    return (stats.cached_nodes / stats.total_nodes) * 100;
+  }, [stats]);
+
   const levelStats = useMemo(() => {
     return levels.map((level, idx) => ({
       level: idx,
@@ -120,6 +125,14 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           <div className="stat-card">
             <div className="stat-value">{stats.max_parallelism}</div>
             <div className="stat-label">Max Parallel</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{stats.cached_nodes}</div>
+            <div className="stat-label">Cache Hits{cacheRate !== null ? ` (${cacheRate.toFixed(0)}%)` : ""}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{stats.error_nodes}</div>
+            <div className="stat-label">Errors</div>
           </div>
         </div>
       )}
@@ -177,26 +190,30 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
         )}
         
         {timelineData.map((entry, index) => (
-          <div
-            key={`${entry.node_id}-${index}`}
-            className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
-            onMouseEnter={() => handleNodeHover(entry.node_id)}
-            onMouseLeave={() => handleNodeHover(null)}
-          >
-            <div className="entry-header">
-              <div className="entry-info">
-                <span className="entry-index">{index + 1}</span>
-                <span className="entry-node-id">{entry.node_id}</span>
-                {entry.level !== undefined && (
-                  <span className="entry-level">L{entry.level}</span>
-                )}
+            <div
+              key={`${entry.node_id}-${index}`}
+              className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
+              onMouseEnter={() => handleNodeHover(entry.node_id)}
+              onMouseLeave={() => handleNodeHover(null)}
+            >
+              <div className="entry-header">
+                <div className="entry-info">
+                  <span className="entry-index">{index + 1}</span>
+                  <span className="entry-node-id">{entry.node_id}</span>
+                  {entry.level !== undefined && (
+                    <span className="entry-level">L{entry.level}</span>
+                  )}
+                </div>
+                <div className="entry-timing">
+                  <div className="entry-badges">
+                    {entry.from_cache && <span className="entry-badge cached">Cached</span>}
+                    {entry.status === "error" && <span className="entry-badge error">Error</span>}
+                  </div>
+                  {entry.duration_ms !== undefined && (
+                    <span className="entry-duration">{formatDuration(entry.duration_ms)}</span>
+                  )}
+                </div>
               </div>
-              <div className="entry-timing">
-                {entry.duration_ms !== undefined && (
-                  <span className="entry-duration">{formatDuration(entry.duration_ms)}</span>
-                )}
-              </div>
-            </div>
             
             <div className="entry-bar-container">
               <div

@@ -61,6 +61,18 @@ const LogPanel = ({
       <div className="log-header">
         <h3>Execution</h3>
         <div className="log-header-right">
+          {stats && (
+            <div className="log-kpis">
+              <span className="kpi-chip success">Cache {stats.cached_nodes}</span>
+              <span className="kpi-chip">Parallel {stats.max_parallelism}x</span>
+              {stats.skipped_nodes > 0 && (
+                <span className="kpi-chip warn">Skipped {stats.skipped_nodes}</span>
+              )}
+              {stats.error_nodes > 0 && (
+                <span className="kpi-chip error">Errors {stats.error_nodes}</span>
+              )}
+            </div>
+          )}
           {isRunning && (
             <div className="execution-progress">
               <div className="progress-bar">

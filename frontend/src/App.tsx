@@ -23,6 +23,7 @@ import "reactflow/dist/style.css";
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
+import OutputsView from "./components/OutputsView";
 import SmartConnectModal from "./components/SmartConnectModal";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
@@ -1921,17 +1922,18 @@ const App = () => {
   return (
     <ReactFlowProvider>
       <div className="app-shell">
-        <div
-          className="reactflow-fullpage"
-          ref={reactFlowWrapper}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        >
-          <ReactFlow
+        {headerTab === "graph-editor" ? (
+          <div
+            className="reactflow-fullpage"
+            ref={reactFlowWrapper}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
+            <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -1980,6 +1982,11 @@ const App = () => {
             />
           </ReactFlow>
         </div>
+        ) : (
+          <div className="outputs-fullpage">
+            <OutputsView nodes={nodes} outputs={outputs} />
+          </div>
+        )}
 
         <header className="overlay-header">
           <div className="header-left">
