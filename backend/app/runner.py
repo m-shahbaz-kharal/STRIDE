@@ -604,6 +604,33 @@ class GraphExecutor:
 
         tasks: Dict[asyncio.Task[NodeExecutionResult], Tuple[str, Dict[str, Any]]] = {}
 
+        def _propagate_failure(failed_id: str, reason: str) -> None:
+            """Mark all downstream dependents as failed so they don't stay queued forever."""
+            nonlocal ready, completed_nodes
+            stack = list(self._dependents.get(failed_id, []))
+            while stack:
+                dep = stack.pop()
+                if dep not in execution_set:
+                    continue
+                if remaining_inputs.get(dep, 0) < 0:
+                    continue  # already marked failed
+                # Remove from ready queue if present
+                if dep in ready:
+                    ready = deque([n for n in ready if n != dep])
+                remaining_inputs[dep] = -1
+                result = NodeExecutionResult(
+                    node_id=dep,
+                    node_type=self.nodes[dep].type,
+                    status=NodeStatus.ERROR,
+                    logs=[reason],
+                    duration_ms=0.0,
+                    level=self._node_levels.get(dep, 0),
+                    from_cache=False,
+                )
+                self._finalize_node_result(dep, {}, result, cached=False)
+                completed_nodes += 1
+                stack.extend(self._dependents.get(dep, []))
+
         try:
             while (ready or tasks) and not self._cancel_all:
                 # Launch tasks while capacity remains
@@ -685,6 +712,9 @@ class GraphExecutor:
                             pending.cancel()
                         tasks.clear()
                         break
+
+                    if result.status != NodeStatus.COMPLETED:
+                        _propagate_failure(node_id, f"Dependency '{node_id}' failed or was interrupted")
 
                     # Enqueue dependents when all their inputs are ready
                     for dep in self._dependents.get(node_id, []):
@@ -776,7 +806,48 @@ class GraphExecutor:
         }
         ready: deque[str] = deque([nid for nid, deg in remaining_inputs.items() if deg == 0])
         tasks: Dict[asyncio.Task[NodeExecutionResult], Tuple[str, Dict[str, Any]]] = {}
-        
+
+        def _propagate_failure(failed_id: str, reason: str):
+            """Mark downstream nodes as errors and emit events so UI doesn't show them stuck as queued."""
+            nonlocal ready, completed_nodes
+            stack = list(self._dependents.get(failed_id, []))
+            while stack:
+                dep = stack.pop()
+                if dep not in execution_set:
+                    continue
+                if remaining_inputs.get(dep, 0) < 0:
+                    continue
+                if dep in ready:
+                    ready = deque([n for n in ready if n != dep])
+                remaining_inputs[dep] = -1
+                result = NodeExecutionResult(
+                    node_id=dep,
+                    node_type=self.nodes[dep].type,
+                    status=NodeStatus.ERROR,
+                    logs=[reason],
+                    duration_ms=0.0,
+                    level=self._node_levels.get(dep, 0),
+                    from_cache=False,
+                )
+                self._finalize_node_result(dep, {}, result, cached=False)
+                completed_nodes += 1
+                yield ExecutionEvent(
+                    event_type="node_error",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=dep,
+                    node_type=result.node_type,
+                    status=NodeStatus.ERROR,
+                    error=reason,
+                    duration_ms=0.0,
+                    level=result.level,
+                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                    total_nodes=total_nodes,
+                    completed_nodes=completed_nodes,
+                    from_cache=False,
+                )
+                stack.extend(self._dependents.get(dep, []))
+
         start_time = time.perf_counter()
 
         try:
@@ -958,6 +1029,10 @@ class GraphExecutor:
                             completed_nodes=completed_nodes,
                             from_cache=result.from_cache,
                         )
+
+                    if result.status != NodeStatus.COMPLETED:
+                        for event in _propagate_failure(result.node_id, f"Dependency '{result.node_id}' failed or was interrupted"):
+                            yield event
 
                     # Enqueue dependents
                     for dep in self._dependents.get(node_id, []):
