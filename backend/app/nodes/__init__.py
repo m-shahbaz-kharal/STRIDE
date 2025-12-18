@@ -28,14 +28,20 @@ def list_node_types() -> List[Dict[str, Any]]:
     metadata: List[Dict[str, Any]] = []
     for node_cls in NODE_REGISTRY.values():
         schema = getattr(node_cls, "params_schema", {}) or {}
+        input_ports = list(getattr(node_cls, "input_ports", []))
+        output_ports = list(getattr(node_cls, "output_ports", []))
+        input_types = getattr(node_cls, "input_port_types", {}) or {}
+        output_types = getattr(node_cls, "output_port_types", {}) or {}
         metadata.append(
             {
                 "node_type": node_cls.node_type,
                 "display_name": getattr(node_cls, "display_name", node_cls.node_type),
                 "description": getattr(node_cls, "description", ""),
                 "icon": getattr(node_cls, "icon", ""),
-                "input_ports": list(getattr(node_cls, "input_ports", [])),
-                "output_ports": list(getattr(node_cls, "output_ports", [])),
+                "input_ports": input_ports,
+                "output_ports": output_ports,
+                "input_port_types": {port: input_types.get(port, "any") for port in input_ports},
+                "output_port_types": {port: output_types.get(port, "any") for port in output_ports},
                 "params_schema": schema,
                 "params_defaults": {
                     name: field.get("default") for name, field in schema.items() if "default" in field
@@ -53,4 +59,3 @@ __all__ = [
     "NODE_REGISTRY",
     "list_node_types",
 ]
-

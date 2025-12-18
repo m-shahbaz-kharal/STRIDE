@@ -26,6 +26,9 @@ class NodeBase(abc.ABC):
     params_schema: Dict[str, Dict[str, Any]] = {}
     input_ports: List[str] = []
     output_ports: List[str] = []
+    # Optional port type metadata, used by the UI for connection validation.
+    input_port_types: Dict[str, str] = {}
+    output_port_types: Dict[str, str] = {}
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self.id: str = config["id"]
@@ -40,6 +43,8 @@ class NodeBase(abc.ABC):
             "type": self.type,
             "input_ports": self.input_ports,
             "output_ports": self.output_ports,
+            "input_port_types": self.input_port_types,
+            "output_port_types": self.output_port_types,
             "params": self.params,
         }
 

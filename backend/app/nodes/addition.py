@@ -15,6 +15,8 @@ class AdditionNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["a", "b"]
     output_ports = ["sum"]
+    input_port_types = {"a": "number", "b": "number"}
+    output_port_types = {"sum": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext

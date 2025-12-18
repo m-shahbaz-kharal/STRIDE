@@ -6,6 +6,8 @@ import ReactFlow, {
   EdgeProps,
   getBezierPath,
   Handle,
+  Connection,
+  ConnectionLineComponentProps,
   MiniMap,
   Node,
   NodeProps,
@@ -439,6 +441,42 @@ const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
   }
 };
 
+const PORT_TYPE_COLORS: Record<string, string> = {
+  number: "#4a9eff",
+  image: "#e85aad",
+  stream: "#0fb5a9",
+  url: "#7c3aed",
+  boolean: "#f59e0b",
+  string: "#10b981",
+  any: "#94a3b8",
+};
+
+const PORT_ROW_HEIGHT = 34;
+const HEADER_HEIGHT = 70;
+const MIN_NODE_WIDTH = 220;
+
+const getPortTypeColor = (type?: string): string => {
+  if (!type) return PORT_TYPE_COLORS.any;
+  const key = type.toLowerCase();
+  return PORT_TYPE_COLORS[key] || PORT_TYPE_COLORS.any;
+};
+
+const formatPortTypeLabel = (type?: string): string => {
+  if (!type) return "Any";
+  const normalized = type.toLowerCase();
+  if (normalized === "any") return "Any";
+  const label = normalized.replace(/_/g, " ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
+const computeNodeDimensions = (maxPorts: number) => {
+  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT;
+  return {
+    width: MIN_NODE_WIDTH,
+    height,
+  };
+};
+
 // Custom Edge with delete button, hover, selection, and preview states
 const CustomEdge = ({
   id,
@@ -534,6 +572,51 @@ const CustomEdge = ({
   );
 };
 
+const TypeAwareConnectionLine = ({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  fromPosition,
+  toPosition,
+  connectionLineStyle,
+  connectionStatus,
+}: ConnectionLineComponentProps) => {
+  const [path] = getBezierPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: fromPosition,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: toPosition,
+  });
+
+  const isInvalid = connectionStatus === "invalid";
+  const stroke = isInvalid
+    ? "var(--status-error)"
+    : ((connectionLineStyle as React.CSSProperties | undefined)?.stroke as string) || "#4a9eff";
+  const glow = isInvalid ? "rgba(248, 81, 73, 0.85)" : "rgba(74, 158, 255, 0.35)";
+  const strokeWidth = isInvalid ? 3.2 : 2.5;
+
+  return (
+    <g className={`connection-line ${isInvalid ? "invalid" : "valid"}`}>
+      <path d={path} fill="none" stroke="transparent" strokeWidth={18} />
+      <path
+        d={path}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        style={{
+          ...connectionLineStyle,
+          filter: `drop-shadow(0 0 8px ${glow})`,
+          transition: "stroke 0.08s ease, stroke-width 0.08s ease",
+        }}
+        strokeDasharray={isInvalid ? "6 4" : undefined}
+      />
+    </g>
+  );
+};
+
 const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const [hoveredCorner, setHoveredCorner] = useState<Corner>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -564,9 +647,18 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
   const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
   // Calculate min dimensions based on content
-  // Header ~36px, each port row ~24px, padding ~16px
-  const MIN_WIDTH = 200;
-  const MIN_HEIGHT = 64 + maxPorts * 26;
+  const MIN_WIDTH = MIN_NODE_WIDTH;
+  const MIN_HEIGHT = computeNodeDimensions(maxPorts).height;
+  const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
+  const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
+
+  const resolvePortType = useCallback(
+    (port: string, direction: "input" | "output") => {
+      const map = direction === "input" ? inputPortTypes : outputPortTypes;
+      return map?.[port] || "any";
+    },
+    [inputPortTypes, outputPortTypes]
+  );
 
   useEffect(() => {
     if (!isResizing) return;
@@ -750,31 +842,59 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
       <div className="node-ports">
         <div className="node-port-column">
-          {data.input_ports.map((port, index) => (
-            <div key={`in-${port}-${index}`} className="node-port node-port-input">
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={port}
-                className="node-handle"
-              />
-              <span>{port}</span>
-            </div>
-          ))}
+          {data.input_ports.map((port, index) => {
+            const portType = resolvePortType(port, "input");
+            const color = getPortTypeColor(portType);
+            const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
+            return (
+              <div key={`in-${port}-${index}`} className="node-port node-port-input">
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={port}
+                  className="node-handle"
+                  style={handleStyle}
+                />
+                <div className="node-port-label-group">
+                  <span className="node-port-name">{port}</span>
+                  <span
+                    className="port-type-text"
+                    style={{ color }}
+                    title={`Accepts ${formatPortTypeLabel(portType)}`}
+                  >
+                    {formatPortTypeLabel(portType)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
         <div className="node-port-column">
           {data.output_ports.map((port, index) => {
             const outputValue = data.last_outputs?.[port];
             const hasValue = outputValue !== undefined;
+            const portType = resolvePortType(port, "output");
+            const color = getPortTypeColor(portType);
+            const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
             return (
               <div key={`out-${port}-${index}`} className="node-port node-port-output">
-                <span className="node-port-label">{port}</span>
-                {hasValue && <OutputValue port={port} value={outputValue} />}
+                <div className="node-port-label-group">
+                  <span className="node-port-label">{port}</span>
+                  <span
+                    className="port-type-text"
+                    style={{ color }}
+                    title={`Emits ${formatPortTypeLabel(portType)}`}
+                  >
+                    {formatPortTypeLabel(portType)}
+                  </span>
+                  {hasValue && <OutputValue port={port} value={outputValue} />}
+                </div>
                 <Handle
                   type="source"
                   position={Position.Right}
                   id={port}
                   className="node-handle"
+                  style={handleStyle}
                 />
               </div>
             );
@@ -849,6 +969,10 @@ const App = () => {
     flowPosition: { x: 0, y: 0 },
     source: null,
   });
+  const [connectionMessage, setConnectionMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
+  const connectionMessageTimeout = useRef<number | null>(null);
+  const [connectionLineColor, setConnectionLineColor] = useState<string | undefined>(undefined);
+  const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
 
   // Set global popup functions
   useEffect(() => {
@@ -857,6 +981,15 @@ const App = () => {
     return () => {
       globalShowValuePopup = null;
       globalShowLogsPopup = null;
+    };
+  }, []);
+
+  // Ensure connection toast timers are cleaned up
+  useEffect(() => {
+    return () => {
+      if (connectionMessageTimeout.current) {
+        window.clearTimeout(connectionMessageTimeout.current);
+      }
     };
   }, []);
 
@@ -885,6 +1018,7 @@ const App = () => {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
   // Undo/Redo hook
   const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo({
@@ -1093,10 +1227,10 @@ const App = () => {
       if (!sourceNode || !targetNode) return;
 
       // Calculate edge endpoints (approximate - right side of source, left side of target)
-      const sourceX = sourceNode.position.x + (sourceNode.width || 160);
-      const sourceY = sourceNode.position.y + (sourceNode.height || 80) / 2;
+      const sourceX = sourceNode.position.x + (sourceNode.width || MIN_NODE_WIDTH);
+      const sourceY = sourceNode.position.y + (sourceNode.height || computeNodeDimensions(Math.max(sourceNode.data.input_ports.length, sourceNode.data.output_ports.length)).height) / 2;
       const targetX = targetNode.position.x;
-      const targetY = targetNode.position.y + (targetNode.height || 80) / 2;
+      const targetY = targetNode.position.y + (targetNode.height || computeNodeDimensions(Math.max(targetNode.data.input_ports.length, targetNode.data.output_ports.length)).height) / 2;
 
       // Check if the bezier curve intersects the selection box
       if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
@@ -1610,8 +1744,7 @@ const App = () => {
 
       // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 200;
-      const initialHeight = 64 + maxPorts * 26;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       const payload: Node<BlueprintNodeData> = {
         id,
@@ -1623,6 +1756,8 @@ const App = () => {
           description: nodeType.description,
           input_ports: nodeType.input_ports,
           output_ports: nodeType.output_ports,
+          input_port_types: nodeType.input_port_types,
+          output_port_types: nodeType.output_port_types,
           params,
           breakpoint: false,
           metadata: nodeType,
@@ -1665,9 +1800,79 @@ const App = () => {
     [edges.length, nodes, selectedNodeIds.length]
   );
 
+  const showConnectionMessage = useCallback((text: string, tone: "error" | "info" = "error") => {
+    if (connectionMessageTimeout.current) {
+      window.clearTimeout(connectionMessageTimeout.current);
+    }
+    setConnectionMessage({ text, tone });
+    connectionMessageTimeout.current = window.setTimeout(() => setConnectionMessage(null), 1800);
+  }, []);
+
+  const arePortTypesCompatible = useCallback((sourceType: string, targetType: string) => {
+    const src = (sourceType || "any").toLowerCase();
+    const tgt = (targetType || "any").toLowerCase();
+    return src === "any" || tgt === "any" || src === tgt;
+  }, []);
+
+  const getPortTypeForHandle = useCallback(
+    (nodeId: string, handleId: string, role: "source" | "target") => {
+      const node = nodeMap.get(nodeId);
+      if (!node) return "any";
+      const map =
+        role === "source"
+          ? node.data.output_port_types || node.data.metadata?.output_port_types
+          : node.data.input_port_types || node.data.metadata?.input_port_types;
+      return map?.[handleId] || "any";
+    },
+    [nodeMap]
+  );
+
+  const validateConnection = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.sourceHandle) {
+        setConnectionLineIsInvalid(false);
+        return { valid: false, reason: "Select both connectors" };
+      }
+
+      const sourceType = getPortTypeForHandle(connection.source, connection.sourceHandle, "source");
+
+      if (!connection.target || !connection.targetHandle) {
+        setConnectionLineIsInvalid(false);
+        return { valid: true, sourceType };
+      }
+
+      if (connection.source === connection.target) {
+        setConnectionLineIsInvalid(true);
+        return { valid: false, reason: "Cannot connect a node to itself" };
+      }
+
+      const targetType = getPortTypeForHandle(connection.target, connection.targetHandle, "target");
+      const compatible = arePortTypesCompatible(sourceType, targetType);
+
+      setConnectionLineIsInvalid(!compatible);
+
+      return {
+        valid: compatible,
+        reason: compatible ? undefined : `Type mismatch: ${formatPortTypeLabel(sourceType)} -> ${formatPortTypeLabel(targetType)}`,
+        sourceType,
+        targetType,
+      };
+    },
+    [arePortTypesCompatible, getPortTypeForHandle]
+  );
+
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
       if (!connection.sourceHandle || !connection.targetHandle) return;
+
+      const validation = validateConnection(connection as Connection);
+      if (!validation.valid) {
+        showConnectionMessage(validation.reason || "These connectors cannot be linked");
+        return;
+      }
+
+      const sourceType = getPortTypeForHandle(connection.source!, connection.sourceHandle, "source");
+      const edgeColor = getPortTypeColor(sourceType);
 
       // Check for duplicate edges (same source, target, sourceHandle, targetHandle)
       const isDuplicate = edges.some(
@@ -1696,14 +1901,37 @@ const App = () => {
             ...connection,
             type: "default",
             animated: false,
-            style: { stroke: "#4a9eff", strokeWidth: 2 },
+            style: { stroke: edgeColor, strokeWidth: 2 },
           },
           filtered
         );
       });
+      setConnectionLineIsInvalid(false);
     },
-    [edges, setEdges, takeSnapshot]
+    [edges, getPortTypeForHandle, setEdges, showConnectionMessage, takeSnapshot, validateConnection]
   );
+
+  const isValidConnection = useCallback((connection: Connection) => validateConnection(connection).valid, [validateConnection]);
+
+  // Ensure all edges carry a color that matches their source port type
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (!edge.sourceHandle) return edge;
+        const desiredStroke = getPortTypeColor(getPortTypeForHandle(edge.source, edge.sourceHandle, "source"));
+        const currentStroke = (edge.style as React.CSSProperties | undefined)?.stroke as string | undefined;
+        if (currentStroke === desiredStroke) return edge;
+        return {
+          ...edge,
+          style: {
+            ...(edge.style as React.CSSProperties | undefined),
+            stroke: desiredStroke,
+            strokeWidth: (edge.style as React.CSSProperties | undefined)?.strokeWidth || 2,
+          },
+        };
+      })
+    );
+  }, [getPortTypeForHandle, setEdges]);
 
   // Helper to calculate handle position for smart connect line
   const getHandlePosition = useCallback((nodeId: string, handleId: string, type: "source" | "target") => {
@@ -1717,13 +1945,10 @@ const App = () => {
     if (index === -1) return null;
 
     // Matches BlueprintNode layout constants
-    // Header ~50px (8px pad + ~27px content + 6px pad + 1px border + 8px margin)
-    // Each port row: 20px height + 6px gap = 26px stride
-    // Handle is centered in row (+10px)
-    const yOffset = 50 + index * 26 + 10;
+    const yOffset = HEADER_HEIGHT + index * PORT_ROW_HEIGHT + PORT_ROW_HEIGHT / 2;
 
     // Use measured width if available, otherwise fallback
-    const nodeWidth = node.width ?? 200;
+    const nodeWidth = node.width ?? MIN_NODE_WIDTH;
 
     return {
       x: node.position.x + (isInput ? 0 : nodeWidth),
@@ -1733,7 +1958,17 @@ const App = () => {
 
   const onConnectStart = useCallback((_: unknown, { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
     setConnectStartParams({ nodeId, handleId, handleType });
-  }, []);
+    if (nodeId && handleId && handleType) {
+      const type = handleType === "source"
+        ? getPortTypeForHandle(nodeId, handleId, "source")
+        : getPortTypeForHandle(nodeId, handleId, "target");
+      setConnectionLineColor(getPortTypeColor(type));
+      setConnectionLineIsInvalid(false);
+    } else {
+      setConnectionLineColor(undefined);
+      setConnectionLineIsInvalid(false);
+    }
+  }, [getPortTypeForHandle]);
 
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
@@ -1761,6 +1996,8 @@ const App = () => {
       }
 
       setConnectStartParams(null);
+      setConnectionLineColor(undefined);
+      setConnectionLineIsInvalid(false);
     },
     [connectStartParams, reactFlowInstance]
   );
@@ -1782,8 +2019,7 @@ const App = () => {
       }
 
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 200;
-      const initialHeight = 64 + maxPorts * 26;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       // Calculate position to align the connecting handle with the drop location
       let xOffset = 0;
@@ -1791,7 +2027,7 @@ const App = () => {
 
       // Header ~50px, Port stride ~26px, Handle center +10px
       // We connect to the first port (index 0) by default
-      const portYOffset = 50 + 0 * 26 + 10;
+      const portYOffset = HEADER_HEIGHT + PORT_ROW_HEIGHT / 2;
 
       if (source.type === "source") {
         // Dragging from Source (Output) -> Connect to New Node's Input (Left side)
@@ -1813,6 +2049,8 @@ const App = () => {
           description: nodeType.description,
           input_ports: nodeType.input_ports,
           output_ports: nodeType.output_ports,
+          input_port_types: nodeType.input_port_types,
+          output_port_types: nodeType.output_port_types,
           params,
           breakpoint: false,
           metadata: nodeType,
@@ -1846,25 +2084,52 @@ const App = () => {
       }
 
       if (sourceHandle && targetHandle) {
-        setEdges((eds) =>
-          addEdge(
-            {
-              source: sourceId,
-              sourceHandle: sourceHandle,
-              target: targetId,
-              targetHandle: targetHandle,
-              type: "default",
-              animated: false,
-              style: { stroke: "#4a9eff", strokeWidth: 2 },
-            },
-            eds
-          )
-        );
+        const sourceType =
+          source.type === "source"
+            ? getPortTypeForHandle(sourceId, sourceHandle, "source")
+            : nodeType.output_port_types?.[sourceHandle] || "any";
+        const targetType =
+          source.type === "source"
+            ? nodeType.input_port_types?.[targetHandle] || "any"
+            : getPortTypeForHandle(targetId, targetHandle, "target");
+
+        if (!arePortTypesCompatible(sourceType, targetType)) {
+          showConnectionMessage(
+            `Incompatible: ${formatPortTypeLabel(sourceType)} -> ${formatPortTypeLabel(targetType)}`
+          );
+        } else {
+          const edgeColor = getPortTypeColor(sourceType);
+          setEdges((eds) =>
+            addEdge(
+              {
+                source: sourceId,
+                sourceHandle: sourceHandle,
+                target: targetId,
+                targetHandle: targetHandle,
+                type: "default",
+                animated: false,
+                style: { stroke: edgeColor, strokeWidth: 2 },
+              },
+              eds
+            )
+          );
+        }
       }
 
       setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
     },
-    [smartConnectMenu, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes, setEdges]
+    [
+      smartConnectMenu,
+      handleDeleteNode,
+      handleRunFromNode,
+      handleClearNodeCache,
+      handleInterruptNode,
+      setNodes,
+      setEdges,
+      arePortTypesCompatible,
+      getPortTypeForHandle,
+      showConnectionMessage,
+    ]
   );
 
   const selectedNodes = useMemo(
@@ -1958,8 +2223,7 @@ const App = () => {
 
       // Calculate initial size based on ports
       const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-      const initialWidth = 200;
-      const initialHeight = 64 + maxPorts * 26;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       const newNode: Node<BlueprintNodeData> = {
         id,
@@ -1971,6 +2235,8 @@ const App = () => {
           description: nodeType.description,
           input_ports: nodeType.input_ports,
           output_ports: nodeType.output_ports,
+          input_port_types: nodeType.input_port_types,
+          output_port_types: nodeType.output_port_types,
           params,
           breakpoint: false,
           metadata: nodeType,
@@ -2018,7 +2284,12 @@ const App = () => {
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             fitView
-            connectionLineStyle={{ stroke: "#4a9eff" }}
+            isValidConnection={isValidConnection}
+            connectionLineStyle={{
+              stroke: connectionLineColor || "#4a9eff",
+              strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+            }}
+            connectionLineComponent={TypeAwareConnectionLine}
             attributionPosition="bottom-left"
             selectionMode={SelectionMode.Partial}
             selectionOnDrag
@@ -2051,6 +2322,12 @@ const App = () => {
               }}
             />
           </ReactFlow>
+          {connectionMessage && (
+            <div className={`connection-toast ${connectionMessage.tone}`}>
+              <span className="connection-toast-dot" />
+              <span className="connection-toast-text">{connectionMessage.text}</span>
+            </div>
+          )}
         </div>
         ) : (
           <div className="outputs-fullpage">

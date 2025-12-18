@@ -244,6 +244,7 @@ class GetStreamURLNode(NodeBase):
     icon = "camera"
     input_ports = []
     output_ports = ["url"]
+    output_port_types = {"url": "url"}
     params_schema = {
         "camera_id": {
             "type": "number",
@@ -273,6 +274,8 @@ class ReadFrameNode(NodeBase):
     icon = "image"
     input_ports = ["url"]
     output_ports = ["image", "width", "height"]
+    input_port_types = {"url": "url"}
+    output_port_types = {"image": "image", "width": "number", "height": "number"}
     params_schema = {
         "timeout": {
             "type": "number",
@@ -381,6 +384,13 @@ class StartCameraStreamNode(NodeBase):
     icon = "camera"
     input_ports: list[str] = []
     output_ports = ["stream_id", "url", "width", "height", "fps"]
+    output_port_types = {
+        "stream_id": "stream",
+        "url": "url",
+        "width": "number",
+        "height": "number",
+        "fps": "number",
+    }
     params_schema = {
         "camera_id": {
             "type": "number",
@@ -428,6 +438,13 @@ class NextCameraFrameNode(NodeBase):
     icon = "image"
     input_ports = ["stream_id"]
     output_ports = ["image", "width", "height", "timestamp"]
+    input_port_types = {"stream_id": "stream"}
+    output_port_types = {
+        "image": "image",
+        "width": "number",
+        "height": "number",
+        "timestamp": "number",
+    }
     params_schema = {
         "timeout": {
             "type": "number",
@@ -472,6 +489,8 @@ class StopCameraStreamNode(NodeBase):
     icon = "stop"
     input_ports = ["stream_id"]
     output_ports = ["stopped"]
+    input_port_types = {"stream_id": "stream"}
+    output_port_types = {"stopped": "boolean"}
     params_schema: Dict[str, Any] = {}
 
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
@@ -493,6 +512,8 @@ class DisplayImageNode(NodeBase):
     icon = "monitor"
     input_ports = ["image"]
     output_ports = ["display"]
+    input_port_types = {"image": "image"}
+    output_port_types = {"display": "image"}
     params_schema = {}
 
     def forward(

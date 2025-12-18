@@ -15,6 +15,8 @@ export interface NodeTypeDefinition {
   icon?: string;
   input_ports: string[];
   output_ports: string[];
+  input_port_types?: Record<string, string>;
+  output_port_types?: Record<string, string>;
   params_schema: Record<string, ParamSchemaField>;
   params_defaults?: Record<string, string | number | boolean>;
 }
@@ -104,6 +106,8 @@ export interface BlueprintNodeData {
   description: string;
   input_ports: string[];
   output_ports: string[];
+  input_port_types?: Record<string, string>;
+  output_port_types?: Record<string, string>;
   params: Record<string, unknown>;
   breakpoint: boolean;
   metadata?: NodeTypeDefinition;

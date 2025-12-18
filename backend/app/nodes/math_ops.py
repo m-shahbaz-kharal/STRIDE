@@ -16,6 +16,8 @@ class MultiplyNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["a", "b"]
     output_ports = ["product"]
+    input_port_types = {"a": "number", "b": "number"}
+    output_port_types = {"product": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -36,6 +38,8 @@ class SubtractNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["a", "b"]
     output_ports = ["difference"]
+    input_port_types = {"a": "number", "b": "number"}
+    output_port_types = {"difference": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -56,6 +60,8 @@ class DivideNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["a", "b"]
     output_ports = ["quotient"]
+    input_port_types = {"a": "number", "b": "number"}
+    output_port_types = {"quotient": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -79,6 +85,8 @@ class PowerNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["base", "exponent"]
     output_ports = ["result"]
+    input_port_types = {"base": "number", "exponent": "number"}
+    output_port_types = {"result": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -99,6 +107,8 @@ class AbsoluteNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["value"]
     output_ports = ["result"]
+    input_port_types = {"value": "number"}
+    output_port_types = {"result": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -126,6 +136,8 @@ class DelayNode(NodeBase):
     }
     input_ports = ["value"]
     output_ports = ["value"]
+    input_port_types = {"value": "any"}
+    output_port_types = {"value": "any"}
 
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
@@ -150,6 +162,8 @@ class SplitterNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["input"]
     output_ports = ["out_a", "out_b", "out_c"]
+    input_port_types = {"input": "any"}
+    output_port_types = {"out_a": "any", "out_b": "any", "out_c": "any"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -169,6 +183,8 @@ class MergerNode(NodeBase):
     params_schema: Dict[str, Any] = {}
     input_ports = ["in_a", "in_b", "in_c"]
     output_ports = ["sum"]
+    input_port_types = {"in_a": "number", "in_b": "number", "in_c": "number"}
+    output_port_types = {"sum": "number"}
 
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
@@ -179,4 +195,3 @@ class MergerNode(NodeBase):
         result = a + b + c
         ctx.log(f"{self.id} merged {a} + {b} + {c} -> {result}")
         return {"sum": result}
-

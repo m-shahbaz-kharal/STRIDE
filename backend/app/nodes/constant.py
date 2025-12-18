@@ -14,6 +14,7 @@ class BaseNumberNode(NodeBase):
     icon = "circle"
     input_ports = []
     output_ports = ["value"]
+    output_port_types = {"value": "number"}
     params_schema = {
         "value": {
             "type": "number",
@@ -40,5 +41,4 @@ class ConstantNumberNode(BaseNumberNode):
     display_name = "Number"
     description = "Always produces the configured scalar."
     icon = "math"
-
 
