@@ -2610,11 +2610,8 @@ body {
 
 .port-highlighted {
   background: transparent;
-  padding: 0;
-  box-shadow: none;
   color: inherit;
   font-weight: inherit;
-  border-bottom: 1px solid var(--border-subtle);
 }
 
 .port-type-text {
