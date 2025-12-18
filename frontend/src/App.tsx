@@ -350,9 +350,10 @@ const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
     <span
       className={`node-output-value ${isLong ? "expandable" : ""}`}
       onClick={handleClick}
-      title={isLong ? "Click to view full value" : formatted}
+      title={formatted}
     >
-      = {displayValue}
+      <span style={{ fontSize: 8, opacity: 0.75 }}>◎</span>
+      <span className="node-output-value-text">{displayValue}</span>
     </span>
   );
 };
@@ -595,8 +596,8 @@ const TypeAwareConnectionLine = ({
   const stroke = isInvalid
     ? "var(--status-error)"
     : ((connectionLineStyle as React.CSSProperties | undefined)?.stroke as string) || "#4a9eff";
-  const glow = isInvalid ? "rgba(248, 81, 73, 0.85)" : "rgba(74, 158, 255, 0.35)";
-  const strokeWidth = isInvalid ? 3.2 : 2.5;
+  const glow = isInvalid ? "rgba(248, 81, 73, 1)" : "rgba(74, 158, 255, 0.35)";
+  const strokeWidth = isInvalid ? 3.4 : 2.5;
 
   return (
     <g className={`connection-line ${isInvalid ? "invalid" : "valid"}`}>
@@ -608,10 +609,11 @@ const TypeAwareConnectionLine = ({
         strokeWidth={strokeWidth}
         style={{
           ...connectionLineStyle,
-          filter: `drop-shadow(0 0 8px ${glow})`,
+          filter: `drop-shadow(0 0 10px ${glow})`,
+          animation: isInvalid ? "invalid-glow 0.6s ease-in-out infinite alternate" : undefined,
           transition: "stroke 0.08s ease, stroke-width 0.08s ease",
         }}
-        strokeDasharray={isInvalid ? "6 4" : undefined}
+        strokeDasharray={isInvalid ? undefined : undefined}
       />
     </g>
   );

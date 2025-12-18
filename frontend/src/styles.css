@@ -124,6 +124,22 @@ body {
   font-weight: 600;
 }
 
+.connection-line.invalid path {
+  stroke: var(--status-error) !important;
+  stroke-width: 3.4px !important;
+  filter: drop-shadow(0 0 12px rgba(248, 81, 73, 1));
+  animation: invalid-glow 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes invalid-glow {
+  from {
+    filter: drop-shadow(0 0 6px rgba(248, 81, 73, 0.7));
+  }
+  to {
+    filter: drop-shadow(0 0 14px rgba(248, 81, 73, 1));
+  }
+}
+
 .react-flow__controls {
   background: var(--bg-elevated) !important;
   border: 1px solid var(--border-default) !important;
@@ -2603,40 +2619,42 @@ body {
 }
 
 .node-output-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 9px;
   color: var(--accent-green);
   font-family: var(--font-mono);
-  margin-left: 3px;
-  padding: 1px 4px;
-  background: rgba(63, 185, 80, 0.1);
-  border-radius: 2px;
-  max-width: 60px;
+  margin-left: 4px;
+  padding: 2px 6px;
+  background: rgba(63, 185, 80, 0.12);
+  border-radius: 6px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
   transition: all 0.15s ease;
+  border: 1px solid rgba(63, 185, 80, 0.28);
 }
 
 .node-output-value:hover {
   background: rgba(63, 185, 80, 0.25);
+  border-color: rgba(63, 185, 80, 0.45);
+  box-shadow: 0 4px 12px rgba(63, 185, 80, 0.28);
 }
 
-.node-output-value.expandable {
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.node-output-value.expandable:hover {
-  background: rgba(63, 185, 80, 0.2);
-  border-color: rgba(63, 185, 80, 0.3);
+.node-output-value-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Bigger Node Handles with larger interaction area */
 .node-handle {
-  width: 10px !important;
-  height: 10px !important;
-  border-radius: 50% !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 100% !important;
   background: var(--handle-color, var(--accent-blue)) !important;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
   position: absolute !important;
@@ -2667,7 +2685,7 @@ body {
 
 .node-handle:hover {
   background: var(--handle-color, var(--accent-blue)) !important;
-  transform: translateY(-50%) scale(1.25) !important;
+  transform: translateY(-50%) scale(1.2) !important;
   box-shadow: 0 0 10px var(--handle-color, var(--accent-green)) !important;
 }
 
