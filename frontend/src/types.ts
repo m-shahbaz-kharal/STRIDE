@@ -118,6 +118,8 @@ export interface BlueprintNodeData {
   onRunSelection?: (nodeId: string) => void;
   onClearCache?: (nodeId: string) => void;
   onInterrupt?: (nodeId: string) => void;
+  onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  highlightedPort?: { port: string; direction: "input" | "output" } | null;
   // Execution state
   executionStatus?: NodeExecutionStatus;
   executionProgress?: number;

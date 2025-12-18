@@ -7,6 +7,8 @@ type InspectorProps = {
   onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
+   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
+   onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
 };
 
 const parseParamValue = (
@@ -32,6 +34,8 @@ const NodeCard = ({
   isExpanded,
   onToggle,
   isSingleNode,
+  hoveredPort,
+  onOutputHover,
 }: {
   node: Node<BlueprintNodeData>;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
@@ -40,6 +44,8 @@ const NodeCard = ({
   isExpanded: boolean;
   onToggle: () => void;
   isSingleNode: boolean;
+  hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
+  onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
 }) => {
   const schema = node.data.metadata?.params_schema ?? {};
   const schemaEntries = Object.entries(schema);
@@ -148,14 +154,25 @@ const NodeCard = ({
             <div className="inspector-section">
               <h4>Last Outputs</h4>
               <div className="inspector-outputs">
-                {Object.entries(node.data.last_outputs).map(([key, value]) => (
-                  <div key={key} className="inspector-output-item">
-                    <span className="inspector-output-key">{key}</span>
-                    <span className="inspector-output-value" title={JSON.stringify(value)}>
-                      {JSON.stringify(value)}
-                    </span>
-                  </div>
-                ))}
+                {Object.entries(node.data.last_outputs).map(([key, value]) => {
+                  const isHighlighted =
+                    hoveredPort?.nodeId === node.id &&
+                    hoveredPort?.port === key &&
+                    hoveredPort?.direction === "output";
+                  return (
+                    <div
+                      key={key}
+                      className={`inspector-output-item ${isHighlighted ? "highlighted" : ""}`}
+                      onMouseEnter={() => onOutputHover?.({ nodeId: node.id, port: key, direction: "output" })}
+                      onMouseLeave={() => onOutputHover?.(null)}
+                    >
+                      <span className="inspector-output-key">{key}</span>
+                      <span className="inspector-output-value" title={JSON.stringify(value)}>
+                        {JSON.stringify(value)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -174,6 +191,8 @@ const NodeInspector = ({
   onParamChange,
   onDelete,
   onDuplicate,
+  hoveredPort,
+  onOutputHover,
 }: InspectorProps) => {
   // Track expanded nodes in multi-select mode
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -219,6 +238,8 @@ const NodeInspector = ({
             isExpanded={expandedNodes.has(node.id)}
             onToggle={() => toggleNode(node.id)}
             isSingleNode={isSingleNode}
+            hoveredPort={hoveredPort}
+            onOutputHover={onOutputHover}
           />
         ))}
       </div>

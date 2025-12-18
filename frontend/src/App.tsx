@@ -352,7 +352,7 @@ const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
       onClick={handleClick}
       title={formatted}
     >
-      <span style={{ fontSize: 8, opacity: 0.75 }}>◎</span>
+      <span style={{ fontSize: 7, opacity: 0.7 }}>•</span>
       <span className="node-output-value-text">{displayValue}</span>
     </span>
   );
@@ -596,8 +596,8 @@ const TypeAwareConnectionLine = ({
   const stroke = isInvalid
     ? "var(--status-error)"
     : ((connectionLineStyle as React.CSSProperties | undefined)?.stroke as string) || "#4a9eff";
-  const glow = isInvalid ? "rgba(248, 81, 73, 1)" : "rgba(74, 158, 255, 0.35)";
-  const strokeWidth = isInvalid ? 3.4 : 2.5;
+  const glow = isInvalid ? "rgba(248, 81, 73, 0.9)" : "rgba(74, 158, 255, 0.35)";
+  const strokeWidth = isInvalid ? 3.2 : 2.5;
 
   return (
     <g className={`connection-line ${isInvalid ? "invalid" : "valid"}`}>
@@ -609,11 +609,10 @@ const TypeAwareConnectionLine = ({
         strokeWidth={strokeWidth}
         style={{
           ...connectionLineStyle,
-          filter: `drop-shadow(0 0 10px ${glow})`,
-          animation: isInvalid ? "invalid-glow 0.6s ease-in-out infinite alternate" : undefined,
+          filter: `drop-shadow(0 0 8px ${glow})`,
           transition: "stroke 0.08s ease, stroke-width 0.08s ease",
         }}
-        strokeDasharray={isInvalid ? undefined : undefined}
+        strokeDasharray={isInvalid ? "10 4" : undefined}
       />
     </g>
   );
@@ -842,24 +841,30 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         </div>
       </div>
 
-      <div className="node-ports">
-        <div className="node-port-column">
-          {data.input_ports.map((port, index) => {
-            const portType = resolvePortType(port, "input");
-            const color = getPortTypeColor(portType);
-            const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
-            return (
-              <div key={`in-${port}-${index}`} className="node-port node-port-input">
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id={port}
-                  className="node-handle"
-                  style={handleStyle}
-                />
-                <div className="node-port-label-group">
-                  <span className="node-port-name">{port}</span>
-                  <span
+        <div className="node-ports">
+          <div className="node-port-column">
+            {data.input_ports.map((port, index) => {
+              const portType = resolvePortType(port, "input");
+              const color = getPortTypeColor(portType);
+              const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
+              const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "input";
+              return (
+                <div
+                  key={`in-${port}-${index}`}
+                  className={`node-port node-port-input ${isHighlighted ? "port-highlighted" : ""}`}
+                  onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
+                  onMouseLeave={() => data.onPortHover?.(null)}
+                >
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id={port}
+                    className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
+                    style={handleStyle}
+                  />
+                  <div className="node-port-label-group">
+                    <span className="node-port-name">{port}</span>
+                    <span
                     className="port-type-text"
                     style={{ color }}
                     title={`Accepts ${formatPortTypeLabel(portType)}`}
@@ -874,12 +879,17 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         <div className="node-port-column">
           {data.output_ports.map((port, index) => {
             const outputValue = data.last_outputs?.[port];
-            const hasValue = outputValue !== undefined;
             const portType = resolvePortType(port, "output");
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
+            const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "output";
             return (
-              <div key={`out-${port}-${index}`} className="node-port node-port-output">
+              <div
+                key={`out-${port}-${index}`}
+                className={`node-port node-port-output ${isHighlighted ? "port-highlighted" : ""}`}
+                onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "output" })}
+                onMouseLeave={() => data.onPortHover?.(null)}
+              >
                 <div className="node-port-label-group">
                   <span className="node-port-label">{port}</span>
                   <span
@@ -889,13 +899,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   >
                     {formatPortTypeLabel(portType)}
                   </span>
-                  {hasValue && <OutputValue port={port} value={outputValue} />}
                 </div>
                 <Handle
                   type="source"
                   position={Position.Right}
                   id={port}
-                  className="node-handle"
+                  className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
                   style={handleStyle}
                 />
               </div>
@@ -945,6 +954,7 @@ const App = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [useStreaming] = useState(true);
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
+  const [hoveredPort, setHoveredPort] = useState<{ nodeId: string; port: string; direction: "input" | "output" } | null>(null);
   const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
   const nodeIdRef = useRef(1);
 
@@ -1342,6 +1352,22 @@ const App = () => {
     );
   }, [highlightedNodeIds, setNodes]);
 
+  // Highlight specific ports (from inspector or node hover)
+  useEffect(() => {
+    setNodes((existing) =>
+      existing.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          highlightedPort:
+            hoveredPort && hoveredPort.nodeId === node.id
+              ? { port: hoveredPort.port, direction: hoveredPort.direction }
+              : null,
+        },
+      }))
+    );
+  }, [hoveredPort, setNodes]);
+
   // Update edges with preview state during selection drag
   useEffect(() => {
     setEdges((existing) =>
@@ -1596,6 +1622,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
         },
       });
     });
@@ -1640,6 +1667,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
         },
       });
     });
@@ -1767,6 +1795,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -1788,6 +1817,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
         },
       }))
     );
@@ -2063,6 +2093,7 @@ const App = () => {
           height: initialHeight,
           executionLogs: [],
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
         },
       };
 
@@ -2246,6 +2277,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onPortHover: setHoveredPort,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -2522,6 +2554,8 @@ const App = () => {
                         setSelectedNodeId(nodeId);
                         setTimeout(() => handleDuplicateSelected(), 0);
                       }}
+                      hoveredPort={hoveredPort}
+                      onOutputHover={(info) => setHoveredPort(info)}
                     />
                   )}
                   {rightPanelTab === "execution" && (
