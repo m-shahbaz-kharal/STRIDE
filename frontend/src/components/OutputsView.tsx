@@ -82,120 +82,150 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
     );
   }
 
+  const [streamsCollapsed, setStreamsCollapsed] = useState(false);
+  const [imagesCollapsed, setImagesCollapsed] = useState(false);
+  const [valuesCollapsed, setValuesCollapsed] = useState(false);
+
   return (
     <div className="outputs-view">
-      <div className="outputs-hero">
-        <div>
-          <p className="eyebrow">Captured Outputs</p>
-          <h2>Live canvas for your runs</h2>
-          <div className="outputs-pills">
-            <span className="pill">{images.length} image{images.length === 1 ? "" : "s"}</span>
-            <span className="pill">{streams.length} stream{streams.length === 1 ? "" : "s"}</span>
-            <span className="pill">{values.length} value{values.length === 1 ? "" : "s"}</span>
-          </div>
-        </div>
-        <div className="outputs-legend">
-          <span className="legend-dot live" /> Live stream
-          <span className="legend-sep">•</span>
-          <span className="legend-dot capture" /> Captured frame/value
-        </div>
-      </div>
 
       {streams.length > 0 && (
         <section className="outputs-section">
-          <div className="outputs-header">
-            <div>
+          <button
+            type="button"
+            className="outputs-header"
+            onClick={() => setStreamsCollapsed((prev) => !prev)}
+            aria-expanded={!streamsCollapsed}
+          >
+            <div className="outputs-header-title">
               <p className="eyebrow">Streaming</p>
               <h3>Live feeds</h3>
             </div>
-            <span className="outputs-count">{streams.length}</span>
-          </div>
-          <div className="outputs-grid">
-            {streams.map((id) => (
-              <div key={id} className="output-card stream">
-                <div className="output-card__bar">
-                  <span className="badge live">LIVE</span>
-                  <span className="meta">camera.stream_start</span>
-                  <span className="mono">#{id}</span>
+            <div className="outputs-header-meta">
+              <span className="outputs-count">{streams.length}</span>
+              <span className={`outputs-chevron ${streamsCollapsed ? "collapsed" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 7.5L10 12.5L15 7.5" />
+                </svg>
+              </span>
+            </div>
+          </button>
+          {!streamsCollapsed && (
+            <div className="outputs-grid">
+              {streams.map((id) => (
+                <div key={id} className="output-card stream">
+                  <div className="output-card__bar">
+                    <span className="badge live">LIVE</span>
+                    <span className="meta">camera.stream_start</span>
+                    <span className="mono">#{id}</span>
+                  </div>
+                  <div className="output-card__body">
+                    <img
+                      src={`/api/streams/${id}/frame?ts=${refreshToken}`}
+                      alt="Live stream"
+                      className="output-card__media"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.opacity = "0.45";
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="output-card__body">
-                  <img
-                    src={`/api/streams/${id}/frame?ts=${refreshToken}`}
-                    alt="Live stream"
-                    className="output-card__media"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.style.opacity = "0.45";
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
       {images.length > 0 && (
         <section className="outputs-section">
-          <div className="outputs-header">
-            <div>
+          <button
+            type="button"
+            className="outputs-header"
+            onClick={() => setImagesCollapsed((prev) => !prev)}
+            aria-expanded={!imagesCollapsed}
+          >
+            <div className="outputs-header-title">
               <p className="eyebrow">Frames</p>
               <h3>Image outputs</h3>
             </div>
-            <span className="outputs-count">{images.length}</span>
-          </div>
-          <div className="outputs-grid">
-            {images.map((output, index) => (
-              <div key={`${output.nodeId}-${index}`} className="output-card image">
-                <div className="output-card__bar">
-                  <span className="badge subtle">{output.source === "node" ? "Node" : "Graph"}</span>
-                  <span className="meta">{output.nodeName}</span>
-                  <span className="mono">{output.nodeId}</span>
+            <div className="outputs-header-meta">
+              <span className="outputs-count">{images.length}</span>
+              <span className={`outputs-chevron ${imagesCollapsed ? "collapsed" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 7.5L10 12.5L15 7.5" />
+                </svg>
+              </span>
+            </div>
+          </button>
+          {!imagesCollapsed && (
+            <div className="outputs-grid">
+              {images.map((output, index) => (
+                <div key={`${output.nodeId}-${index}`} className="output-card image">
+                  <div className="output-card__bar">
+                    <span className="badge subtle">{output.source === "node" ? "Node" : "Graph"}</span>
+                    <span className="meta">{output.nodeName}</span>
+                    <span className="mono">{output.nodeId}</span>
+                  </div>
+                  <div className="output-card__body">
+                    <img
+                      src={output.image}
+                      alt={`Output from ${output.nodeName}`}
+                      className="output-card__media"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                        const fallback = target.parentElement;
+                        if (fallback) {
+                          const div = document.createElement("div");
+                          div.className = "output-item-error";
+                          div.textContent = "Failed to load image";
+                          fallback.appendChild(div);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="output-card__body">
-                  <img
-                    src={output.image}
-                    alt={`Output from ${output.nodeName}`}
-                    className="output-card__media"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.style.display = "none";
-                      const fallback = target.parentElement;
-                      if (fallback) {
-                        const div = document.createElement("div");
-                        div.className = "output-item-error";
-                        div.textContent = "Failed to load image";
-                        fallback.appendChild(div);
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
       {values.length > 0 && (
         <section className="outputs-section">
-          <div className="outputs-header">
-            <div>
+          <button
+            type="button"
+            className="outputs-header"
+            onClick={() => setValuesCollapsed((prev) => !prev)}
+            aria-expanded={!valuesCollapsed}
+          >
+            <div className="outputs-header-title">
               <p className="eyebrow">Scalars</p>
               <h3>Value outputs</h3>
             </div>
-            <span className="outputs-count">{values.length}</span>
-          </div>
-          <div className="outputs-values-grid">
-            {values.map(({ key, value }) => (
-              <div key={key} className="output-value-card">
-                <div className="output-item-header">
-                  <span className="output-item-title">{key}</span>
-                  <span className="badge subtle">capture</span>
+            <div className="outputs-header-meta">
+              <span className="outputs-count">{values.length}</span>
+              <span className={`outputs-chevron ${valuesCollapsed ? "collapsed" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 7.5L10 12.5L15 7.5" />
+                </svg>
+              </span>
+            </div>
+          </button>
+          {!valuesCollapsed && (
+            <div className="outputs-values-grid">
+              {values.map(({ key, value }) => (
+                <div key={key} className="output-value-card">
+                  <div className="output-item-header">
+                    <span className="output-item-title">{key}</span>
+                    <span className="badge subtle">capture</span>
+                  </div>
+                  <pre className="output-value-body">{formatValue(value)}</pre>
                 </div>
-                <pre className="output-value-body">{formatValue(value)}</pre>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
     </div>

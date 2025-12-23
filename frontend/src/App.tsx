@@ -170,6 +170,38 @@ const App = () => {
     runGraphSync,
   } = useGraphExecution();
 
+  const outputsSummary = useMemo(() => {
+    let images = 0;
+    let streams = 0;
+    let values = 0;
+
+    for (const node of nodes) {
+      const display = node.data.last_outputs?.display;
+      if (typeof display === "string" && display.startsWith("data:image")) {
+        images += 1;
+      }
+    }
+
+    for (const [key, value] of Object.entries(outputs)) {
+      if (typeof value === "string" && value.startsWith("data:image")) {
+        images += 1;
+      } else if (typeof value === "string" && key.toLowerCase().includes("stream_id")) {
+        streams += 1;
+      } else {
+        values += 1;
+      }
+    }
+
+    return { images, streams, values };
+  }, [nodes, outputs]);
+
+  const graphSummary = useMemo(() => {
+    const nodeCount = nodes.length;
+    const edgeCount = edges.length;
+    const selectedCount = selectedNodeIds.length + selectedEdgeIds.length;
+    return { nodeCount, edgeCount, selectedCount };
+  }, [nodes.length, edges.length, selectedNodeIds.length, selectedEdgeIds.length]);
+
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
   const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
 
@@ -1504,6 +1536,20 @@ const App = () => {
                 Outputs
               </button>
             </div>
+            {headerTab === "graph-editor" && (
+              <div className="outputs-pills header-pills">
+                <span className="pill">{graphSummary.nodeCount} node{graphSummary.nodeCount === 1 ? "" : "s"}</span>
+                <span className="pill">{graphSummary.edgeCount} edge{graphSummary.edgeCount === 1 ? "" : "s"}</span>
+                <span className="pill">{graphSummary.selectedCount} selected</span>
+              </div>
+            )}
+            {headerTab === "outputs" && (
+              <div className="outputs-pills header-pills">
+                <span className="pill">{outputsSummary.images} image{outputsSummary.images === 1 ? "" : "s"}</span>
+                <span className="pill">{outputsSummary.streams} stream{outputsSummary.streams === 1 ? "" : "s"}</span>
+                <span className="pill">{outputsSummary.values} value{outputsSummary.values === 1 ? "" : "s"}</span>
+              </div>
+            )}
             {headerTab === "graph-editor" && isRunning && (
               <div className="header-stats">
                 <span className="stat-badge running">
@@ -1513,196 +1559,202 @@ const App = () => {
               </div>
             )}
           </div>
-          <div className="header-controls">
-            <ConnectionIcon connected={isConnected} />
-            <button
-              className="icon-btn primary"
-              onClick={() => handleRunGraph("full")}
-              disabled={nodes.length === 0}
-              title="Run Graph"
-            >
-              <PlayIcon />
-              {isRunning && <span className="btn-spinner" />}
-            </button>
-            <button
-              className="icon-btn danger"
-              onClick={handleInterruptAll}
-              disabled={!isRunning || !executionId}
-              title="Interrupt all running nodes"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
-              </svg>
-            </button>
-            <button
-              className="icon-btn clear-cache-btn"
-              onClick={handleClearBackendCache}
-              disabled={isRunning}
-              title="Clear Backend Cache"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z" />
-              </svg>
-            </button>
-            {error && <span className="error-indicator" title={error}>!</span>}
-          </div>
+          {headerTab === "graph-editor" && (
+            <div className="header-controls">
+              <ConnectionIcon connected={isConnected} />
+              <button
+                className="icon-btn primary"
+                onClick={() => handleRunGraph("full")}
+                disabled={nodes.length === 0}
+                title="Run Graph"
+              >
+                <PlayIcon />
+                {isRunning && <span className="btn-spinner" />}
+              </button>
+              <button
+                className="icon-btn danger"
+                onClick={handleInterruptAll}
+                disabled={!isRunning || !executionId}
+                title="Interrupt all running nodes"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
+                </svg>
+              </button>
+              <button
+                className="icon-btn clear-cache-btn"
+                onClick={handleClearBackendCache}
+                disabled={isRunning}
+                title="Clear Backend Cache"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z" />
+                </svg>
+              </button>
+              {error && <span className="error-indicator" title={error}>!</span>}
+            </div>
+          )}
         </header>
 
-        <aside
-          className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
-          style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
-        >
-          {!leftPanelCollapsed && (
-            <>
-              <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
-              <div
-                className="resize-handle right"
-                onMouseDown={() => setIsResizingLeft(true)}
-              />
-            </>
-          )}
-        </aside>
+        {headerTab === "graph-editor" && (
+          <>
+            <aside
+              className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
+              style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
+            >
+              {!leftPanelCollapsed && (
+                <>
+                  <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
+                  <div
+                    className="resize-handle right"
+                    onMouseDown={() => setIsResizingLeft(true)}
+                  />
+                </>
+              )}
+            </aside>
 
-        <button
-          className="panel-collapse-btn left"
-          style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
-          onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
-          title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
-        >
-          {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
-        </button>
+            <button
+              className="panel-collapse-btn left"
+              style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
+              onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
+              title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
+            >
+              {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
+            </button>
 
-        <aside
-          className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
-          style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
-        >
-          {!rightPanelCollapsed && (
-            <>
-              <div
-                className="resize-handle left"
-                onMouseDown={() => setIsResizingRight(true)}
-              />
-              <div className="right-panel-content">
-                {/* Right panel tabs */}
-                <div className="right-panel-tabs">
-                  <button
-                    type="button"
-                    className={`right-panel-tab ${rightPanelTab === "inspector" ? "active" : ""}`}
-                    onClick={() => setRightPanelTab("inspector")}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
-                    </svg>
-                    Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
-                  </button>
-                  <button
-                    type="button"
-                    className={`right-panel-tab ${rightPanelTab === "execution" ? "active" : ""}`}
-                    onClick={() => setRightPanelTab("execution")}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    Execution {trace.length > 0 && `(${trace.length})`}
-                  </button>
-                </div>
-
-                {/* Multi-selection toolbar */}
-                {(selectedNodeIds.length > 1 || selectedEdgeIds.length > 0) && (
-                  <div className="multi-select-toolbar">
-                    <span className="selection-count">
-                      {selectedNodeIds.length > 0 && `${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""}`}
-                      {selectedNodeIds.length > 0 && selectedEdgeIds.length > 0 && ", "}
-                      {selectedEdgeIds.length > 0 && `${selectedEdgeIds.length} edge${selectedEdgeIds.length !== 1 ? "s" : ""}`}
-                      {" "}selected
-                    </span>
-                    <div className="toolbar-actions">
-                      {/* Only show duplicate/copy for nodes */}
-                      {selectedNodeIds.length > 0 && (
-                        <>
-                          <button
-                            type="button"
-                            className="toolbar-btn"
-                            onClick={handleDuplicateSelected}
-                            title="Duplicate (Ctrl+D)"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                            </svg>
-                            Duplicate
-                          </button>
-                          <button
-                            type="button"
-                            className="toolbar-btn"
-                            onClick={handleCopy}
-                            title="Copy (Ctrl+C)"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                            </svg>
-                            Copy
-                          </button>
-                        </>
-                      )}
+            <aside
+              className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
+              style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
+            >
+              {!rightPanelCollapsed && (
+                <>
+                  <div
+                    className="resize-handle left"
+                    onMouseDown={() => setIsResizingRight(true)}
+                  />
+                  <div className="right-panel-content">
+                    {/* Right panel tabs */}
+                    <div className="right-panel-tabs">
                       <button
                         type="button"
-                        className="toolbar-btn danger"
-                        onClick={handleDeleteSelected}
-                        title="Delete (Del)"
+                        className={`right-panel-tab ${rightPanelTab === "inspector" ? "active" : ""}`}
+                        onClick={() => setRightPanelTab("inspector")}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                          <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                         </svg>
-                        Delete
+                        Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
+                      </button>
+                      <button
+                        type="button"
+                        className={`right-panel-tab ${rightPanelTab === "execution" ? "active" : ""}`}
+                        onClick={() => setRightPanelTab("execution")}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        Execution {trace.length > 0 && `(${trace.length})`}
                       </button>
                     </div>
+
+                    {/* Multi-selection toolbar */}
+                    {(selectedNodeIds.length > 1 || selectedEdgeIds.length > 0) && (
+                      <div className="multi-select-toolbar">
+                        <span className="selection-count">
+                          {selectedNodeIds.length > 0 && `${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""}`}
+                          {selectedNodeIds.length > 0 && selectedEdgeIds.length > 0 && ", "}
+                          {selectedEdgeIds.length > 0 && `${selectedEdgeIds.length} edge${selectedEdgeIds.length !== 1 ? "s" : ""}`}
+                          {" "}selected
+                        </span>
+                        <div className="toolbar-actions">
+                          {/* Only show duplicate/copy for nodes */}
+                          {selectedNodeIds.length > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                className="toolbar-btn"
+                                onClick={handleDuplicateSelected}
+                                title="Duplicate (Ctrl+D)"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                                </svg>
+                                Duplicate
+                              </button>
+                              <button
+                                type="button"
+                                className="toolbar-btn"
+                                onClick={handleCopy}
+                                title="Copy (Ctrl+C)"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                                </svg>
+                                Copy
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            className="toolbar-btn danger"
+                            onClick={handleDeleteSelected}
+                            title="Delete (Del)"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                            </svg>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab content */}
+                    <div className="right-panel-tab-content">
+                      {rightPanelTab === "inspector" && (
+                        <NodeInspector
+                          nodes={selectedNodes}
+                          onParamChange={handleParamChange}
+                          onDelete={handleDeleteNode}
+                          onDuplicate={(nodeId) => {
+                            setSelectedNodeIds([nodeId]);
+                            setSelectedNodeId(nodeId);
+                            setTimeout(() => handleDuplicateSelected(), 0);
+                          }}
+                          hoveredPort={hoveredPort}
+                          onOutputHover={(info) => setHoveredPort(info)}
+                        />
+                      )}
+                      {rightPanelTab === "execution" && (
+                        <LogPanel
+                          trace={trace}
+                          outputs={outputs}
+                          error={error}
+                          stats={stats}
+                          levels={levels}
+                          isRunning={isRunning}
+                          currentNodeId={currentNodeId}
+                          nodeStatuses={nodeStatuses}
+                          progress={progress}
+                          onHighlightNodes={handleHighlightNodes}
+                        />
+                      )}
+                    </div>
                   </div>
-                )}
+                </>
+              )}
+            </aside>
 
-                {/* Tab content */}
-                <div className="right-panel-tab-content">
-                  {rightPanelTab === "inspector" && (
-                    <NodeInspector
-                      nodes={selectedNodes}
-                      onParamChange={handleParamChange}
-                      onDelete={handleDeleteNode}
-                      onDuplicate={(nodeId) => {
-                        setSelectedNodeIds([nodeId]);
-                        setSelectedNodeId(nodeId);
-                        setTimeout(() => handleDuplicateSelected(), 0);
-                      }}
-                      hoveredPort={hoveredPort}
-                      onOutputHover={(info) => setHoveredPort(info)}
-                    />
-                  )}
-                  {rightPanelTab === "execution" && (
-                    <LogPanel
-                      trace={trace}
-                      outputs={outputs}
-                      error={error}
-                      stats={stats}
-                      levels={levels}
-                      isRunning={isRunning}
-                      currentNodeId={currentNodeId}
-                      nodeStatuses={nodeStatuses}
-                      progress={progress}
-                      onHighlightNodes={handleHighlightNodes}
-                    />
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </aside>
-
-        <button
-          className="panel-collapse-btn right"
-          style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
-          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
-        >
-          {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
-        </button>
+            <button
+              className="panel-collapse-btn right"
+              style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
+              onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+              title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
+            >
+              {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
+            </button>
+          </>
+        )}
 
         {/* Smart Connect Line */}
         {smartConnectMenu.isOpen && smartConnectMenu.source && (
