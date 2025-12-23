@@ -1571,16 +1571,16 @@ const App = () => {
                 <PlayIcon />
                 {isRunning && <span className="btn-spinner" />}
               </button>
-              <button
-                className="icon-btn danger"
-                onClick={handleInterruptAll}
-                disabled={!isRunning || !executionId}
-                title="Interrupt all running nodes"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
-                </svg>
-              </button>
+            <button
+              className="icon-btn danger"
+              onClick={handleInterruptAll}
+              disabled={!isRunning || !executionId}
+              title="Interrupt all running nodes"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+              </svg>
+            </button>
             <button
               className="icon-btn clear-cache-btn"
               onClick={handleClearBackendCache}

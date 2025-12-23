@@ -225,7 +225,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   title="Interrupt node"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
+                    <rect x="6" y="6" width="12" height="12" rx="1.5" />
                   </svg>
                 </button>
               );
