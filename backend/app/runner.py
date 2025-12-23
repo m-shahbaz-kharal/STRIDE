@@ -1,137 +1,46 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import os
 import threading
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple
 
+from .execution import (
+    ExecutionCache,
+    ExecutionEvent,
+    ExecutionStats,
+    GraphExecutionError,
+    Link,
+    NodeExecutionResult,
+    NodeStatus,
+)
 from .nodes import ExecutionContext, NodeBase, get_node
-
-
-class GraphExecutionError(Exception):
-    pass
-
-
-class NodeStatus(str, Enum):
-    PENDING = "pending"
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    SKIPPED = "skipped"
-    ERROR = "error"
-
-
-@dataclass
-class Link:
-    from_node: str
-    from_port: str
-    to_node: str
-    to_port: str
-
-
-@dataclass
-class NodeExecutionResult:
-    """Result of executing a single node."""
-    node_id: str
-    node_type: str
-    status: NodeStatus
-    outputs: Dict[str, Any] = field(default_factory=dict)
-    logs: List[str] = field(default_factory=list)
-    start_time: float = 0.0
-    end_time: float = 0.0
-    duration_ms: float = 0.0
-    error: Optional[str] = None
-    level: int = 0  # Topological level for parallel execution
-    from_cache: bool = False  # Whether result came from cache
-
-
-@dataclass
-class ExecutionEvent:
-    """Event emitted during graph execution for real-time updates."""
-    event_type: str  # "start", "node_queued", "node_started", "node_completed", "node_skipped", "node_error", "complete"
-    execution_id: str
-    timestamp: float
-    node_id: Optional[str] = None
-    node_type: Optional[str] = None
-    status: Optional[NodeStatus] = None
-    outputs: Optional[Dict[str, Any]] = None
-    logs: Optional[List[str]] = None
-    duration_ms: Optional[float] = None
-    error: Optional[str] = None
-    level: Optional[int] = None
-    progress: Optional[float] = None  # 0.0 to 1.0
-    total_nodes: Optional[int] = None
-    completed_nodes: Optional[int] = None
-    from_cache: Optional[bool] = None  # Whether result came from cache
-    # Execution plan info (sent at start)
-    execution_plan: Optional[List[Dict[str, Any]]] = None
-    levels: Optional[List[List[str]]] = None
-
-
-@dataclass
-class ExecutionStats:
-    """Statistics about graph execution."""
-    total_nodes: int = 0
-    executed_nodes: int = 0
-    skipped_nodes: int = 0
-    cached_nodes: int = 0  # Nodes that used cached results
-    error_nodes: int = 0
-    total_time_ms: float = 0.0
-    node_time_ms: float = 0.0  # Sum of individual node times
-    parallel_efficiency: float = 0.0  # node_time_ms / total_time_ms (higher = more parallelism)
-    max_parallelism: int = 0  # Max nodes that ran in parallel
-    levels_executed: int = 0
 
 
 class GraphExecutor:
     """High-performance graph executor with level-based parallel execution and caching."""
 
-    # Class-level cache shared across all executor instances
-    # Key: cache_key (hash of node type + params + inputs)
-    # Value: cached outputs dict
-    _global_cache: Dict[str, Dict[str, Any]] = {}
-
-    # Maps cache_key -> node_type for selective clearing
-    _cache_metadata: Dict[str, str] = {}
-    _cache_lock = threading.Lock()
     _active_executions: Dict[str, "GraphExecutor"] = {}
     _active_lock = threading.Lock()
 
     @classmethod
     def clear_cache(cls) -> int:
         """Clear the global execution cache. Returns number of entries cleared."""
-        with cls._cache_lock:
-            count = len(cls._global_cache)
-            cls._global_cache.clear()
-            cls._cache_metadata.clear()
-        return count
+        return ExecutionCache.clear_all()
 
     @classmethod
     def clear_cache_by_type(cls, node_type: str) -> int:
         """Clear cache entries for a specific node type. Returns number of entries cleared."""
-        with cls._cache_lock:
-            keys_to_remove = [
-                key for key, cached_type in cls._cache_metadata.items()
-                if cached_type == node_type
-            ]
-            for key in keys_to_remove:
-                cls._global_cache.pop(key, None)
-                cls._cache_metadata.pop(key, None)
-            return len(keys_to_remove)
+        return ExecutionCache.clear_by_type(node_type)
 
     @classmethod
     def get_cache_size(cls) -> int:
         """Get the current number of cached entries."""
-        with cls._cache_lock:
-            return len(cls._global_cache)
+        return ExecutionCache.size()
 
     def __init__(self, graph_definition: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -> None:
         self.definition = graph_definition
@@ -166,7 +75,7 @@ class GraphExecutor:
         self._cancel_all: bool = False
         
         # Caching options
-        self._use_cache = self.options.get("use_cache", True)
+        self._cache = ExecutionCache(enabled=self.options.get("use_cache", True))
         
         self._build_nodes()
         self._build_links()
@@ -215,36 +124,24 @@ class GraphExecutor:
             if not fut.done():
                 fut.cancel()
 
-    def _compute_cache_key(self, node_id: str, inputs: Dict[str, Any]) -> str:
-        """Compute a unique cache key for a node based on its type, params, and inputs."""
-        node = self.nodes[node_id]
-        key_data = {
-            "type": node.type,
-            "params": node.params,
-            "inputs": inputs,
-        }
-        # Create a stable hash from the key data
-        key_str = json.dumps(key_data, sort_keys=True, default=str)
-        return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+    def _reset_execution_state(self) -> None:
+        """Reset per-run execution state so subsequent runs are isolated."""
+        self.execution_trace = []
+        self.outputs = {}
+        self._computed_values = {}
+        self._cancel_all = False
+        self._cancelled_nodes.clear()
+        self._running_tasks = {}
 
     def _try_get_cached(self, node_id: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Try to get cached outputs for a node. Returns None if not cached."""
-        if not self._use_cache:
-            return None
-        cache_key = self._compute_cache_key(node_id, inputs)
-        with self._cache_lock:
-            return self._global_cache.get(cache_key)
+        """Try to get cached outputs for a node. Returns None if not cached or disabled."""
+        node = self.nodes[node_id]
+        return self._cache.get(node.type, node.params, inputs)
 
     def _cache_outputs(self, node_id: str, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
-        """Cache the outputs for a node."""
-        if not self._use_cache:
-            return
-        cache_key = self._compute_cache_key(node_id, inputs)
+        """Cache the outputs for a node when caching is enabled."""
         node = self.nodes[node_id]
-        with self._cache_lock:
-            self._global_cache[cache_key] = outputs
-            # Store metadata for selective clearing
-            self._cache_metadata[cache_key] = node.type
+        self._cache.set(node.type, node.params, inputs, outputs)
 
     def _build_nodes(self) -> None:
         node_configs = self.definition.get("nodes", [])
@@ -488,12 +385,7 @@ class GraphExecutor:
     def run(self) -> Dict[str, Any]:
         """Execute the graph synchronously (legacy interface)."""
         self._execution_order = self._resolve_execution_order()
-        self.execution_trace = []
-        self.outputs = {}
-        self._computed_values = {}
-        self._cancel_all = False
-        self._cancelled_nodes.clear()
-        self._running_tasks = {}
+        self._reset_execution_state()
         
         executed_count = 0
         max_steps = self.options.get("max_steps")
@@ -578,11 +470,7 @@ class GraphExecutor:
         """Execute the graph with dynamic readiness (no level barrier)."""
         self._execution_order = self._resolve_execution_order()
         execution_set = set(self._execution_order)
-        self.execution_trace = []
-        self.outputs = {}
-        self._computed_values = {}
-        self._cancel_all = False
-        self._cancelled_nodes.clear()
+        self._reset_execution_state()
 
         max_steps = self.options.get("max_steps")
         breakpoints: Set[str] = set(self.options.get("breakpoints") or [])
@@ -765,11 +653,7 @@ class GraphExecutor:
         """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
         self._execution_order = self._resolve_execution_order()
         execution_set = set(self._execution_order)
-        self.execution_trace = []
-        self.outputs = {}
-        self._computed_values = {}
-        self._cancel_all = False
-        self._cancelled_nodes.clear()
+        self._reset_execution_state()
         
         max_steps = self.options.get("max_steps")
         breakpoints: Set[str] = set(self.options.get("breakpoints") or [])

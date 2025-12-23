@@ -3,918 +3,44 @@ import ReactFlow, {
   addEdge,
   Background,
   Controls,
-  EdgeProps,
-  getBezierPath,
-  Handle,
   Connection,
-  ConnectionLineComponentProps,
   MiniMap,
   Node,
-  NodeProps,
   OnSelectionChangeParams,
-  Position,
   ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  useReactFlow,
   SelectionMode,
   ReactFlowInstance,
+  useEdgesState,
+  useNodesState,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
+import BlueprintNode from "./components/graph/BlueprintNode";
+import CustomEdge from "./components/graph/CustomEdge";
+import TypeAwareConnectionLine from "./components/graph/TypeAwareConnectionLine";
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
 import OutputsView from "./components/OutputsView";
 import SmartConnectModal from "./components/SmartConnectModal";
+import { PopupProvider } from "./context/PopupContext";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import {
   BlueprintNodeData,
-  NodeExecutionStatus,
   NodeTypeDefinition,
 } from "./types";
+import {
+  MIN_NODE_WIDTH,
+  bezierIntersectsRect,
+  computeNodeDimensions,
+  formatPortTypeLabel,
+  getPortTypeColor,
+  HEADER_HEIGHT,
+  PORT_ROW_HEIGHT,
+} from "./graph/utils";
 
-// Right panel tab type
 type RightPanelTab = "inspector" | "execution";
-
-// Helper: Check if a line segment intersects a rectangle
-const lineIntersectsRect = (
-  x1: number, y1: number, x2: number, y2: number,
-  rx: number, ry: number, rw: number, rh: number
-): boolean => {
-  // Check if either endpoint is inside the rectangle
-  const pointInRect = (px: number, py: number) =>
-    px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
-
-  if (pointInRect(x1, y1) || pointInRect(x2, y2)) return true;
-
-  // Check line intersection with each edge of the rectangle
-  const lineIntersectsLine = (
-    ax1: number, ay1: number, ax2: number, ay2: number,
-    bx1: number, by1: number, bx2: number, by2: number
-  ): boolean => {
-    const denom = (by2 - by1) * (ax2 - ax1) - (bx2 - bx1) * (ay2 - ay1);
-    if (Math.abs(denom) < 0.0001) return false;
-
-    const ua = ((bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)) / denom;
-    const ub = ((ax2 - ax1) * (ay1 - by1) - (ay2 - ay1) * (ax1 - bx1)) / denom;
-
-    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
-  };
-
-  // Check all four edges of rectangle
-  return (
-    lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) || // top
-    lineIntersectsLine(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh) || // bottom
-    lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx, ry + rh) || // left
-    lineIntersectsLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) // right
-  );
-};
-
-// Helper: Sample points along a bezier curve and check if any segment intersects the rect
-const bezierIntersectsRect = (
-  sourceX: number, sourceY: number,
-  targetX: number, targetY: number,
-  rx: number, ry: number, rw: number, rh: number
-): boolean => {
-  // Calculate control points for bezier (similar to ReactFlow's default)
-  const centerX = (sourceX + targetX) / 2;
-  const cp1x = centerX;
-  const cp1y = sourceY;
-  const cp2x = centerX;
-  const cp2y = targetY;
-
-  // Sample the bezier curve and check line segments
-  const samples = 20;
-  let prevX = sourceX;
-  let prevY = sourceY;
-
-  for (let i = 1; i <= samples; i++) {
-    const t = i / samples;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    const mt = 1 - t;
-    const mt2 = mt * mt;
-    const mt3 = mt2 * mt;
-
-    // Cubic bezier formula
-    const x = mt3 * sourceX + 3 * mt2 * t * cp1x + 3 * mt * t2 * cp2x + t3 * targetX;
-    const y = mt3 * sourceY + 3 * mt2 * t * cp1y + 3 * mt * t2 * cp2y + t3 * targetY;
-
-    if (lineIntersectsRect(prevX, prevY, x, y, rx, ry, rw, rh)) {
-      return true;
-    }
-
-    prevX = x;
-    prevY = y;
-  }
-
-  return false;
-};
-
-// Value Preview Popup Component
-interface ValuePopupProps {
-  value: unknown;
-  title: string;
-  onClose: () => void;
-}
-
-const ValuePopup = ({ value, title, onClose }: ValuePopupProps) => {
-  const [size, setSize] = useState({ width: 400, height: 300 });
-  const [position, setPosition] = useState({ x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
-
-  const formatValue = (val: unknown): string => {
-    if (val === null || val === undefined) return "null";
-    if (typeof val === "string") return val;
-    if (typeof val === "number" || typeof val === "boolean") return String(val);
-    try {
-      return JSON.stringify(val, null, 2);
-    } catch {
-      return String(val);
-    }
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const dx = e.clientX - dragStartRef.current.x;
-        const dy = e.clientY - dragStartRef.current.y;
-        setPosition({
-          x: dragStartRef.current.posX + dx,
-          y: dragStartRef.current.posY + dy,
-        });
-      }
-      if (isResizing) {
-        const dx = e.clientX - resizeStartRef.current.x;
-        const dy = e.clientY - resizeStartRef.current.y;
-        setSize({
-          width: Math.max(200, resizeStartRef.current.width + dx),
-          height: Math.max(150, resizeStartRef.current.height + dy),
-        });
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      setIsResizing(false);
-    };
-
-    if (isDragging || isResizing) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isDragging, isResizing]);
-
-  const handleDragStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStartRef.current = { x: e.clientX, y: e.clientY, posX: position.x, posY: position.y };
-    setIsDragging(true);
-  };
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizeStartRef.current = { x: e.clientX, y: e.clientY, width: size.width, height: size.height };
-    setIsResizing(true);
-  };
-
-  return (
-    <div className="value-popup-overlay" onClick={onClose}>
-      <div
-        className="value-popup"
-        style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="value-popup-header" onMouseDown={handleDragStart}>
-          <span className="value-popup-title">{title}</span>
-          <button className="value-popup-close" onClick={onClose}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-        </div>
-        <div className="value-popup-content">
-          <pre>{formatValue(value)}</pre>
-        </div>
-        <div className="value-popup-resize" onMouseDown={handleResizeStart}>
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Node Logs Popup Component
-interface LogsPopupProps {
-  nodeId: string;
-  nodeName: string;
-  logs: string[];
-  onClose: () => void;
-}
-
-const LogsPopup = ({ nodeId, nodeName, logs, onClose }: LogsPopupProps) => {
-  const [size, setSize] = useState({ width: 450, height: 300 });
-  const [position, setPosition] = useState({ x: window.innerWidth / 2 - 225, y: window.innerHeight / 2 - 150 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const dx = e.clientX - dragStartRef.current.x;
-        const dy = e.clientY - dragStartRef.current.y;
-        setPosition({
-          x: dragStartRef.current.posX + dx,
-          y: dragStartRef.current.posY + dy,
-        });
-      }
-      if (isResizing) {
-        const dx = e.clientX - resizeStartRef.current.x;
-        const dy = e.clientY - resizeStartRef.current.y;
-        setSize({
-          width: Math.max(250, resizeStartRef.current.width + dx),
-          height: Math.max(150, resizeStartRef.current.height + dy),
-        });
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      setIsResizing(false);
-    };
-
-    if (isDragging || isResizing) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isDragging, isResizing]);
-
-  const handleDragStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStartRef.current = { x: e.clientX, y: e.clientY, posX: position.x, posY: position.y };
-    setIsDragging(true);
-  };
-
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizeStartRef.current = { x: e.clientX, y: e.clientY, width: size.width, height: size.height };
-    setIsResizing(true);
-  };
-
-  return (
-    <div className="value-popup-overlay" onClick={onClose}>
-      <div
-        className="value-popup logs-popup"
-        style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="value-popup-header" onMouseDown={handleDragStart}>
-          <span className="value-popup-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 6 }}>
-              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-            </svg>
-            Logs: {nodeName}
-          </span>
-          <button className="value-popup-close" onClick={onClose}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-        </div>
-        <div className="value-popup-content logs-content">
-          {logs.length === 0 ? (
-            <div className="logs-empty">No logs available for this node.</div>
-          ) : (
-            logs.map((log, i) => (
-              <div key={i} className="log-line">
-                <span className="log-line-number">{i + 1}</span>
-                <span className="log-line-content">{log}</span>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="value-popup-resize" onMouseDown={handleResizeStart}>
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const formatValue = (value: unknown): string => {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
-};
-
-// Global state for popups (to avoid prop drilling through ReactFlow)
-let globalShowValuePopup: ((value: unknown, title: string) => void) | null = null;
-let globalShowLogsPopup: ((nodeId: string, nodeName: string, logs: string[]) => void) | null = null;
-
-const OutputValue = ({ port, value }: { port: string; value: unknown }) => {
-  const formatted = formatValue(value);
-  const isLong = formatted.length > 12;
-  const displayValue = isLong ? formatted.slice(0, 10) + "…" : formatted;
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (globalShowValuePopup) {
-      globalShowValuePopup(value, `Output: ${port}`);
-    }
-  };
-
-  return (
-    <span
-      className={`node-output-value ${isLong ? "expandable" : ""}`}
-      onClick={handleClick}
-      title={formatted}
-    >
-      <span style={{ fontSize: 7, opacity: 0.7 }}>•</span>
-      <span className="node-output-value-text">{displayValue}</span>
-    </span>
-  );
-};
-
-type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
-
-interface ResizeZoneProps {
-  corner: Corner;
-  isHovered: boolean;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
-  onMouseDown: (e: React.MouseEvent) => void;
-}
-
-const ResizeZone = ({ corner, isHovered, onMouseEnter, onMouseLeave, onMouseDown }: ResizeZoneProps) => {
-  if (!corner) return null;
-
-  const isTop = corner.includes("top");
-  const isLeft = corner.includes("left");
-  const cursor = (corner === "top-left" || corner === "bottom-right") ? "nwse-resize" : "nesw-resize";
-  const rotation = corner === "top-left" ? 0 :
-    corner === "top-right" ? 90 :
-      corner === "bottom-right" ? 180 : 270;
-
-  // Position zone mostly outside the node - only activates at corner or slightly outside
-  const zoneSize = 16;
-  const zoneOffset = corner === "bottom-right" ? `-${zoneSize - 4}px` : "-2px";
-
-  return (
-    <div
-      className={`resize-zone nodrag ${corner}`}
-      style={{
-        position: "absolute",
-        [isTop ? "top" : "bottom"]: zoneOffset,
-        [isLeft ? "left" : "right"]: zoneOffset,
-        width: `${zoneSize}px`,
-        height: `${zoneSize}px`,
-        cursor,
-        zIndex: 20,
-      }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      onMouseDown={onMouseDown}
-    >
-      {isHovered && (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          style={{
-            position: "absolute",
-            // Position icon outside the node corner
-            top: corner === "bottom-right" ? "2px" : "3px",
-            left: corner === "bottom-right" ? "2px" : "3px",
-            transform: `rotate(${rotation}deg)`,
-            transformOrigin: "6px 6px",
-            pointerEvents: "none",
-          }}
-        >
-          <path
-            d="M 1 10 L 1 6 Q 1 1 6 1 L 10 1"
-            fill="none"
-            stroke="var(--accent-blue)"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-      )}
-    </div>
-  );
-};
-
-// Get status-based styling for nodes
-const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
-  switch (status) {
-    case "running":
-      return "node-running";
-    case "queued":
-      return "node-queued";
-    case "completed":
-      return "node-executed";
-    case "error":
-      return "node-error";
-    default:
-      return "";
-  }
-};
-
-const PORT_TYPE_COLORS: Record<string, string> = {
-  number: "#4a9eff",
-  image: "#e85aad",
-  stream: "#0fb5a9",
-  url: "#7c3aed",
-  boolean: "#f59e0b",
-  string: "#10b981",
-  any: "#94a3b8",
-};
-
-const PORT_ROW_HEIGHT = 34;
-const HEADER_HEIGHT = 70;
-const MIN_NODE_WIDTH = 220;
-
-const getPortTypeColor = (type?: string): string => {
-  if (!type) return PORT_TYPE_COLORS.any;
-  const key = type.toLowerCase();
-  return PORT_TYPE_COLORS[key] || PORT_TYPE_COLORS.any;
-};
-
-const formatPortTypeLabel = (type?: string): string => {
-  if (!type) return "Any";
-  const normalized = type.toLowerCase();
-  if (normalized === "any") return "Any";
-  const label = normalized.replace(/_/g, " ");
-  return label.charAt(0).toUpperCase() + label.slice(1);
-};
-
-const computeNodeDimensions = (maxPorts: number) => {
-  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT;
-  return {
-    width: MIN_NODE_WIDTH,
-    height,
-  };
-};
-
-// Custom Edge with delete button, hover, selection, and preview states
-const CustomEdge = ({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  style = {},
-  markerEnd,
-  selected,
-  data,
-}: EdgeProps) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const { setEdges } = useReactFlow();
-
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  });
-
-  const handleDeleteEdge = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEdges((edges) => edges.filter((edge) => edge.id !== id));
-  };
-
-  // Check if edge is in preview mode (during selection drag)
-  const isPreview = data?.isPreview ?? false;
-
-  // Determine stroke color and width based on state
-  const baseStroke = (style as React.CSSProperties)?.stroke || "#4a9eff";
-  const strokeColor = selected
-    ? "var(--selection-yellow)"
-    : isPreview
-      ? "var(--selection-yellow)"
-      : isHovered
-        ? "var(--selection-yellow-light)"
-        : baseStroke;
-  const strokeWidth = selected ? 3 : isPreview ? 2.5 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
-
-  return (
-    <g
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={`custom-edge ${selected ? "selected" : ""} ${isHovered ? "hovered" : ""} ${isPreview ? "preview" : ""}`}
-    >
-      {/* Invisible wider path for easier interaction */}
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={20}
-        style={{ cursor: "pointer" }}
-      />
-      <path
-        id={id}
-        className="react-flow__edge-path"
-        d={edgePath}
-        style={{
-          ...style,
-          stroke: strokeColor,
-          strokeWidth,
-          transition: "stroke 0.1s ease, stroke-width 0.1s ease",
-        }}
-        markerEnd={markerEnd}
-      />
-      {(isHovered || selected) && !isPreview && (
-        <g
-          transform={`translate(${labelX - 8}, ${labelY - 8})`}
-          onClick={handleDeleteEdge}
-          style={{ cursor: "pointer" }}
-        >
-          <circle
-            r="8"
-            cx="8"
-            cy="8"
-            fill={selected ? "var(--selection-yellow)" : "var(--selection-yellow-light)"}
-          />
-          <path
-            d="M5 5L11 11M11 5L5 11"
-            stroke="var(--bg-deep)"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </g>
-      )}
-    </g>
-  );
-};
-
-const TypeAwareConnectionLine = ({
-  fromX,
-  fromY,
-  toX,
-  toY,
-  fromPosition,
-  toPosition,
-  connectionLineStyle,
-  connectionStatus,
-}: ConnectionLineComponentProps) => {
-  const [path] = getBezierPath({
-    sourceX: fromX,
-    sourceY: fromY,
-    sourcePosition: fromPosition,
-    targetX: toX,
-    targetY: toY,
-    targetPosition: toPosition,
-  });
-
-  const isInvalid = connectionStatus === "invalid";
-  const stroke = isInvalid
-    ? "var(--status-error)"
-    : ((connectionLineStyle as React.CSSProperties | undefined)?.stroke as string) || "#4a9eff";
-  const glow = isInvalid ? "rgba(248, 81, 73, 0.9)" : "rgba(74, 158, 255, 0.35)";
-  const strokeWidth = isInvalid ? 3.2 : 2.5;
-
-  return (
-    <g className={`connection-line ${isInvalid ? "invalid" : "valid"}`}>
-      <path d={path} fill="none" stroke="transparent" strokeWidth={18} />
-      <path
-        d={path}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-        style={{
-          ...connectionLineStyle,
-          filter: `drop-shadow(0 0 8px ${glow})`,
-          transition: "stroke 0.08s ease, stroke-width 0.08s ease",
-        }}
-        strokeDasharray={isInvalid ? "10 4" : undefined}
-      />
-    </g>
-  );
-};
-
-const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
-  const [hoveredCorner, setHoveredCorner] = useState<Corner>(null);
-  const [isResizing, setIsResizing] = useState(false);
-  const [nodeSize, setNodeSize] = useState({ width: data.width || 0, height: data.height || 0 });
-  const nodeRef = useRef<HTMLDivElement>(null);
-  const startPosRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
-  const resizeCornerRef = useRef<Corner>(null);
-  const zoomRef = useRef(1);
-  const { getZoom } = useReactFlow();
-
-  const executionStatusClass = getExecutionStatusClass(data.executionStatus);
-  const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
-  const highlightClass = data.isHighlighted ? "node-highlighted" : "";
-
-  const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {
-    if (!corner || !nodeRef.current) return;
-
-    e.stopPropagation();
-    e.preventDefault();
-    const width = nodeRef.current.offsetWidth;
-    const height = nodeRef.current.offsetHeight;
-    startPosRef.current = { x: e.clientX, y: e.clientY, width, height };
-    resizeCornerRef.current = corner;
-    zoomRef.current = getZoom(); // Capture zoom level at resize start
-    setNodeSize({ width, height });
-    setIsResizing(true);
-  }, [getZoom]);
-
-  const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
-  // Calculate min dimensions based on content
-  const MIN_WIDTH = MIN_NODE_WIDTH;
-  const MIN_HEIGHT = computeNodeDimensions(maxPorts).height;
-  const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
-  const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
-
-  const resolvePortType = useCallback(
-    (port: string, direction: "input" | "output") => {
-      const map = direction === "input" ? inputPortTypes : outputPortTypes;
-      return map?.[port] || "any";
-    },
-    [inputPortTypes, outputPortTypes]
-  );
-
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const corner = resizeCornerRef.current;
-      if (!corner) return;
-
-      // Adjust delta by zoom level so resize matches mouse position exactly
-      const zoom = zoomRef.current;
-      const dx = (e.clientX - startPosRef.current.x) / zoom;
-      const dy = (e.clientY - startPosRef.current.y) / zoom;
-
-      let newWidth = startPosRef.current.width;
-      let newHeight = startPosRef.current.height;
-
-      if (corner === "bottom-right") {
-        newWidth += dx;
-        newHeight += dy;
-      } else if (corner === "bottom-left") {
-        newWidth -= dx;
-        newHeight += dy;
-      } else if (corner === "top-right") {
-        newWidth += dx;
-        newHeight -= dy;
-      } else if (corner === "top-left") {
-        newWidth -= dx;
-        newHeight -= dy;
-      }
-
-      newWidth = Math.max(MIN_WIDTH, newWidth);
-      newHeight = Math.max(MIN_HEIGHT, newHeight);
-
-      setNodeSize({ width: newWidth, height: newHeight });
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-      resizeCornerRef.current = null;
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizing, MIN_HEIGHT, MIN_WIDTH]);
-
-  // Apply calculated min dimensions, with explicit size only if user has resized
-  const sizeStyle: React.CSSProperties = {
-    minWidth: MIN_WIDTH,
-    minHeight: MIN_HEIGHT,
-    ...(nodeSize.width > 0 && nodeSize.height > 0
-      ? { width: nodeSize.width, height: nodeSize.height }
-      : {})
-  };
-
-  const corners: Corner[] = ["bottom-right"];
-
-  const handleViewLogs = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (globalShowLogsPopup) {
-      // Collect logs from execution trace
-      const logs = data.executionLogs || [];
-      globalShowLogsPopup(id, data.displayName, logs);
-    }
-  };
-
-  const handleRunNode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    data.onRunSelection?.(id);
-  };
-
-  const handleInterruptNode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    data.onInterrupt?.(id);
-  };
-
-  const handleClearNodeCache = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    data.onClearCache?.(id);
-  };
-
-  return (
-    <div
-      ref={nodeRef}
-      className={`blueprint-node ${statusClass} ${highlightClass}`}
-      style={sizeStyle}
-    >
-      {/* Execution progress ring for running nodes */}
-      {data.executionStatus === "running" && (
-        <div className="node-execution-ring" />
-      )}
-
-      {corners.map((corner) => (
-        <ResizeZone
-          key={corner}
-          corner={corner}
-          isHovered={hoveredCorner === corner}
-          onMouseEnter={() => setHoveredCorner(corner)}
-          onMouseLeave={() => !isResizing && setHoveredCorner(null)}
-          onMouseDown={(e) => handleResizeStart(corner, e)}
-        />
-      ))}
-
-      <div className="node-header">
-        <div className="node-title-section">
-          <strong>{data.displayName}</strong>
-          <span className="node-type-label">{data.nodeType}</span>
-        </div>
-        <div className="node-header-right">
-          {data.executionStatus === "queued" && (
-            <span className="node-status-chip queued">QUEUE</span>
-          )}
-          <button
-            className="node-action-btn nodrag"
-            onClick={handleViewLogs}
-            title="View Logs"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z" />
-            </svg>
-          </button>
-          {(() => {
-            const isActive = data.executionStatus === "running" || data.executionStatus === "queued";
-            const wasInterrupted = data.executionStatus === "skipped" || data.executionStatus === "error";
-            if (isActive) {
-              return (
-                <button
-                  className="node-action-btn danger nodrag"
-                  onClick={handleInterruptNode}
-                  title="Interrupt node"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
-                  </svg>
-                </button>
-              );
-            }
-            if (data.last_outputs && !wasInterrupted) {
-              return (
-                <button
-                  className="node-action-btn clear-cache-btn nodrag"
-                  onClick={handleClearNodeCache}
-                  title="Clear cached output"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
-                  </svg>
-                </button>
-              );
-            }
-            return (
-              <button
-                className="node-action-btn run-btn nodrag"
-                onClick={handleRunNode}
-                title="Run from this node"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
-            );
-          })()}
-          <button
-            className="node-delete-btn nodrag"
-            onClick={(e) => {
-              e.stopPropagation();
-              data.onDelete?.(id);
-            }}
-            title="Delete Node"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-        <div className="node-ports">
-          <div className="node-port-column">
-            {data.input_ports.map((port, index) => {
-              const portType = resolvePortType(port, "input");
-              const color = getPortTypeColor(portType);
-              const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
-              const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "input";
-              return (
-                <div
-                  key={`in-${port}-${index}`}
-                  className={`node-port node-port-input ${isHighlighted ? "port-highlighted" : ""}`}
-                  onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
-                  onMouseLeave={() => data.onPortHover?.(null)}
-                >
-                  <Handle
-                    type="target"
-                    position={Position.Left}
-                    id={port}
-                    className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
-                    style={handleStyle}
-                  />
-                  <div className="node-port-label-group">
-                    <span className="node-port-name">{port}</span>
-                    <span
-                    className="port-type-text"
-                    style={{ color }}
-                    title={`Accepts ${formatPortTypeLabel(portType)}`}
-                  >
-                    {formatPortTypeLabel(portType)}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="node-port-column">
-          {data.output_ports.map((port, index) => {
-            const outputValue = data.last_outputs?.[port];
-            const portType = resolvePortType(port, "output");
-            const color = getPortTypeColor(portType);
-            const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
-            const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "output";
-            return (
-              <div
-                key={`out-${port}-${index}`}
-                className={`node-port node-port-output ${isHighlighted ? "port-highlighted" : ""}`}
-                onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "output" })}
-                onMouseLeave={() => data.onPortHover?.(null)}
-              >
-                <div className="node-port-label-group">
-                  <span className="node-port-label">{port}</span>
-                  <span
-                    className="port-type-text"
-                    style={{ color }}
-                    title={`Emits ${formatPortTypeLabel(portType)}`}
-                  >
-                    {formatPortTypeLabel(portType)}
-                  </span>
-                </div>
-                <Handle
-                  type="source"
-                  position={Position.Right}
-                  id={port}
-                  className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
-                  style={handleStyle}
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // Icons
 const PlayIcon = () => (
@@ -958,9 +84,6 @@ const App = () => {
   const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
   const nodeIdRef = useRef(1);
 
-  // Popup states
-  const [valuePopup, setValuePopup] = useState<{ value: unknown; title: string } | null>(null);
-  const [logsPopup, setLogsPopup] = useState<{ nodeId: string; nodeName: string; logs: string[] } | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Smart Connect state
@@ -985,16 +108,6 @@ const App = () => {
   const connectionMessageTimeout = useRef<number | null>(null);
   const [connectionLineColor, setConnectionLineColor] = useState<string | undefined>(undefined);
   const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
-
-  // Set global popup functions
-  useEffect(() => {
-    globalShowValuePopup = (value, title) => setValuePopup({ value, title });
-    globalShowLogsPopup = (nodeId, nodeName, logs) => setLogsPopup({ nodeId, nodeName, logs });
-    return () => {
-      globalShowValuePopup = null;
-      globalShowLogsPopup = null;
-    };
-  }, []);
 
   // Ensure connection toast timers are cleaned up
   useEffect(() => {
@@ -2004,8 +1117,11 @@ const App = () => {
 
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
-      const target = event.target as HTMLElement;
-      const isPane = target.classList.contains("react-flow__pane");
+      const target = event.target;
+      const isPane =
+        target instanceof HTMLElement
+          ? Boolean(target.closest(".react-flow__pane"))
+          : false;
 
       if (isPane && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
         const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
@@ -2177,9 +1293,9 @@ const App = () => {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Only track left mouse button for selection
     if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      const target = e.target as HTMLElement;
+      const target = e.target;
       // Only start selection on the pane background
-      if (target.classList.contains('react-flow__pane')) {
+      if (target instanceof HTMLElement && target.classList.contains('react-flow__pane')) {
         const rect = reactFlowWrapper.current?.getBoundingClientRect();
         if (rect) {
           setIsSelecting(true);
@@ -2290,8 +1406,9 @@ const App = () => {
   );
 
   return (
-    <ReactFlowProvider>
-      <div className="app-shell">
+    <PopupProvider>
+      <ReactFlowProvider>
+        <div className="app-shell">
         {headerTab === "graph-editor" ? (
           <div
             className="reactflow-fullpage"
@@ -2304,35 +1421,35 @@ const App = () => {
             onDrop={handleDrop}
           >
             <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onInit={setReactFlowInstance}
-            onConnect={handleConnect}
-            onConnectStart={onConnectStart}
-            onConnectEnd={onConnectEnd}
-            onNodeDragStart={() => takeSnapshot()}
-            onSelectionDragStart={() => takeSnapshot()}
-            onSelectionChange={handleSelectionChange}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            fitView
-            isValidConnection={isValidConnection}
-            connectionLineStyle={{
-              stroke: connectionLineColor || "#4a9eff",
-              strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
-            }}
-            connectionLineComponent={TypeAwareConnectionLine}
-            attributionPosition="bottom-left"
-            selectionMode={SelectionMode.Partial}
-            selectionOnDrag
-            panOnDrag={[1, 2]}
-            selectNodesOnDrag
-            edgesFocusable
-            edgesUpdatable
-            elementsSelectable
-          >
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onInit={setReactFlowInstance}
+              onConnect={handleConnect}
+              onConnectStart={onConnectStart}
+              onConnectEnd={onConnectEnd}
+              onNodeDragStart={() => takeSnapshot()}
+              onSelectionDragStart={() => takeSnapshot()}
+              onSelectionChange={handleSelectionChange}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              fitView
+              isValidConnection={isValidConnection}
+              connectionLineStyle={{
+                stroke: connectionLineColor || "#4a9eff",
+                strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+              }}
+              connectionLineComponent={TypeAwareConnectionLine}
+              attributionPosition="bottom-left"
+              selectionMode={SelectionMode.Partial}
+              selectionOnDrag
+              panOnDrag={[1, 2]}
+              selectNodesOnDrag
+              edgesFocusable
+              edgesUpdatable
+              elementsSelectable
+            >
             <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
             <Controls
               showZoom
@@ -2587,25 +1704,6 @@ const App = () => {
           {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
         </button>
 
-        {/* Value Popup */}
-        {valuePopup && (
-          <ValuePopup
-            value={valuePopup.value}
-            title={valuePopup.title}
-            onClose={() => setValuePopup(null)}
-          />
-        )}
-
-        {/* Logs Popup */}
-        {logsPopup && (
-          <LogsPopup
-            nodeId={logsPopup.nodeId}
-            nodeName={logsPopup.nodeName}
-            logs={logsPopup.logs}
-            onClose={() => setLogsPopup(null)}
-          />
-        )}
-
         {/* Smart Connect Line */}
         {smartConnectMenu.isOpen && smartConnectMenu.source && (
           <svg
@@ -2670,7 +1768,8 @@ const App = () => {
           sourceHandleType={smartConnectMenu.source?.type}
         />
       </div>
-    </ReactFlowProvider >
+      </ReactFlowProvider>
+    </PopupProvider>
   );
 };
 
