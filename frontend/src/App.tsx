@@ -108,6 +108,7 @@ const App = () => {
   const connectionMessageTimeout = useRef<number | null>(null);
   const [connectionLineColor, setConnectionLineColor] = useState<string | undefined>(undefined);
   const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
+  const connectSucceededRef = useRef(false);
 
   // Ensure connection toast timers are cleaned up
   useEffect(() => {
@@ -991,6 +992,17 @@ const App = () => {
     return src === "any" || tgt === "any" || src === tgt;
   }, []);
 
+  const getHandleRole = useCallback(
+    (nodeId: string, handleId: string): "source" | "target" | null => {
+      const node = nodeMap.get(nodeId);
+      if (!node) return null;
+      if (node.data.output_ports.includes(handleId)) return "source";
+      if (node.data.input_ports.includes(handleId)) return "target";
+      return null;
+    },
+    [nodeMap]
+  );
+
   const getPortTypeForHandle = useCallback(
     (nodeId: string, handleId: string, role: "source" | "target") => {
       const node = nodeMap.get(nodeId);
@@ -1001,7 +1013,31 @@ const App = () => {
           : node.data.input_port_types || node.data.metadata?.input_port_types;
       return map?.[handleId] || "any";
     },
-    [nodeMap]
+      [nodeMap]
+    );
+
+  const normalizeConnection = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) {
+        return connection;
+      }
+
+      const sourceRole = getHandleRole(connection.source, connection.sourceHandle);
+      const targetRole = getHandleRole(connection.target, connection.targetHandle);
+
+      if (sourceRole === "target" && targetRole === "source") {
+        return {
+          ...connection,
+          source: connection.target,
+          sourceHandle: connection.targetHandle,
+          target: connection.source,
+          targetHandle: connection.sourceHandle,
+        };
+      }
+
+      return connection;
+    },
+    [getHandleRole]
   );
 
   const validateConnection = useCallback(
@@ -1011,22 +1047,40 @@ const App = () => {
         return { valid: false, reason: "Select both connectors" };
       }
 
-      const sourceType = getPortTypeForHandle(connection.source, connection.sourceHandle, "source");
-
       if (!connection.target || !connection.targetHandle) {
+        const sourceRole = getHandleRole(connection.source, connection.sourceHandle);
+        const sourceType = getPortTypeForHandle(
+          connection.source,
+          connection.sourceHandle,
+          sourceRole === "target" ? "target" : "source"
+        );
         setConnectionLineIsInvalid(false);
         return { valid: true, sourceType };
       }
 
-      if (connection.source === connection.target) {
+      const normalized = normalizeConnection(connection);
+      const sourceRole = getHandleRole(normalized.source!, normalized.sourceHandle!);
+      const targetRole = getHandleRole(normalized.target!, normalized.targetHandle!);
+
+      if (sourceRole !== "source" || targetRole !== "target") {
+        setConnectionLineIsInvalid(true);
+        return { valid: false, reason: "Connect outputs to inputs only" };
+      }
+
+      if (normalized.source === normalized.target) {
         setConnectionLineIsInvalid(true);
         return { valid: false, reason: "Cannot connect a node to itself" };
       }
 
-      const targetType = getPortTypeForHandle(connection.target, connection.targetHandle, "target");
+      const sourceType = getPortTypeForHandle(normalized.source!, normalized.sourceHandle!, "source");
+      const targetType = getPortTypeForHandle(normalized.target!, normalized.targetHandle!, "target");
       const compatible = arePortTypesCompatible(sourceType, targetType);
 
       setConnectionLineIsInvalid(!compatible);
+      const desiredColor = getPortTypeColor(sourceType);
+      if (connectionLineColor !== desiredColor) {
+        setConnectionLineColor(desiredColor);
+      }
 
       return {
         valid: compatible,
@@ -1035,47 +1089,50 @@ const App = () => {
         targetType,
       };
     },
-    [arePortTypesCompatible, getPortTypeForHandle]
+    [arePortTypesCompatible, connectionLineColor, getHandleRole, getPortTypeForHandle, normalizeConnection]
   );
 
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
       if (!connection.sourceHandle || !connection.targetHandle) return;
 
-      const validation = validateConnection(connection as Connection);
+      const normalized = normalizeConnection(connection as Connection);
+      const validation = validateConnection(normalized);
       if (!validation.valid) {
         showConnectionMessage(validation.reason || "These connectors cannot be linked");
         return;
       }
 
-      const sourceType = getPortTypeForHandle(connection.source!, connection.sourceHandle, "source");
+      const sourceType = getPortTypeForHandle(normalized.source!, normalized.sourceHandle!, "source");
       const edgeColor = getPortTypeColor(sourceType);
 
       // Check for duplicate edges (same source, target, sourceHandle, targetHandle)
       const isDuplicate = edges.some(
         (edge) =>
-          edge.source === connection.source &&
-          edge.target === connection.target &&
-          edge.sourceHandle === connection.sourceHandle &&
-          edge.targetHandle === connection.targetHandle
+          edge.source === normalized.source &&
+          edge.target === normalized.target &&
+          edge.sourceHandle === normalized.sourceHandle &&
+          edge.targetHandle === normalized.targetHandle
       );
 
       if (isDuplicate) {
+        connectSucceededRef.current = true;
         return; // Don't add duplicate edge
       }
 
+      connectSucceededRef.current = true;
       takeSnapshot();
 
       setEdges((existing) => {
         // Remove any existing edge that connects to the same target handle
         const filtered = existing.filter(
           (edge) =>
-            !(edge.target === connection.target && edge.targetHandle === connection.targetHandle)
+            !(edge.target === normalized.target && edge.targetHandle === normalized.targetHandle)
         );
 
         return addEdge(
           {
-            ...connection,
+            ...normalized,
             type: "default",
             animated: false,
             style: { stroke: edgeColor, strokeWidth: 2 },
@@ -1085,7 +1142,7 @@ const App = () => {
       });
       setConnectionLineIsInvalid(false);
     },
-    [edges, getPortTypeForHandle, setEdges, showConnectionMessage, takeSnapshot, validateConnection]
+    [edges, getPortTypeForHandle, normalizeConnection, setEdges, showConnectionMessage, takeSnapshot, validateConnection]
   );
 
   const isValidConnection = useCallback((connection: Connection) => validateConnection(connection).valid, [validateConnection]);
@@ -1147,19 +1204,36 @@ const App = () => {
     }
   }, [getPortTypeForHandle]);
 
-  const onConnectEnd = useCallback(
-    (event: MouseEvent | TouchEvent) => {
-      const target = event.target;
-      const isPane =
-        target instanceof HTMLElement
-          ? Boolean(target.closest(".react-flow__pane"))
-          : false;
+    const onConnectEnd = useCallback(
+      (event: MouseEvent | TouchEvent) => {
+        if (connectSucceededRef.current) {
+          connectSucceededRef.current = false;
+          return;
+        }
+        const target = event.target;
+        const isPane =
+          target instanceof HTMLElement
+            ? Boolean(target.closest(".react-flow__pane"))
+            : false;
+        const isHandle =
+          target instanceof HTMLElement
+            ? Boolean(target.closest(".react-flow__handle"))
+            : false;
+        const isNode =
+          target instanceof HTMLElement
+            ? Boolean(target.closest(".react-flow__node"))
+            : false;
+        const isEdge =
+          target instanceof HTMLElement
+            ? Boolean(target.closest(".react-flow__edge"))
+            : false;
+        const isEmptySpace = isPane && !isHandle && !isNode && !isEdge;
 
-      if (isPane && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
-        const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
+        if (isEmptySpace && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
+          const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
 
-        const position = reactFlowInstance.screenToFlowPosition({
-          x: clientX,
+          const position = reactFlowInstance.screenToFlowPosition({
+            x: clientX,
           y: clientY,
         });
 
