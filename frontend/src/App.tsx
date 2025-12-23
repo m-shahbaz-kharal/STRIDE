@@ -1581,16 +1581,18 @@ const App = () => {
                   <path d="M6 19h12V5H6v14zm-2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2z" />
                 </svg>
               </button>
-              <button
-                className="icon-btn clear-cache-btn"
-                onClick={handleClearBackendCache}
-                disabled={isRunning}
-                title="Clear Backend Cache"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z" />
-                </svg>
-              </button>
+            <button
+              className="icon-btn clear-cache-btn"
+              onClick={handleClearBackendCache}
+              disabled={isRunning}
+              title="Clear Backend Cache"
+            >
+              <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
+                <path d="M44.7818 24.1702L31.918 7.09938L14.1348 20.5L27.5 37L30.8556 34.6644L44.7818 24.1702Z" fill="currentColor" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
+                <path d="M27.4998 37L23.6613 40.0748L13.0978 40.074L10.4973 36.6231L4.06543 28.0876L14.4998 20.2248" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
+                <path d="M13.2056 40.0721L44.5653 40.072" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
+              </svg>
+            </button>
               {error && <span className="error-indicator" title={error}>!</span>}
             </div>
           )}

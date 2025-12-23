@@ -237,8 +237,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   onClick={handleClearNodeCache}
                   title="Clear cached output"
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+                  <svg width="12" height="12" viewBox="0 0 48 48" fill="none">
+                    <path d="M44.7818 24.1702L31.918 7.09938L14.1348 20.5L27.5 37L30.8556 34.6644L44.7818 24.1702Z" fill="currentColor" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
+                    <path d="M27.4998 37L23.6613 40.0748L13.0978 40.074L10.4973 36.6231L4.06543 28.0876L14.4998 20.2248" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
+                    <path d="M13.2056 40.0721L44.5653 40.072" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
                   </svg>
                 </button>
               );
