@@ -1169,6 +1169,23 @@ const App = () => {
 
   // Helper to calculate handle position for smart connect line
   const getHandlePosition = useCallback((nodeId: string, handleId: string, type: "source" | "target") => {
+    if (reactFlowInstance) {
+      const escapeId = (value: string) =>
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(value)
+          : value.replace(/["\\]/g, "\\$&");
+      const safeNodeId = escapeId(nodeId);
+      const safeHandleId = escapeId(handleId);
+      const handleEl = document.querySelector(
+        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle[data-handleid="${safeHandleId}"]`
+      ) as HTMLElement | null;
+      if (handleEl) {
+        const rect = handleEl.getBoundingClientRect();
+        const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        return reactFlowInstance.screenToFlowPosition(center);
+      }
+    }
+
     const node = nodes.find((n) => n.id === nodeId);
     if (!node) return null;
 
@@ -1188,7 +1205,7 @@ const App = () => {
       x: node.position.x + (isInput ? 0 : nodeWidth),
       y: node.position.y + yOffset,
     };
-  }, [nodes]);
+  }, [nodes, reactFlowInstance]);
 
   const onConnectStart = useCallback((_: unknown, { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
     setConnectStartParams({ nodeId, handleId, handleType });
