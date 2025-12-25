@@ -3103,10 +3103,28 @@ body {
   min-width: 0;
 }
 
+.node-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .node-name {
   font-weight: 500;
   font-size: 13px;
   color: var(--text-primary);
+}
+
+.node-category {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .node-desc {

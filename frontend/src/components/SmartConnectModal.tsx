@@ -252,7 +252,10 @@ const SmartConnectModal = ({
                         >
                             <div className="item-icon">{getCategoryIcon(category)}</div>
                             <div className="item-content">
-                                <span className="node-name">{node.display_name}</span>
+                                <div className="node-title-row">
+                                    <span className="node-category">{category}</span>
+                                    <span className="node-name">{node.display_name}</span>
+                                </div>
                                 <span className="node-desc">{node.description}</span>
                             </div>
                             {index === selectedIndex && <span className="enter-hint">↵</span>}
