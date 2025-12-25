@@ -48,6 +48,33 @@ const SmartConnectModal = ({
                 node.display_name.toLowerCase().includes(normalizedQuery) ||
                 node.node_type.toLowerCase().includes(normalizedQuery)
             );
+
+            const scoreMatch = (text: string) => {
+                const normalizedText = text.toLowerCase();
+                if (normalizedText === normalizedQuery) return 0;
+
+                const words = normalizedText.split(/[^a-z0-9]+/).filter(Boolean);
+                if (words[0] === normalizedQuery) return 1;
+                if (words.includes(normalizedQuery)) return 2;
+                if (normalizedText.startsWith(normalizedQuery)) return 3;
+                if (words.some((word) => word.startsWith(normalizedQuery))) return 4;
+                if (normalizedText.includes(normalizedQuery)) return 5;
+                return 6;
+            };
+
+            const scoreNode = (node: NodeTypeDefinition) => {
+                const displayScore = scoreMatch(node.display_name);
+                if (displayScore < 6) return displayScore;
+                const typeScore = scoreMatch(node.node_type);
+                return typeScore < 6 ? typeScore + 10 : 20;
+            };
+
+            nodes = [...nodes].sort((a, b) => {
+                const aScore = scoreNode(a);
+                const bScore = scoreNode(b);
+                if (aScore !== bScore) return aScore - bScore;
+                return a.display_name.localeCompare(b.display_name);
+            });
         }
 
         // 2. Sort/Prioritize based on context (if no query)
