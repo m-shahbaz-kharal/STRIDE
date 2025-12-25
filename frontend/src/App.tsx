@@ -1176,9 +1176,16 @@ const App = () => {
           : value.replace(/["\\]/g, "\\$&");
       const safeNodeId = escapeId(nodeId);
       const safeHandleId = escapeId(handleId);
-      const handleEl = document.querySelector(
-        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle[data-handleid="${safeHandleId}"]`
-      ) as HTMLElement | null;
+      const handlePosition = type === "target" ? "left" : "right";
+      const selectors = [
+        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle-${type}[data-handleid="${safeHandleId}"]`,
+        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle.${type}[data-handleid="${safeHandleId}"]`,
+        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle[data-handleid="${safeHandleId}"][data-handlepos="${handlePosition}"]`,
+        `.react-flow__node[data-id="${safeNodeId}"] .react-flow__handle[data-handleid="${safeHandleId}"]`,
+      ];
+      const handleEl = selectors
+        .map((selector) => document.querySelector(selector))
+        .find((el): el is HTMLElement => Boolean(el)) ?? null;
       if (handleEl) {
         const rect = handleEl.getBoundingClientRect();
         const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
