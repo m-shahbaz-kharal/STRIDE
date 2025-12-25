@@ -992,15 +992,63 @@ const App = () => {
     return src === "any" || tgt === "any" || src === tgt;
   }, []);
 
-  const getHandleRole = useCallback(
-    (nodeId: string, handleId: string): "source" | "target" | null => {
-      const node = nodeMap.get(nodeId);
-      if (!node) return null;
-      if (node.data.output_ports.includes(handleId)) return "source";
-      if (node.data.input_ports.includes(handleId)) return "target";
+  const getHandleRoleFromDom = useCallback(
+    (
+      nodeId: string,
+      handleId: string,
+      side?: "source" | "target"
+    ): "source" | "target" | null => {
+      const escapeId = (value: string) =>
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(value)
+          : value.replace(/["\\]/g, "\\$&");
+      const safeNodeId = escapeId(nodeId);
+      const safeHandleId = escapeId(handleId);
+      const nodeSelector = `.react-flow__node[data-id="${safeNodeId}"]`;
+      const baseSelector = `${nodeSelector} .react-flow__handle[data-handleid="${safeHandleId}"]`;
+      const leftSelector = `${baseSelector}[data-handlepos="left"], ${nodeSelector} .react-flow__handle-target[data-handleid="${safeHandleId}"]`;
+      const rightSelector = `${baseSelector}[data-handlepos="right"], ${nodeSelector} .react-flow__handle-source[data-handleid="${safeHandleId}"]`;
+      const hasLeft = Boolean(document.querySelector(leftSelector));
+      const hasRight = Boolean(document.querySelector(rightSelector));
+
+      if (side === "target" && hasLeft) return "target";
+      if (side === "source" && hasRight) return "source";
+      if (hasLeft && !hasRight) return "target";
+      if (hasRight && !hasLeft) return "source";
       return null;
     },
-    [nodeMap]
+    []
+  );
+
+  const getHandleRole = useCallback(
+    (
+      nodeId: string,
+      handleId: string,
+      side?: "source" | "target"
+    ): "source" | "target" | null => {
+      const node = nodeMap.get(nodeId);
+      if (!node) return null;
+      if (
+        side === "source" &&
+        connectStartParams?.nodeId === nodeId &&
+        connectStartParams.handleId === handleId &&
+        connectStartParams.handleType
+      ) {
+        return connectStartParams.handleType;
+      }
+      const domRole = getHandleRoleFromDom(nodeId, handleId, side);
+      if (domRole) return domRole;
+
+      const isOutput = node.data.output_ports.includes(handleId);
+      const isInput = node.data.input_ports.includes(handleId);
+      if (isOutput && isInput && side) {
+        return side;
+      }
+      if (isOutput) return "source";
+      if (isInput) return "target";
+      return null;
+    },
+    [connectStartParams, getHandleRoleFromDom, nodeMap]
   );
 
   const getPortTypeForHandle = useCallback(
@@ -1047,8 +1095,8 @@ const App = () => {
         return connection;
       }
 
-      const sourceRole = getHandleRole(connection.source, connection.sourceHandle);
-      const targetRole = getHandleRole(connection.target, connection.targetHandle);
+      const sourceRole = getHandleRole(connection.source, connection.sourceHandle, "source");
+      const targetRole = getHandleRole(connection.target, connection.targetHandle, "target");
 
       if (sourceRole === "target" && targetRole === "source") {
         return {
@@ -1073,7 +1121,7 @@ const App = () => {
       }
 
       if (!connection.target || !connection.targetHandle) {
-        const sourceRole = getHandleRole(connection.source, connection.sourceHandle);
+        const sourceRole = getHandleRole(connection.source, connection.sourceHandle, "source");
         const sourceType = getPortTypeForHandle(
           connection.source,
           connection.sourceHandle,
@@ -1084,8 +1132,8 @@ const App = () => {
       }
 
       const normalized = normalizeConnection(connection);
-      const sourceRole = getHandleRole(normalized.source!, normalized.sourceHandle!);
-      const targetRole = getHandleRole(normalized.target!, normalized.targetHandle!);
+      const sourceRole = getHandleRole(normalized.source!, normalized.sourceHandle!, "source");
+      const targetRole = getHandleRole(normalized.target!, normalized.targetHandle!, "target");
 
       if (sourceRole !== "source" || targetRole !== "target") {
         setConnectionLineIsInvalid(true);
