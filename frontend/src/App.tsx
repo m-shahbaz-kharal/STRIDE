@@ -1414,8 +1414,15 @@ const App = () => {
           );
         } else {
           const edgeColor = getPortTypeColor(sourceType);
-          setEdges((eds) =>
-            addEdge(
+          setEdges((eds) => {
+            const filtered =
+              source.type === "target"
+                ? eds.filter(
+                    (edge) =>
+                      !(edge.target === targetId && edge.targetHandle === targetHandle)
+                  )
+                : eds;
+            return addEdge(
               {
                 source: sourceId,
                 sourceHandle: sourceHandle,
@@ -1425,9 +1432,9 @@ const App = () => {
                 animated: false,
                 style: { stroke: edgeColor, strokeWidth: 2 },
               },
-              eds
-            )
-          );
+              filtered
+            );
+          });
         }
       }
 
