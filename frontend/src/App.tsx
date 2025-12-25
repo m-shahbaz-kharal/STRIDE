@@ -1013,8 +1013,33 @@ const App = () => {
           : node.data.input_port_types || node.data.metadata?.input_port_types;
       return map?.[handleId] || "any";
     },
-      [nodeMap]
-    );
+    [nodeMap]
+  );
+
+  const findCompatiblePortForSmartConnect = useCallback(
+    (nodeType: NodeTypeDefinition, source: { nodeId: string; handleId: string; type: "source" | "target" }) => {
+      if (source.type === "source") {
+        const sourceType = getPortTypeForHandle(source.nodeId, source.handleId, "source");
+        for (const port of nodeType.input_ports) {
+          const targetType = nodeType.input_port_types?.[port] || "any";
+          if (arePortTypesCompatible(sourceType, targetType)) {
+            return { targetHandle: port, sourceType, targetType };
+          }
+        }
+        return null;
+      }
+
+      const targetType = getPortTypeForHandle(source.nodeId, source.handleId, "target");
+      for (const port of nodeType.output_ports) {
+        const sourceType = nodeType.output_port_types?.[port] || "any";
+        if (arePortTypesCompatible(sourceType, targetType)) {
+          return { sourceHandle: port, sourceType, targetType };
+        }
+      }
+      return null;
+    },
+    [arePortTypesCompatible, getPortTypeForHandle]
+  );
 
   const normalizeConnection = useCallback(
     (connection: Connection) => {
@@ -1146,6 +1171,13 @@ const App = () => {
   );
 
   const isValidConnection = useCallback((connection: Connection) => validateConnection(connection).valid, [validateConnection]);
+
+  const smartConnectNodeTypes = useMemo(() => {
+    if (!smartConnectMenu.source) return nodeLibrary;
+    return nodeLibrary.filter((nodeType) =>
+      Boolean(findCompatiblePortForSmartConnect(nodeType, smartConnectMenu.source!))
+    );
+  }, [findCompatiblePortForSmartConnect, nodeLibrary, smartConnectMenu.source]);
 
   // Ensure all edges carry a color that matches their source port type
   useEffect(() => {
@@ -1289,6 +1321,13 @@ const App = () => {
       const { flowPosition, source } = smartConnectMenu;
       const newId = `node-${nodeIdRef.current++}`;
 
+      const compatiblePort = findCompatiblePortForSmartConnect(nodeType, source);
+      if (!compatiblePort) {
+        showConnectionMessage("No compatible ports found for this node");
+        setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
+        return;
+      }
+
       // Create new node
       const params: Record<string, unknown> = {};
       const defaults = nodeType.params_defaults ?? {};
@@ -1304,8 +1343,11 @@ const App = () => {
       let yOffset = 0;
 
       // Header ~50px, Port stride ~26px, Handle center +10px
-      // We connect to the first port (index 0) by default
-      const portYOffset = HEADER_HEIGHT + PORT_ROW_HEIGHT / 2;
+      const matchedPortIndex = source.type === "source"
+        ? nodeType.input_ports.indexOf(compatiblePort.targetHandle!)
+        : nodeType.output_ports.indexOf(compatiblePort.sourceHandle!);
+      const resolvedPortIndex = matchedPortIndex >= 0 ? matchedPortIndex : 0;
+      const portYOffset = HEADER_HEIGHT + resolvedPortIndex * PORT_ROW_HEIGHT + PORT_ROW_HEIGHT / 2;
 
       if (source.type === "source") {
         // Dragging from Source (Output) -> Connect to New Node's Input (Left side)
@@ -1354,23 +1396,17 @@ const App = () => {
         sourceId = source.nodeId;
         sourceHandle = source.handleId;
         targetId = newId;
-        targetHandle = nodeType.input_ports[0]; // Connect to first input
+        targetHandle = compatiblePort.targetHandle; // Connect to compatible input
       } else {
         sourceId = newId;
-        sourceHandle = nodeType.output_ports[0]; // Connect from first output
+        sourceHandle = compatiblePort.sourceHandle; // Connect from compatible output
         targetId = source.nodeId;
         targetHandle = source.handleId;
       }
 
       if (sourceHandle && targetHandle) {
-        const sourceType =
-          source.type === "source"
-            ? getPortTypeForHandle(sourceId, sourceHandle, "source")
-            : nodeType.output_port_types?.[sourceHandle] || "any";
-        const targetType =
-          source.type === "source"
-            ? nodeType.input_port_types?.[targetHandle] || "any"
-            : getPortTypeForHandle(targetId, targetHandle, "target");
+        const sourceType = compatiblePort.sourceType;
+        const targetType = compatiblePort.targetType;
 
         if (!arePortTypesCompatible(sourceType, targetType)) {
           showConnectionMessage(
@@ -1397,19 +1433,19 @@ const App = () => {
 
       setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
     },
-    [
-      smartConnectMenu,
-      handleDeleteNode,
-      handleRunFromNode,
-      handleClearNodeCache,
-      handleInterruptNode,
-      setNodes,
-      setEdges,
-      arePortTypesCompatible,
-      getPortTypeForHandle,
-      showConnectionMessage,
-    ]
-  );
+      [
+        smartConnectMenu,
+        handleDeleteNode,
+        handleRunFromNode,
+        handleClearNodeCache,
+        handleInterruptNode,
+        setNodes,
+        setEdges,
+        arePortTypesCompatible,
+        findCompatiblePortForSmartConnect,
+        showConnectionMessage,
+      ]
+    );
 
   const selectedNodes = useMemo(
     () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
@@ -1918,7 +1954,7 @@ const App = () => {
           position={smartConnectMenu.position}
           onClose={() => setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }))}
           onSelect={handleSmartConnectSelect}
-          nodeTypes={nodeLibrary}
+          nodeTypes={smartConnectNodeTypes}
           sourceHandleType={smartConnectMenu.source?.type}
         />
       </div>
