@@ -82,16 +82,17 @@ class GraphExecutor:
         # Caching options
         self._cache = ExecutionCache(enabled=self.options.get("use_cache", True))
         
+        self._execution_order: List[str] = []
+        self._loop_nodes: Set[str] = set()
+        self._loop_body_nodes: Dict[str, Set[str]] = {}
+        self._nodes_in_loop_body: Set[str] = set()
+
         self._build_nodes()
         self._build_links()
         self._validate_output_nodes()
         self._topo_order = self._topological_sort()
         self._compute_levels()
         self._build_loop_sets()
-        self._execution_order: List[str] = []
-        self._loop_nodes: Set[str] = set()
-        self._loop_body_nodes: Dict[str, Set[str]] = {}
-        self._nodes_in_loop_body: Set[str] = set()
 
     @classmethod
     def _register_execution(cls, executor: "GraphExecutor") -> None:
@@ -430,10 +431,11 @@ class GraphExecutor:
         inputs: Dict[str, Any],
         result: NodeExecutionResult,
         cached: bool = False,
+        allow_cache: bool = True,
     ) -> None:
         """Persist a node result back into executor state."""
         if result.status == NodeStatus.COMPLETED:
-            if not cached:
+            if not cached and allow_cache:
                 self._cache_outputs(node_id, inputs, result.outputs)
             with self._state_lock:
                 self._computed_values[node_id] = result.outputs
@@ -507,10 +509,10 @@ class GraphExecutor:
                 level=self._node_levels.get(node_id, 0),
                 from_cache=True,
             )
-            self._finalize_node_result(node_id, inputs, result, cached=True)
+            self._finalize_node_result(node_id, inputs, result, cached=True, allow_cache=allow_cache)
             return result
         result = self._execute_node_work(node_id, inputs)
-        self._finalize_node_result(node_id, inputs, result, cached=False)
+        self._finalize_node_result(node_id, inputs, result, cached=False, allow_cache=allow_cache)
         return result
 
     def _execute_loop_sync(

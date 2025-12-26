@@ -39,6 +39,7 @@ VAR_DECLARE_SPEC = NodeSpec(
             default="var",
         )
     },
+    cache_policy="disabled",
 )
 
 
@@ -76,6 +77,7 @@ VAR_SET_SPEC = NodeSpec(
             default="var",
         )
     },
+    cache_policy="disabled",
 )
 
 
@@ -117,6 +119,7 @@ VAR_GET_SPEC = NodeSpec(
             default="",
         ),
     },
+    cache_policy="disabled",
 )
 
 
