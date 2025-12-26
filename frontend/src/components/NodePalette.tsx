@@ -22,7 +22,7 @@ const ChevronIcon = ({ collapsed }: { collapsed: boolean }) => (
 );
 
 // Parse node type to extract category and node name
-// e.g., "constant.number" -> { category: "Constant", nodeName: "Number" }
+// e.g., "literal.int" -> { category: "Literal", nodeName: "Int" }
 // e.g., "math.add" -> { category: "Math", nodeName: "Add" }
 const parseNodeType = (nodeType: string): { category: string; nodeName: string } => {
   const parts = nodeType.split(".");
@@ -37,8 +37,8 @@ const parseNodeType = (nodeType: string): { category: string; nodeName: string }
   return { category: "Other", nodeName: nodeType };
 };
 
-const getCategoryForNodeType = (nodeType: string): string => {
-  return parseNodeType(nodeType).category;
+const getCategoryForNodeType = (nodeType: NodeTypeDefinition): string => {
+  return nodeType.category || parseNodeType(nodeType.node_type).category;
 };
 
 const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
@@ -63,7 +63,7 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
     const categories: Record<string, NodeTypeDefinition[]> = {};
 
     for (const nodeType of filteredNodeTypes) {
-      const category = getCategoryForNodeType(nodeType.node_type);
+      const category = getCategoryForNodeType(nodeType);
       if (!categories[category]) {
         categories[category] = [];
       }

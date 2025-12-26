@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .nodes import list_node_types
+from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
 from .nodes.camera import STREAM_MANAGER
 
@@ -36,6 +36,12 @@ async def get_node_types() -> list[Dict[str, Any]]:
     return list_node_types()
 
 
+@app.get("/api/node-definitions")
+async def get_node_definitions() -> list[Dict[str, Any]]:
+    """Typed node definition schema (preferred)."""
+    return list_node_definitions()
+
+
 @app.post("/api/run-graph")
 async def run_graph(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Execute graph synchronously (legacy endpoint)."""
@@ -45,7 +51,7 @@ async def run_graph(payload: Dict[str, Any]) -> Dict[str, Any]:
         graph_executor = GraphExecutor(graph_definition, options=options)
         return graph_executor.run()
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
 
 
 @app.post("/api/run-graph-async")
@@ -57,7 +63,7 @@ async def run_graph_async(payload: Dict[str, Any]) -> Dict[str, Any]:
         graph_executor = GraphExecutor(graph_definition, options=options)
         return await graph_executor.run_async()
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
 
 
 @app.post("/api/execution-plan")
@@ -69,7 +75,7 @@ async def get_execution_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         graph_executor = GraphExecutor(graph_definition, options=options)
         return graph_executor.get_execution_plan()
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
 
 
 @app.post("/api/cache/clear")
@@ -148,7 +154,7 @@ def serialize_event(event) -> str:
     optional_fields = [
         "node_id", "node_type", "status", "outputs", "logs",
         "duration_ms", "error", "level", "progress", "total_nodes",
-        "completed_nodes", "execution_plan", "levels", "from_cache"
+        "completed_nodes", "execution_plan", "levels", "from_cache", "error_code"
     ]
     
     for field in optional_fields:

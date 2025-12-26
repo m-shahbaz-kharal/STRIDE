@@ -19,6 +19,14 @@ const parseParamValue = (
     const numeric = Number(raw);
     return Number.isNaN(numeric) ? 0 : numeric;
   }
+  if (schema.type === "float") {
+    const numeric = Number(raw);
+    return Number.isNaN(numeric) ? 0 : numeric;
+  }
+  if (schema.type === "int") {
+    const numeric = parseInt(raw, 10);
+    return Number.isNaN(numeric) ? 0 : numeric;
+  }
   if (schema.type === "select" && schema.options?.length) {
     return raw;
   }
@@ -137,7 +145,8 @@ const NodeCard = ({
                   ) : (
                     <input
                       id={`param-${node.id}-${param}`}
-                      type={field.type === "number" ? "number" : "text"}
+                      type={field.type === "number" || field.type === "float" || field.type === "int" ? "number" : "text"}
+                      step={field.type === "int" ? 1 : "any"}
                       value={`${node.data.params[param] ?? field.default ?? ""}`}
                       onChange={(event) =>
                         onParamChange(node.id, param, parseParamValue(event.target.value, field))

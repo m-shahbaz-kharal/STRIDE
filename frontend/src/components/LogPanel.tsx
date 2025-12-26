@@ -7,6 +7,7 @@ type LogPanelProps = {
   trace: ExecutionTraceEntry[];
   outputs: Record<string, unknown>;
   error: string | null;
+  errorCode?: string | null;
   stats?: ExecutionStats | null;
   levels?: string[][];
   isRunning?: boolean;
@@ -31,6 +32,7 @@ const LogPanel = ({
   trace, 
   outputs, 
   error,
+  errorCode,
   stats = null,
   levels = [],
   isRunning = false,
@@ -84,7 +86,7 @@ const LogPanel = ({
               <span className="progress-text">{Math.round(progress * 100)}%</span>
             </div>
           )}
-          {error && <span className="log-error-badge">Error</span>}
+          {error && <span className="log-error-badge">Error{errorCode ? ` (${errorCode})` : ""}</span>}
         </div>
       </div>
 
@@ -166,7 +168,7 @@ const LogPanel = ({
             </div>
             <div className="trace-item" style={{ borderColor: "rgba(248, 81, 73, 0.4)" }}>
               <div className="trace-log" style={{ color: "#f85149", borderColor: "#f85149" }}>
-                {error}
+                {errorCode ? `[${errorCode}] ` : ""}{error}
               </div>
             </div>
           </div>

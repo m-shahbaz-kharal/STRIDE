@@ -29,6 +29,7 @@ import { useUndoRedo } from "./hooks/useUndoRedo";
 import {
   BlueprintNodeData,
   NodeTypeDefinition,
+  TypeDescriptor,
 } from "./types";
 import {
   MIN_NODE_WIDTH,
@@ -108,6 +109,7 @@ const App = () => {
   const connectionMessageTimeout = useRef<number | null>(null);
   const [connectionLineColor, setConnectionLineColor] = useState<string | undefined>(undefined);
   const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
+  const [connectionLineDash, setConnectionLineDash] = useState<string | undefined>(undefined);
   const connectSucceededRef = useRef(false);
 
   // Ensure connection toast timers are cleaned up
@@ -206,16 +208,54 @@ const App = () => {
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
   const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
 
+  const normalizeDefinition = useCallback((def: any): NodeTypeDefinition => {
+    const inputs: { name: string; type: TypeDescriptor }[] =
+      def.inputs ??
+      (def.input_ports || []).map((name: string) => ({
+        name,
+        type: typeof def.input_port_types?.[name] === "object"
+          ? def.input_port_types[name]
+          : { kind: def.input_port_types?.[name] || "any" },
+      }));
+    const outputs: { name: string; type: TypeDescriptor }[] =
+      def.outputs ??
+      (def.output_ports || []).map((name: string) => ({
+        name,
+        type: typeof def.output_port_types?.[name] === "object"
+          ? def.output_port_types[name]
+          : { kind: def.output_port_types?.[name] || "any" },
+      }));
+
+    return {
+      ...def,
+      inputs,
+      outputs,
+      input_ports: inputs.map((p) => p.name),
+      output_ports: outputs.map((p) => p.name),
+      input_port_types: Object.fromEntries(inputs.map((p) => [p.name, p.type])),
+      output_port_types: Object.fromEntries(outputs.map((p) => [p.name, p.type])),
+    };
+  }, []);
+
   // Load node types
   useEffect(() => {
-    fetch("/api/node-types")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load node registry.");
-        const data: NodeTypeDefinition[] = await response.json();
-        setNodeLibrary(data);
-      })
-      .catch(() => setNodeLibrary([]));
-  }, []);
+    const load = async () => {
+      const urls = ["/api/node-definitions", "/api/node-types"];
+      for (const url of urls) {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) continue;
+          const data: any[] = await response.json();
+          setNodeLibrary(data.map((d) => normalizeDefinition(d)));
+          return;
+        } catch (err) {
+          continue;
+        }
+      }
+      setNodeLibrary([]);
+    };
+    load();
+  }, [normalizeDefinition]);
 
   // Handle panel resizing
   useEffect(() => {
@@ -315,6 +355,11 @@ const App = () => {
         const targetInRunningSet = runningNodeIds.has(edge.target);
         const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
 
+        const sourceType = sourceNode?.data.nodeType ?? "";
+        const isLoopNode = sourceType === "core.control.for" || sourceType === "core.control.repeat" || sourceType === "core.control.while";
+        const isLoopBodyEdge = isLoopNode && edge.sourceHandle === "loop_body";
+        const isLoopRunning = isLoopNode && nodeStatuses.get(edge.source) === "running";
+
         // Determine edge color
         let strokeColor = "#4a9eff"; // default
         if (isRunning && targetInRunningSet) {
@@ -330,6 +375,8 @@ const App = () => {
           }
         }
 
+        const loopDash = isLoopBodyEdge ? (isLoopRunning ? "2 4" : undefined) : edge.style?.strokeDasharray;
+
         return {
           ...edge,
           animated: shouldAnimate,
@@ -337,6 +384,7 @@ const App = () => {
             ...edge.style,
             stroke: strokeColor,
             strokeWidth: (isRunning && targetInRunningSet) ? 2.5 : 2,
+            strokeDasharray: loopDash,
           },
         };
       })
@@ -471,6 +519,41 @@ const App = () => {
     [updateNodeData]
   );
 
+  const handleInputValueChange = useCallback(
+    (nodeId: string, port: string, value: string | number | boolean | null) =>
+      updateNodeData(nodeId, (data) => ({
+        ...data,
+        inputValues: { ...(data.inputValues ?? {}), [port]: value },
+      })),
+    [updateNodeData]
+  );
+
+  const handleAddInputPort = useCallback(
+    (nodeId: string) =>
+      updateNodeData(nodeId, (data) => {
+        const existing = data.input_ports.filter((port) => port.startsWith("item_"));
+        const nextIndex = existing.length > 0
+          ? Math.max(...existing.map((port) => Number(port.split("_")[1]) || 0)) + 1
+          : 0;
+        const nextPort = `item_${nextIndex}`;
+        const input_ports = [...data.input_ports, nextPort];
+        const input_port_types = { ...(data.input_port_types ?? {}), [nextPort]: { kind: "any" } };
+        const inputValues = { ...(data.inputValues ?? {}), [nextPort]: null };
+        const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
+        const maxPorts = Math.max(input_ports.length + extraInputRows, data.output_ports.length);
+        const { width, height } = computeNodeDimensions(maxPorts);
+        return {
+          ...data,
+          input_ports,
+          input_port_types,
+          inputValues,
+          width,
+          height,
+        };
+      }),
+    [updateNodeData]
+  );
+
   const handleDeleteNode = useCallback((nodeId: string) => {
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) =>
@@ -527,23 +610,50 @@ const App = () => {
     );
   }, [previewEdgeIds, setEdges]);
 
+  const getPortTypeForHandle = useCallback(
+    (nodeId: string, handleId: string, role: "source" | "target"): TypeDescriptor => {
+      const node = nodeMap.get(nodeId);
+      if (!node) return { kind: "any" };
+      const map =
+        role === "source"
+          ? node.data.output_port_types || node.data.metadata?.output_port_types
+          : node.data.input_port_types || node.data.metadata?.input_port_types;
+      const value = map?.[handleId];
+      if (!value) return { kind: "any" };
+      if (typeof value === "string") return { kind: value as TypeDescriptor["kind"] };
+      return value as TypeDescriptor;
+    },
+    [nodeMap]
+  );
+
   const buildGraphPayload = useCallback(
     (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
       const nodePayload = nodes.map((node) => ({
         id: node.id,
         type: node.data.nodeType,
         params: node.data.params,
+        input_values: node.data.inputValues ?? {},
+        input_ports_override: node.data.input_ports,
+        input_port_types_override: node.data.input_port_types,
+        output_ports_override: node.data.output_ports,
+        output_port_types_override: node.data.output_port_types,
       }));
 
       const linkPayload = edges
         .filter((edge): edge is typeof edge & { sourceHandle: string; targetHandle: string } =>
           Boolean(edge.sourceHandle) && Boolean(edge.targetHandle))
-        .map((edge) => ({
-          from_node: edge.source,
-          from_port: edge.sourceHandle,
-          to_node: edge.target,
-          to_port: edge.targetHandle,
-        }));
+        .map((edge) => {
+          const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle!, "source");
+          const targetType = getPortTypeForHandle(edge.target, edge.targetHandle!, "target");
+          const isControl = sourceType.kind === "control" || targetType.kind === "control";
+          return {
+            from_node: edge.source,
+            from_port: edge.sourceHandle,
+            to_node: edge.target,
+            to_port: edge.targetHandle,
+            kind: isControl ? "control" : (edge.data as any)?.kind || "data",
+          };
+        });
 
       const options: Record<string, unknown> = { mode };
       if (mode === "selection" && targetNodes?.length) {
@@ -561,7 +671,7 @@ const App = () => {
         options,
       };
     },
-    [edges, nodes]
+    [edges, nodes, getPortTypeForHandle]
   );
 
   const handleRunGraph = useCallback(
@@ -907,6 +1017,32 @@ const App = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleDeleteSelected, handleSelectAll, handleDuplicateSelected, handleCopy, handlePaste, selectedNodeIds]);
 
+  const buildDefaultInputValues = useCallback((nodeType: NodeTypeDefinition) => {
+    const inputValues: Record<string, unknown> = {};
+    for (const input of nodeType.inputs ?? []) {
+      if (input.type?.kind === "control") {
+        continue;
+      }
+      if (input.default !== undefined && input.default !== null) {
+        inputValues[input.name] = input.default;
+      }
+    }
+    return inputValues;
+  }, []);
+
+  const getInitialPorts = useCallback((nodeType: NodeTypeDefinition) => {
+    if (nodeType.node_type === "core.container.make_array") {
+      return {
+        input_ports: ["item_0"],
+        input_port_types: { item_0: { kind: "any" } },
+      };
+    }
+    return {
+      input_ports: nodeType.input_ports,
+      input_port_types: nodeType.input_port_types,
+    };
+  }, []);
+
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
       takeSnapshot();
@@ -915,11 +1051,18 @@ const App = () => {
       for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
         params[key] = schema.default ?? defaults[key] ?? "";
       }
+      const { input_ports, input_port_types } = getInitialPorts(nodeType);
+      const inputValues = buildDefaultInputValues(nodeType);
+      const seededInputValues =
+        nodeType.node_type === "core.container.make_array"
+          ? { ...inputValues, item_0: null }
+          : inputValues;
       const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
 
       // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
-      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
+      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
       const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       const payload: Node<BlueprintNodeData> = {
@@ -930,11 +1073,12 @@ const App = () => {
           displayName: nodeType.display_name,
           nodeType: nodeType.node_type,
           description: nodeType.description,
-          input_ports: nodeType.input_ports,
+          input_ports,
           output_ports: nodeType.output_ports,
-          input_port_types: nodeType.input_port_types,
+          input_port_types,
           output_port_types: nodeType.output_port_types,
           params,
+          inputValues: seededInputValues,
           breakpoint: false,
           metadata: nodeType,
           onDelete: handleDeleteNode,
@@ -942,6 +1086,8 @@ const App = () => {
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
           onPortHover: setHoveredPort,
+          onInputValueChange: handleInputValueChange,
+          onAddInputPort: handleAddInputPort,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -949,7 +1095,18 @@ const App = () => {
       };
       setNodes((existing) => existing.concat(payload));
     },
-    [handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, nodes.length, setNodes]
+    [
+      buildDefaultInputValues,
+      getInitialPorts,
+      handleDeleteNode,
+      handleRunFromNode,
+      handleClearNodeCache,
+      handleInterruptNode,
+      handleInputValueChange,
+      handleAddInputPort,
+      nodes.length,
+      setNodes,
+    ]
   );
 
   // Update existing nodes with the run handler
@@ -964,10 +1121,20 @@ const App = () => {
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
           onPortHover: setHoveredPort,
+          onInputValueChange: handleInputValueChange,
+          onAddInputPort: handleAddInputPort,
         },
       }))
     );
-  }, [handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
+  }, [
+    handleDeleteNode,
+    handleRunFromNode,
+    handleClearNodeCache,
+    handleInterruptNode,
+    handleInputValueChange,
+    handleAddInputPort,
+    setNodes,
+  ]);
 
   const graphStats = useMemo(
     () => ({
@@ -986,11 +1153,43 @@ const App = () => {
     connectionMessageTimeout.current = window.setTimeout(() => setConnectionMessage(null), 1800);
   }, []);
 
-  const arePortTypesCompatible = useCallback((sourceType: string, targetType: string) => {
-    const src = (sourceType || "any").toLowerCase();
-    const tgt = (targetType || "any").toLowerCase();
-    return src === "any" || tgt === "any" || src === tgt;
+  const normalizeType = useCallback((type?: TypeDescriptor | string | null): TypeDescriptor => {
+    if (!type) return { kind: "any" };
+    if (typeof type === "string") {
+      if (type === "number") return { kind: "float" };
+      return { kind: type as TypeDescriptor["kind"] };
+    }
+    return type;
   }, []);
+
+  const arePortTypesCompatible = useCallback((sourceType: TypeDescriptor | string | undefined, targetType: TypeDescriptor | string | undefined) => {
+    const src = normalizeType(sourceType);
+    const tgt = normalizeType(targetType);
+    if (tgt.kind === "any" || src.kind === "any") return true;
+    if (tgt.kind === "unknown" || src.kind === "unknown") return true;
+    if (src.kind === "int" && tgt.kind === "float") return true;
+    if (src.nullable && !tgt.nullable) return false;
+    if (src.kind !== tgt.kind) return false;
+    if (src.kind === "list" && src.item && tgt.item) {
+      return arePortTypesCompatible(src.item, tgt.item);
+    }
+    if (src.kind === "map" && src.value && tgt.value) {
+      return arePortTypesCompatible(src.value, tgt.value);
+    }
+    if (src.kind === "option" && src.item && tgt.item) {
+      return arePortTypesCompatible(src.item, tgt.item);
+    }
+    if (src.kind === "record" && src.fields && tgt.fields) {
+      const tgtKeys = Object.keys(tgt.fields);
+      return tgtKeys.every((key) => src.fields && src.fields[key] && arePortTypesCompatible(src.fields[key], tgt.fields![key]));
+    }
+    if (src.kind === "tensor") {
+      const srcDtype = src.metadata?.dtype;
+      const tgtDtype = tgt.metadata?.dtype;
+      if (srcDtype && tgtDtype && srcDtype !== tgtDtype) return false;
+    }
+    return true;
+  }, [normalizeType]);
 
   const getHandleRoleFromDom = useCallback(
     (
@@ -1049,19 +1248,6 @@ const App = () => {
       return null;
     },
     [connectStartParams, getHandleRoleFromDom, nodeMap]
-  );
-
-  const getPortTypeForHandle = useCallback(
-    (nodeId: string, handleId: string, role: "source" | "target") => {
-      const node = nodeMap.get(nodeId);
-      if (!node) return "any";
-      const map =
-        role === "source"
-          ? node.data.output_port_types || node.data.metadata?.output_port_types
-          : node.data.input_port_types || node.data.metadata?.input_port_types;
-      return map?.[handleId] || "any";
-    },
-    [nodeMap]
   );
 
   const findCompatiblePortForSmartConnect = useCallback(
@@ -1128,6 +1314,8 @@ const App = () => {
           sourceRole === "target" ? "target" : "source"
         );
         setConnectionLineIsInvalid(false);
+        setConnectionLineColor(getPortTypeColor(sourceType));
+        setConnectionLineDash(sourceType.kind === "control" ? "8 4" : undefined);
         return { valid: true, sourceType };
       }
 
@@ -1151,6 +1339,7 @@ const App = () => {
 
       setConnectionLineIsInvalid(!compatible);
       const desiredColor = getPortTypeColor(sourceType);
+      setConnectionLineDash(sourceType.kind === "control" || targetType.kind === "control" ? "8 4" : undefined);
       if (connectionLineColor !== desiredColor) {
         setConnectionLineColor(desiredColor);
       }
@@ -1383,7 +1572,8 @@ const App = () => {
         params[key] = schema.default ?? defaults[key] ?? "";
       }
 
-      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
+      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
       const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       // Calculate position to align the connecting handle with the drop location
@@ -1415,9 +1605,9 @@ const App = () => {
           displayName: nodeType.display_name,
           nodeType: nodeType.node_type,
           description: nodeType.description,
-          input_ports: nodeType.input_ports,
+          input_ports,
           output_ports: nodeType.output_ports,
-          input_port_types: nodeType.input_port_types,
+          input_port_types,
           output_port_types: nodeType.output_port_types,
           params,
           breakpoint: false,
@@ -1588,11 +1778,18 @@ const App = () => {
       for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
         params[key] = schema.default ?? defaults[key] ?? "";
       }
+      const { input_ports, input_port_types } = getInitialPorts(nodeType);
+      const inputValues = buildDefaultInputValues(nodeType);
+      const seededInputValues =
+        nodeType.node_type === "core.container.make_array"
+          ? { ...inputValues, item_0: null }
+          : inputValues;
 
       const id = `node-${nodeIdRef.current++}`;
 
       // Calculate initial size based on ports
-      const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
+      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
+      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
       const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
 
       const newNode: Node<BlueprintNodeData> = {
@@ -1603,11 +1800,12 @@ const App = () => {
           displayName: nodeType.display_name,
           nodeType: nodeType.node_type,
           description: nodeType.description,
-          input_ports: nodeType.input_ports,
+          input_ports,
           output_ports: nodeType.output_ports,
-          input_port_types: nodeType.input_port_types,
+          input_port_types,
           output_port_types: nodeType.output_port_types,
           params,
+          inputValues: seededInputValues,
           breakpoint: false,
           metadata: nodeType,
           onDelete: handleDeleteNode,
@@ -1615,6 +1813,8 @@ const App = () => {
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
           onPortHover: setHoveredPort,
+          onInputValueChange: handleInputValueChange,
+          onAddInputPort: handleAddInputPort,
           width: initialWidth,
           height: initialHeight,
           executionLogs: [],
@@ -1623,7 +1823,18 @@ const App = () => {
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance, setNodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode]
+    [
+      reactFlowInstance,
+      setNodes,
+      buildDefaultInputValues,
+      getInitialPorts,
+      handleDeleteNode,
+      handleRunFromNode,
+      handleClearNodeCache,
+      handleInterruptNode,
+      handleInputValueChange,
+      handleAddInputPort,
+    ]
   );
 
   return (
@@ -1660,6 +1871,7 @@ const App = () => {
               connectionLineStyle={{
                 stroke: connectionLineColor || "#4a9eff",
                 strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+                strokeDasharray: connectionLineDash,
               }}
               connectionLineComponent={TypeAwareConnectionLine}
               attributionPosition="bottom-left"

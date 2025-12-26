@@ -1,54 +1,56 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Type
+from typing import Any, Dict, List, Type
 
 from .base import ExecutionContext, NodeBase
+from ..node_spec import NodeSpec
 
-NODE_REGISTRY: Dict[str, Type[NodeBase]] = {}
+class NodeRegistration:
+    def __init__(self, spec: NodeSpec, cls: Type[NodeBase]) -> None:
+        self.spec = spec
+        self.cls = cls
 
 
-def register_node(node_cls: Type[NodeBase]) -> Type[NodeBase]:
-    NODE_REGISTRY[node_cls.node_type] = node_cls
-    return node_cls
+NODE_REGISTRY: Dict[str, NodeRegistration] = {}
 
 
-def get_node(node_type: str) -> Type[NodeBase]:
+def register_node(spec: NodeSpec):
+    def decorator(node_cls: Type[NodeBase]) -> Type[NodeBase]:
+        node_cls.spec = spec
+        NODE_REGISTRY[spec.type] = NodeRegistration(spec, node_cls)
+        return node_cls
+    return decorator
+
+
+def get_node(node_type: str) -> NodeRegistration:
     if node_type not in NODE_REGISTRY:
         raise KeyError(f"Unknown node type '{node_type}'")
     return NODE_REGISTRY[node_type]
 
 
-from . import addition  # noqa: F401
-from . import camera  # noqa: F401
-from . import constant  # noqa: F401
-from . import math_ops  # noqa: F401
-
-
 def list_node_types() -> List[Dict[str, Any]]:
-    metadata: List[Dict[str, Any]] = []
-    for node_cls in NODE_REGISTRY.values():
-        schema = getattr(node_cls, "params_schema", {}) or {}
-        input_ports = list(getattr(node_cls, "input_ports", []))
-        output_ports = list(getattr(node_cls, "output_ports", []))
-        input_types = getattr(node_cls, "input_port_types", {}) or {}
-        output_types = getattr(node_cls, "output_port_types", {}) or {}
-        metadata.append(
-            {
-                "node_type": node_cls.node_type,
-                "display_name": getattr(node_cls, "display_name", node_cls.node_type),
-                "description": getattr(node_cls, "description", ""),
-                "icon": getattr(node_cls, "icon", ""),
-                "input_ports": input_ports,
-                "output_ports": output_ports,
-                "input_port_types": {port: input_types.get(port, "any") for port in input_ports},
-                "output_port_types": {port: output_types.get(port, "any") for port in output_ports},
-                "params_schema": schema,
-                "params_defaults": {
-                    name: field.get("default") for name, field in schema.items() if "default" in field
-                },
-            }
-        )
-    return metadata
+    """Legacy endpoint payload for the existing frontend."""
+    return [
+        registration.spec.to_dict()
+        for registration in NODE_REGISTRY.values()
+    ]
+
+
+def list_node_definitions() -> List[Dict[str, Any]]:
+    return [
+        registration.spec.to_dict()
+        for registration in NODE_REGISTRY.values()
+    ]
+
+
+# Register built-in nodes (intentional ordering)
+from . import addition  # noqa: E402,F401
+from . import constant  # noqa: E402,F401
+from . import control  # noqa: E402,F401
+from . import casting  # noqa: E402,F401
+from . import containers  # noqa: E402,F401
+from . import math_ops  # noqa: E402,F401
+from . import programming  # noqa: E402,F401
 
 
 __all__ = [
@@ -58,4 +60,5 @@ __all__ = [
     "get_node",
     "NODE_REGISTRY",
     "list_node_types",
+    "list_node_definitions",
 ]

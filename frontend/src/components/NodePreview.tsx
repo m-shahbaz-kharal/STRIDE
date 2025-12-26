@@ -1,38 +1,21 @@
 import React from "react";
-import { NodeTypeDefinition } from "../types";
+import { NodeTypeDefinition, TypeDescriptor } from "../types";
+import { formatPortTypeLabel, getPortTypeColor } from "../graph/utils";
 
 interface NodePreviewProps {
     nodeType: NodeTypeDefinition;
 }
 
-const PREVIEW_PORT_COLORS: Record<string, string> = {
-    number: "#4a9eff",
-    image: "#e85aad",
-    stream: "#0fb5a9",
-    url: "#7c3aed",
-    boolean: "#f59e0b",
-    string: "#10b981",
-    any: "#94a3b8",
-};
-
-const getPreviewPortColor = (type?: string): string => {
-    const key = type?.toLowerCase() || "any";
-    return PREVIEW_PORT_COLORS[key] || PREVIEW_PORT_COLORS.any;
-};
-
-const formatPortTypeLabel = (type?: string): string => {
-    if (!type) return "Any";
-    const label = type.toLowerCase().replace(/_/g, " ");
-    return label.charAt(0).toUpperCase() + label.slice(1);
-};
-
 const NodePreview = ({ nodeType }: NodePreviewProps) => {
     // Calculate initial size based on ports (mirrors BlueprintNode sizing)
     const maxPorts = Math.max(nodeType.input_ports.length, nodeType.output_ports.length);
-    const MIN_WIDTH = 220;
-    const MIN_HEIGHT = 70 + maxPorts * 34;
+    const MIN_WIDTH = 260;
+    const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
+    const MIN_HEIGHT = 70 + (maxPorts + extraInputRows) * 42 + 8;
     const inputPortTypes = nodeType.input_port_types || {};
     const outputPortTypes = nodeType.output_port_types || {};
+    const getTypeKind = (portType: TypeDescriptor | string | undefined) =>
+        typeof portType === "string" ? portType.toLowerCase() : portType?.kind ?? "any";
 
     return (
         <div
@@ -48,7 +31,6 @@ const NodePreview = ({ nodeType }: NodePreviewProps) => {
             <div className="node-header">
                 <div className="node-title-section">
                     <strong>{nodeType.display_name}</strong>
-                    <span className="node-type-label">{nodeType.node_type}</span>
                 </div>
                 <div className="node-header-right">
                     {/* Mock action buttons for visual fidelity */}
@@ -63,46 +45,80 @@ const NodePreview = ({ nodeType }: NodePreviewProps) => {
             <div className="node-ports">
                 <div className="node-port-column">
                     {nodeType.input_ports.map((port, index) => {
-                        const portType = inputPortTypes?.[port] || "any";
-                        const color = getPreviewPortColor(portType);
+                        const portType = inputPortTypes?.[port] as TypeDescriptor | string | undefined;
+                        const color = getPortTypeColor(portType);
+                        const isControl = getTypeKind(portType) === "control";
+                        const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
+                        const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
                         return (
-                            <div key={`in-${port}-${index}`} className="node-port node-port-input">
+                            <div
+                                key={`in-${port}-${index}`}
+                                className={`node-port node-port-input ${isControl ? "control-port" : ""}`}
+                            >
                                 <div
-                                    className="node-handle react-flow__handle"
+                                    className={`node-handle react-flow__handle ${isControl ? "control-handle" : ""}`}
                                     style={{ left: -4, ["--handle-color" as string]: color }}
-                                />
-                                <div className="node-port-label-group">
-                                    <span className="node-port-name">{port}</span>
-                                    <span
-                                        className="port-type-pill"
-                                        style={{ ["--port-color" as string]: color }}
-                                    >
-                                        {formatPortTypeLabel(portType)}
-                                    </span>
+                                >
+                                    {isControl && (
+                                        <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                    )}
                                 </div>
+                                {!isControl && (
+                                    <div className="node-port-label-group">
+                                        <span className="node-port-name">{port}</span>
+                                        <span
+                                            className="port-type-pill"
+                                            style={{ ["--port-color" as string]: color }}
+                                        >
+                                            {formatPortTypeLabel(portType)}
+                                        </span>
+                                    </div>
+                                )}
+                                {showControlLabel && (
+                                    <span className="control-port-label">{controlLabel}</span>
+                                )}
                             </div>
                         );
                     })}
                 </div>
                 <div className="node-port-column">
                     {nodeType.output_ports.map((port, index) => {
-                        const portType = outputPortTypes?.[port] || "any";
-                        const color = getPreviewPortColor(portType);
+                        const portType = outputPortTypes?.[port] as TypeDescriptor | string | undefined;
+                        const color = getPortTypeColor(portType);
+                        const isControl = getTypeKind(portType) === "control";
+                        const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
+                        const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
                         return (
-                            <div key={`out-${port}-${index}`} className="node-port node-port-output">
-                                <div className="node-port-label-group">
-                                    <span className="node-port-label">{port}</span>
-                                    <span
-                                        className="port-type-pill"
-                                        style={{ ["--port-color" as string]: color }}
-                                    >
-                                        {formatPortTypeLabel(portType)}
-                                    </span>
-                                </div>
+                            <div
+                                key={`out-${port}-${index}`}
+                                className={`node-port node-port-output ${isControl ? "control-port" : ""}`}
+                            >
+                                {!isControl && (
+                                    <div className="node-port-label-group">
+                                        <span className="node-port-label">{port}</span>
+                                        <span
+                                            className="port-type-pill"
+                                            style={{ ["--port-color" as string]: color }}
+                                        >
+                                            {formatPortTypeLabel(portType)}
+                                        </span>
+                                    </div>
+                                )}
+                                {showControlLabel && (
+                                    <span className="control-port-label">{controlLabel}</span>
+                                )}
                                 <div
-                                    className="node-handle react-flow__handle"
+                                    className={`node-handle react-flow__handle ${isControl ? "control-handle" : ""}`}
                                     style={{ right: -4, ["--handle-color" as string]: color }}
-                                />
+                                >
+                                    {isControl && (
+                                        <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                    )}
+                                </div>
                             </div>
                         );
                     })}

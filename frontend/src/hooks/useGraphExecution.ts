@@ -13,6 +13,11 @@ interface GraphPayload {
       id: string;
       type: string;
       params: Record<string, unknown>;
+      input_values?: Record<string, unknown>;
+      input_ports_override?: string[];
+      input_port_types_override?: Record<string, unknown>;
+      output_ports_override?: string[];
+      output_port_types_override?: Record<string, unknown>;
     }>;
     links: Array<{
       from_node: string;
@@ -28,6 +33,7 @@ interface UseGraphExecutionReturn {
   isConnected: boolean;
   isRunning: boolean;
   error: string | null;
+  errorCode?: string | null;
   trace: ExecutionTraceEntry[];
   outputs: Record<string, unknown>;
   stats: ExecutionStats | null;
@@ -56,6 +62,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [activeRuns, setActiveRuns] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [trace, setTrace] = useState<ExecutionTraceEntry[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
   const [stats, setStats] = useState<ExecutionStats | null>(null);
@@ -76,6 +83,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setProgress(0);
           setTrace([]);
           setError(null);
+          setErrorCode(null);
           if (data.levels) {
             setLevels(data.levels);
           }
@@ -159,6 +167,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           }
           if (data.error) {
             setError(data.error);
+            setErrorCode(data.error_code ?? null);
           }
           break;
 
@@ -182,6 +191,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
 
         case "error":
           setError(data.error ?? "Unknown error");
+          setErrorCode(data.error_code ?? null);
           setCurrentNodeId(null);
           activeRunRef.current = false;
           setActiveRuns((prev) => Math.max(0, prev - 1));
@@ -355,6 +365,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     isConnected,
     isRunning: activeRuns > 0,
     error,
+    errorCode,
     trace,
     outputs,
     stats,

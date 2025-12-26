@@ -32,6 +32,7 @@ const CustomEdge = ({
   };
 
   const isPreview = data?.isPreview ?? false;
+  const isControl = data?.kind === "control";
   const baseStroke = (style as React.CSSProperties)?.stroke || "#4a9eff";
   const strokeColor = selected
     ? "var(--selection-yellow)"
@@ -41,6 +42,8 @@ const CustomEdge = ({
         ? "var(--selection-yellow-light)"
         : baseStroke;
   const strokeWidth = selected ? 3 : isPreview ? 2.5 : isHovered ? 2.5 : ((style as React.CSSProperties)?.strokeWidth as number) || 2;
+  const dashOverride = (style as React.CSSProperties)?.strokeDasharray as string | undefined;
+  const dashPattern = isControl ? (dashOverride || "6 4") : dashOverride;
 
   return (
     <g
@@ -64,9 +67,33 @@ const CustomEdge = ({
           stroke: strokeColor,
           strokeWidth,
           transition: "stroke 0.1s ease, stroke-width 0.1s ease",
+          strokeDasharray: dashPattern,
         }}
         markerEnd={markerEnd}
       />
+      {isControl && (
+        <g transform={`translate(${labelX - 10}, ${labelY - 10})`}>
+          <rect
+            x={0}
+            y={0}
+            rx={4}
+            width={38}
+            height={18}
+            fill="rgba(249,115,22,0.15)"
+            stroke="rgba(249,115,22,0.9)"
+            strokeWidth={1}
+          />
+          <text
+            x={6}
+            y={12}
+            fill="rgba(249,115,22,0.95)"
+            fontSize="10"
+            fontFamily="monospace"
+          >
+            control
+          </text>
+        </g>
+      )}
       {(isHovered || selected) && !isPreview && (
         <g
           transform={`translate(${labelX - 8}, ${labelY - 8})`}

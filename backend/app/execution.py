@@ -11,6 +11,11 @@ from typing import Any, Dict, List, Optional
 class GraphExecutionError(Exception):
     """Raised when the graph configuration is invalid or cannot be executed."""
 
+    def __init__(self, message: str, code: str = "execution_error", details: Optional[Dict[str, Any]] = None) -> None:  # type: ignore[name-defined]
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+
 
 class NodeStatus(str, Enum):
     PENDING = "pending"
@@ -27,6 +32,7 @@ class Link:
     from_port: str
     to_node: str
     to_port: str
+    kind: str = "data"  # "data" or "control"
 
 
 @dataclass
@@ -42,6 +48,7 @@ class NodeExecutionResult:
     end_time: float = 0.0
     duration_ms: float = 0.0
     error: Optional[str] = None
+    error_code: Optional[str] = None
     level: int = 0  # Topological level for parallel execution
     from_cache: bool = False  # Whether result came from cache
 
@@ -60,6 +67,7 @@ class ExecutionEvent:
     logs: Optional[List[str]] = None
     duration_ms: Optional[float] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     level: Optional[int] = None
     progress: Optional[float] = None  # 0.0 to 1.0
     total_nodes: Optional[int] = None

@@ -7,17 +7,17 @@ SAMPLE_GRAPH = {
     "nodes": [
         {
             "id": "const_a",
-            "type": "constant.number",
+            "type": "core.literal.int",
             "params": {"value": 12},
         },
         {
             "id": "const_b",
-            "type": "constant.number",
+            "type": "core.literal.int",
             "params": {"value": 7},
         },
         {
             "id": "adder",
-            "type": "math.add",
+            "type": "core.math.add",
             "params": {},
         },
     ],

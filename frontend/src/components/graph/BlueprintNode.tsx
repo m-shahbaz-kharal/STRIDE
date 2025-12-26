@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Handle, NodeProps, Position, useReactFlow } from "reactflow";
+import { Handle, NodeProps, Position, useReactFlow, useStore } from "reactflow";
 
 import { usePopups } from "../../context/PopupContext";
 import {
@@ -62,6 +62,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const resizeCornerRef = useRef<Corner>(null);
   const zoomRef = useRef(1);
   const { getZoom } = useReactFlow();
+  const edges = useStore((state) => state.edges);
   const { showLogsPopup } = usePopups();
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
@@ -82,7 +83,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     setIsResizing(true);
   }, [getZoom]);
 
-  const maxPorts = Math.max(data.input_ports.length, data.output_ports.length);
+  const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
+  const maxPorts = Math.max(data.input_ports.length + extraInputRows, data.output_ports.length);
   const MIN_HEIGHT = computeNodeDimensions(maxPorts).height;
   const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
   const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
@@ -93,6 +95,26 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       return map?.[port] || "any";
     },
     [inputPortTypes, outputPortTypes]
+  );
+
+  const getTypeKind = useCallback((portType: unknown): string => {
+    if (!portType) return "any";
+    if (typeof portType === "string") return portType.toLowerCase();
+    if (typeof portType === "object" && "kind" in (portType as { kind?: string })) {
+      return (portType as { kind?: string }).kind || "any";
+    }
+    return "any";
+  }, []);
+
+  const isInputConnected = useCallback(
+    (port: string) =>
+      edges.some((edge) => edge.target === id && edge.targetHandle === port),
+    [edges, id]
+  );
+
+  const getInputDefault = useCallback(
+    (port: string) => data.metadata?.inputs?.find((input) => input.name === port)?.default,
+    [data.metadata?.inputs]
   );
 
   useEffect(() => {
@@ -200,8 +222,9 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
       <div className="node-header">
         <div className="node-title-section">
-          <strong>{data.displayName}</strong>
-          <span className="node-type-label">{data.nodeType}</span>
+          <div className="node-name-tooltip" data-tooltip={data.nodeType}>
+            <strong>{data.displayName}</strong>
+          </div>
         </div>
         <div className="node-header-right">
           {renderStatusChip(data.executionStatus)}
@@ -278,13 +301,23 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         <div className="node-port-column">
           {data.input_ports.map((port, index) => {
             const portType = resolvePortType(port, "input");
+            const portKind = getTypeKind(portType);
+            const isControl = portKind === "control";
+            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "input";
+            const isConnected = isInputConnected(port);
+            const inputValue = data.inputValues?.[port];
+            const defaultValue = getInputDefault(port);
+            const hasInputValue = Object.prototype.hasOwnProperty.call(data.inputValues ?? {}, port);
+            const resolvedValue = hasInputValue ? inputValue : defaultValue;
+            const placeholderValue = defaultValue == null ? "" : String(defaultValue);
+            const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div
                 key={`in-${port}-${index}`}
-                className={`node-port node-port-input ${isHighlighted ? "port-highlighted" : ""}`}
+                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""}`}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
@@ -292,53 +325,129 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   type="target"
                   position={Position.Left}
                   id={port}
-                  className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""}`}
                   style={handleStyle}
-                />
-                <div className="node-port-label-group">
-                  <span className="node-port-name">{port}</span>
-                  <span
-                    className="port-type-text"
-                    style={{ color }}
-                    title={`Accepts ${formatPortTypeLabel(portType)}`}
-                  >
-                    {formatPortTypeLabel(portType)}
-                  </span>
-                </div>
+                >
+                  {isControl && (
+                    <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </Handle>
+                {!isControl && (
+                  <div className="node-port-label-group">
+                    <span className="node-port-name">{port}</span>
+                    <span
+                      className="port-type-text"
+                      style={{ color }}
+                      title={`Accepts ${formatPortTypeLabel(portType)}`}
+                    >
+                      {formatPortTypeLabel(portType)}
+                    </span>
+                  </div>
+                )}
+                {showControlLabel && (
+                  <span className="control-port-label">{controlLabel}</span>
+                )}
+                {!isControl && (
+                  <div className="node-port-input-control">
+                    {portKind === "boolean" ? (
+                      <input
+                        type="checkbox"
+                        className="node-input-checkbox nodrag"
+                        checked={Boolean(resolvedValue)}
+                        disabled={isConnected}
+                        onChange={(event) =>
+                          data.onInputValueChange?.(id, port, event.target.checked)
+                        }
+                      />
+                    ) : (
+                      <input
+                        type={portKind === "int" || portKind === "float" || portKind === "number" ? "number" : "text"}
+                        step={portKind === "int" ? 1 : "any"}
+                        className="node-input-field nodrag"
+                        value={`${resolvedValue ?? ""}`}
+                        placeholder={placeholderValue}
+                        disabled={isConnected}
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          if (portKind === "int" || portKind === "float" || portKind === "number") {
+                            const numeric = raw === ""
+                              ? null
+                              : portKind === "int"
+                                ? parseInt(raw, 10)
+                                : Number(raw);
+                            data.onInputValueChange?.(id, port, Number.isNaN(numeric) ? null : numeric);
+                            return;
+                          }
+                          data.onInputValueChange?.(id, port, raw);
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
+          {data.nodeType === "core.container.make_array" && (
+            <button
+              type="button"
+              className="node-port-add nodrag"
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onAddInputPort?.(id);
+              }}
+              title="Add array item input"
+            >
+              +
+            </button>
+          )}
         </div>
         <div className="node-port-column">
           {data.output_ports.map((port, index) => {
             const portType = resolvePortType(port, "output");
+            const portKind = getTypeKind(portType);
+            const isControl = portKind === "control";
+            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "output";
+            const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div
                 key={`out-${port}-${index}`}
-                className={`node-port node-port-output ${isHighlighted ? "port-highlighted" : ""}`}
+                className={`node-port node-port-output ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""}`}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "output" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
-                <div className="node-port-label-group">
-                  <span className="node-port-label">{port}</span>
-                  <span
-                    className="port-type-text"
-                    style={{ color }}
-                    title={`Emits ${formatPortTypeLabel(portType)}`}
-                  >
-                    {formatPortTypeLabel(portType)}
-                  </span>
-                </div>
+                {!isControl && (
+                  <div className="node-port-label-group">
+                    <span className="node-port-label">{port}</span>
+                    <span
+                      className="port-type-text"
+                      style={{ color }}
+                      title={`Emits ${formatPortTypeLabel(portType)}`}
+                    >
+                      {formatPortTypeLabel(portType)}
+                    </span>
+                  </div>
+                )}
+                {showControlLabel && (
+                  <span className="control-port-label">{controlLabel}</span>
+                )}
                 <Handle
                   type="source"
                   position={Position.Right}
                   id={port}
-                  className={`node-handle ${isHighlighted ? "handle-highlighted" : ""}`}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""}`}
                   style={handleStyle}
-                />
+                >
+                  {isControl && (
+                    <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </Handle>
               </div>
             );
           })}

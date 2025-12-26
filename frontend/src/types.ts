@@ -1,4 +1,41 @@
-export type ParamSchemaType = "number" | "string" | "select";
+export type ParamSchemaType = "number" | "float" | "int" | "string" | "select" | "boolean";
+
+export type TypeKind =
+  | "int"
+  | "float"
+  | "string"
+  | "boolean"
+  | "null"
+  | "control"
+  | "image"
+  | "stream"
+  | "url"
+  | "any"
+  | "unknown"
+  | "list"
+  | "map"
+  | "record"
+  | "tuple"
+  | "option"
+  | "tensor";
+
+export interface TypeDescriptor {
+  kind: TypeKind;
+  name?: string;
+  item?: TypeDescriptor;
+  value?: TypeDescriptor;
+  fields?: Record<string, TypeDescriptor>;
+  nullable?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PortDefinition {
+  name: string;
+  type: TypeDescriptor;
+  required?: boolean;
+  default?: unknown;
+  description?: string;
+}
 
 export interface ParamSchemaField {
   type: ParamSchemaType;
@@ -10,13 +47,21 @@ export interface ParamSchemaField {
 
 export interface NodeTypeDefinition {
   node_type: string;
+  version?: string;
   display_name: string;
+  category?: string;
+  summary?: string;
   description: string;
   icon?: string;
+  tags?: string[];
+  stability?: "stable" | "experimental";
+  inputs?: PortDefinition[];
+  outputs?: PortDefinition[];
+  // Legacy/compat fields for current UI usage
   input_ports: string[];
   output_ports: string[];
-  input_port_types?: Record<string, string>;
-  output_port_types?: Record<string, string>;
+  input_port_types?: Record<string, TypeDescriptor | string>;
+  output_port_types?: Record<string, TypeDescriptor | string>;
   params_schema: Record<string, ParamSchemaField>;
   params_defaults?: Record<string, string | number | boolean>;
 }
@@ -78,6 +123,7 @@ export interface ExecutionEvent {
   logs?: string[];
   duration_ms?: number;
   error?: string;
+  error_code?: string;
   level?: number;
   progress?: number;
   total_nodes?: number;
@@ -106,9 +152,10 @@ export interface BlueprintNodeData {
   description: string;
   input_ports: string[];
   output_ports: string[];
-  input_port_types?: Record<string, string>;
-  output_port_types?: Record<string, string>;
+  input_port_types?: Record<string, TypeDescriptor | string>;
+  output_port_types?: Record<string, TypeDescriptor | string>;
   params: Record<string, unknown>;
+  inputValues?: Record<string, unknown>;
   breakpoint: boolean;
   metadata?: NodeTypeDefinition;
   last_outputs?: Record<string, unknown>;
@@ -119,6 +166,8 @@ export interface BlueprintNodeData {
   onClearCache?: (nodeId: string) => void;
   onInterrupt?: (nodeId: string) => void;
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  onInputValueChange?: (nodeId: string, port: string, value: string | number | boolean | null) => void;
+  onAddInputPort?: (nodeId: string) => void;
   highlightedPort?: { port: string; direction: "input" | "output" } | null;
   // Execution state
   executionStatus?: NodeExecutionStatus;

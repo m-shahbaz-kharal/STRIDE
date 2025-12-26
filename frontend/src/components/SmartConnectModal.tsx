@@ -13,14 +13,16 @@ interface SmartConnectModalProps {
 // Helper to get category icon (simple mapping for now)
 const getCategoryIcon = (category: string) => {
     const map: Record<string, string> = {
-        Math: "∑",
-        Logic: "⑂",
-        Input: "→",
-        Output: "←",
-        Constant: "#",
-        Flow: "⚡",
+        Math: "+",
+        Logic: "&",
+        Strings: "\"",
+        Variables: "$",
+        Control: ">",
+        Literal: "#",
+        Containers: "[]",
+        Utility: "*",
     };
-    return map[category] || "•";
+    return map[category] || "?";
 };
 
 const SmartConnectModal = ({
@@ -242,7 +244,7 @@ const SmartConnectModal = ({
 
             <div className="smart-connect-list" ref={listRef}>
                 {filteredNodes.map((node, index) => {
-                    const category = node.node_type.split('.')[0];
+                    const category = node.category || "Other";
                     return (
                         <div
                             key={node.node_type}
@@ -274,3 +276,4 @@ const SmartConnectModal = ({
 };
 
 export default SmartConnectModal;
+

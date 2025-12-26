@@ -19,6 +19,7 @@ from .execution import (
     NodeStatus,
 )
 from .nodes import ExecutionContext, NodeBase, get_node
+from .typesystem import TypeDescriptor
 
 
 class GraphExecutor:
@@ -47,6 +48,8 @@ class GraphExecutor:
         self.nodes: Dict[str, NodeBase] = {}
         self.links: List[Link] = []
         self.input_map: Dict[str, Dict[str, Link]] = defaultdict(dict)
+        self.control_inputs: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+        self.control_outputs: Dict[str, List[Tuple[str, str, str]]] = defaultdict(list)
         self.output_map: Dict[str, List[Tuple[str, str, str]]] = defaultdict(list)
         self._dependents: Dict[str, List[str]] = defaultdict(list)
         self.execution_trace: List[NodeExecutionResult] = []
@@ -73,6 +76,8 @@ class GraphExecutor:
         self._running_tasks: Dict[str, asyncio.Future] = {}
         self._cancelled_nodes: Set[str] = set()
         self._cancel_all: bool = False
+        self._variables: Dict[str, Any] = {}
+        self._shared_metadata: Dict[str, Any] = {}
         
         # Caching options
         self._cache = ExecutionCache(enabled=self.options.get("use_cache", True))
@@ -82,7 +87,11 @@ class GraphExecutor:
         self._validate_output_nodes()
         self._topo_order = self._topological_sort()
         self._compute_levels()
+        self._build_loop_sets()
         self._execution_order: List[str] = []
+        self._loop_nodes: Set[str] = set()
+        self._loop_body_nodes: Dict[str, Set[str]] = {}
+        self._nodes_in_loop_body: Set[str] = set()
 
     @classmethod
     def _register_execution(cls, executor: "GraphExecutor") -> None:
@@ -129,17 +138,30 @@ class GraphExecutor:
         self.execution_trace = []
         self.outputs = {}
         self._computed_values = {}
+        self._variables = {}
+        self._shared_metadata = {}
         self._cancel_all = False
         self._cancelled_nodes.clear()
         self._running_tasks = {}
 
+    def _can_cache(self, node_id: str) -> bool:
+        node = self.nodes[node_id]
+        spec = getattr(node, "spec", None)
+        if spec and getattr(spec, "cache_policy", "default") == "disabled":
+            return False
+        return True
+
     def _try_get_cached(self, node_id: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Try to get cached outputs for a node. Returns None if not cached or disabled."""
+        if not self._can_cache(node_id):
+            return None
         node = self.nodes[node_id]
         return self._cache.get(node.type, node.params, inputs)
 
     def _cache_outputs(self, node_id: str, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
         """Cache the outputs for a node when caching is enabled."""
+        if not self._can_cache(node_id):
+            return
         node = self.nodes[node_id]
         self._cache.set(node.type, node.params, inputs, outputs)
 
@@ -151,17 +173,17 @@ class GraphExecutor:
         for node_config in node_configs:
             node_type = node_config.get("type")
             if not node_type:
-                raise GraphExecutionError(f"Node {node_config} has no type")
+                raise GraphExecutionError(f"Node {node_config} has no type", code="missing_type")
             node_id = node_config.get("id")
             if not node_id:
-                raise GraphExecutionError("Every node must declare a unique 'id'")
+                raise GraphExecutionError("Every node must declare a unique 'id'", code="missing_id")
             if node_id in self.nodes:
-                raise GraphExecutionError(f"Duplicate node id '{node_id}' detected")
+                raise GraphExecutionError(f"Duplicate node id '{node_id}' detected", code="duplicate_id")
             try:
-                node_cls = get_node(node_type)
+                registration = get_node(node_type)
             except KeyError as exc:
-                raise GraphExecutionError(str(exc)) from exc
-            node = node_cls(node_config)
+                raise GraphExecutionError(str(exc), code="unknown_node") from exc
+            node = registration.cls(node_config, spec=registration.spec)
             self.nodes[node.id] = node
             self._node_status[node.id] = NodeStatus.PENDING
 
@@ -174,7 +196,7 @@ class GraphExecutor:
             if link.from_node not in self.nodes:
                 raise GraphExecutionError(f"Link references unknown node {link.from_node}")
 
-            key = (link.from_node, link.from_port, link.to_node, link.to_port)
+            key = (link.from_node, link.from_port, link.to_node, link.to_port, link.kind)
             if key in seen_links:
                 raise GraphExecutionError(
                     f"Duplicate link detected: {link.from_node}.{link.from_port} -> {link.to_node}.{link.to_port}"
@@ -182,19 +204,43 @@ class GraphExecutor:
 
             from_node = self.nodes[link.from_node]
             to_node = self.nodes[link.to_node]
-            if link.from_port not in from_node.output_ports:
-                raise GraphExecutionError(
-                    f"Link from '{link.from_node}' references missing output port '{link.from_port}'"
-                )
-            if link.to_port not in to_node.input_ports:
-                raise GraphExecutionError(
-                    f"Link to '{link.to_node}' references missing input port '{link.to_port}'"
-                )
+            if link.kind == "control":
+                # Control edge only enforces ordering; no port binding required.
+                self.control_inputs[link.to_node].append((link.from_node, link.from_port))
+                self.control_outputs[link.from_node].append((link.to_node, link.from_port, link.to_port))
+                self.output_map[link.from_node].append((link.to_node, link.from_port, link.to_port))
+                self._dependents[link.from_node].append(link.to_node)
+            else:
+                if link.from_port not in from_node.output_ports:
+                    raise GraphExecutionError(
+                        f"Link from '{link.from_node}' references missing output port '{link.from_port}'",
+                        code="missing_output_port",
+                    )
+                if link.to_port not in to_node.input_ports:
+                    raise GraphExecutionError(
+                        f"Link to '{link.to_node}' references missing input port '{link.to_port}'",
+                        code="missing_input_port",
+                    )
+
+                # Type compatibility
+                from_type = from_node.output_port_types.get(link.from_port)
+                to_type = to_node.input_port_types.get(link.to_port)
+                if isinstance(from_type, dict):
+                    from_type = TypeDescriptor.from_dict(from_type)
+                if isinstance(to_type, dict):
+                    to_type = TypeDescriptor.from_dict(to_type)
+                if isinstance(from_type, TypeDescriptor) and isinstance(to_type, TypeDescriptor):
+                    if not from_type.is_assignable_to(to_type):
+                        raise GraphExecutionError(
+                            f"Type mismatch: {from_node.type}.{link.from_port} ({from_type.label()}) -> "
+                            f"{to_node.type}.{link.to_port} ({to_type.label()})"
+                        )
+
+                self.input_map[link.to_node][link.to_port] = link
+                self.output_map[link.from_node].append((link.to_node, link.from_port, link.to_port))
+                self._dependents[link.from_node].append(link.to_node)
 
             self.links.append(link)
-            self.input_map[link.to_node][link.to_port] = link
-            self.output_map[link.from_node].append((link.to_node, link.from_port, link.to_port))
-            self._dependents[link.from_node].append(link.to_node)
 
     def _validate_output_nodes(self) -> None:
         """Validate that declared output nodes reference valid ports."""
@@ -213,9 +259,11 @@ class GraphExecutor:
 
     def _topological_sort(self) -> List[str]:
         """Kahn's algorithm for topological sorting."""
-        dependencies: Dict[str, int] = {
-            node_id: len(self.input_map.get(node_id, {})) for node_id in self.nodes
-        }
+        dependencies: Dict[str, int] = {}
+        for node_id in self.nodes:
+            data_deps = len(self.input_map.get(node_id, {}))
+            control_deps = len(self.control_inputs.get(node_id, []))
+            dependencies[node_id] = data_deps + control_deps
         queue = deque([node_id for node_id, count in dependencies.items() if count == 0])
         order: List[str] = []
 
@@ -245,12 +293,17 @@ class GraphExecutor:
         
         for node_id in self._topo_order:
             input_links = self.input_map.get(node_id, {})
-            if not input_links:
+            control_parents = [parent for parent, _ in self.control_inputs.get(node_id, [])]
+            if not input_links and not control_parents:
                 levels[node_id] = 0
             else:
-                max_input_level = max(
-                    levels.get(link.from_node, 0) for link in input_links.values()
-                )
+                max_input_level = 0
+                if input_links:
+                    max_input_level = max(
+                        levels.get(link.from_node, 0) for link in input_links.values()
+                    )
+                if control_parents:
+                    max_input_level = max(max_input_level, max(levels.get(pid, 0) for pid in control_parents))
                 levels[node_id] = max_input_level + 1
         
         self._node_levels = levels
@@ -261,6 +314,34 @@ class GraphExecutor:
         
         max_level = max(levels.values()) if levels else 0
         self._levels = [level_groups.get(i, []) for i in range(max_level + 1)]
+
+    def _is_loop_node(self, node_type: str) -> bool:
+        return node_type in {"core.control.for", "core.control.repeat", "core.control.while"}
+
+    def _build_loop_sets(self) -> None:
+        self._loop_nodes = {node_id for node_id, node in self.nodes.items() if self._is_loop_node(node.type)}
+        self._loop_body_nodes = {}
+        self._nodes_in_loop_body = set()
+        for loop_id in self._loop_nodes:
+            body_nodes = self._collect_loop_body_nodes(loop_id)
+            self._loop_body_nodes[loop_id] = body_nodes
+            self._nodes_in_loop_body.update(body_nodes)
+
+    def _collect_loop_body_nodes(self, loop_id: str) -> Set[str]:
+        body_nodes: Set[str] = set()
+        queue = deque()
+        for to_node, from_port, _ in self.control_outputs.get(loop_id, []):
+            if from_port == "loop_body":
+                queue.append(to_node)
+        while queue:
+            node_id = queue.popleft()
+            if node_id in body_nodes:
+                continue
+            body_nodes.add(node_id)
+            for child, _, _ in self.control_outputs.get(node_id, []):
+                if child not in body_nodes:
+                    queue.append(child)
+        return body_nodes
 
     def _expand_dependencies(self, node_ids: List[str]) -> Set[str]:
         """Expand a set of target nodes to include all their dependencies."""
@@ -274,6 +355,9 @@ class GraphExecutor:
             for link in self.input_map.get(current, {}).values():
                 if link.from_node not in collected:
                     queue.append(link.from_node)
+            for parent, _ in self.control_inputs.get(current, []):
+                if parent not in collected:
+                    queue.append(parent)
         return collected
 
     def _resolve_execution_order(self) -> List[str]:
@@ -283,8 +367,12 @@ class GraphExecutor:
             target_nodes = [node_id for node_id in (self.options.get("target_nodes") or []) if node_id in self.nodes]
             if target_nodes:
                 allowed = self._expand_dependencies(target_nodes)
-                return [node_id for node_id in self._topo_order if node_id in allowed]
-        return list(self._topo_order)
+                return [
+                    node_id
+                    for node_id in self._topo_order
+                    if node_id in allowed and node_id not in self._nodes_in_loop_body
+                ]
+        return [node_id for node_id in self._topo_order if node_id not in self._nodes_in_loop_body]
 
     def _resolve_execution_levels(self) -> List[List[str]]:
         """Get execution levels filtered by the resolved execution order."""
@@ -299,17 +387,34 @@ class GraphExecutor:
         node = self.nodes[node_id]
         if not node.input_ports:
             return {}
-        if node_id not in self.input_map:
-            raise GraphExecutionError(f"Node '{node_id}' declares inputs but no links are mapped")
         inputs: Dict[str, Any] = {}
+        port_specs = {p.name: p for p in (node.spec.inputs if getattr(node, "spec", None) else [])}
+        input_values = node.input_values or {}
         for port in node.input_ports:
-            link = self.input_map[node_id].get(port)
-            if not link:
-                raise GraphExecutionError(f"Node '{node_id}' is missing link for port '{port}'")
-            if link.from_node not in self._computed_values:
-                return None
-            value = self._computed_values[link.from_node].get(link.from_port)
-            inputs[port] = value
+            port_type = node.input_port_types.get(port)
+            if isinstance(port_type, dict):
+                port_type = TypeDescriptor.from_dict(port_type)
+            if isinstance(port_type, TypeDescriptor) and port_type.kind == "control":
+                # Control ports are sequencing only; no data value needed.
+                continue
+            link = self.input_map.get(node_id, {}).get(port)
+            if link:
+                if link.from_node not in self._computed_values:
+                    return None
+                value = self._computed_values[link.from_node].get(link.from_port)
+                inputs[port] = value
+                continue
+            if port in input_values:
+                inputs[port] = input_values[port]
+                continue
+            port_spec = port_specs.get(port)
+            if port_spec and port_spec.default is not None:
+                inputs[port] = port_spec.default
+                continue
+            if port_spec and not port_spec.required:
+                inputs[port] = None
+                continue
+            raise GraphExecutionError(f"Node '{node_id}' is missing link for port '{port}'", code="missing_link")
         return inputs
 
     def _prepare_inputs(self, node_id: str) -> Dict[str, Any]:
@@ -345,6 +450,8 @@ class GraphExecutor:
 
         try:
             ctx = ExecutionContext()
+            ctx.variables = self._variables
+            ctx.metadata = self._shared_metadata
             outputs = node.forward(inputs, ctx)
 
             if set(outputs.keys()) != set(node.output_ports):
@@ -378,9 +485,129 @@ class GraphExecutor:
                 end_time=end_time,
                 duration_ms=(end_time - start_time) * 1000,
                 error=str(e),
+                error_code=getattr(e, "code", None),
                 level=level,
                 from_cache=False,
             )
+
+    def _execute_node_sync(self, node_id: str, inputs: Dict[str, Any], allow_cache: bool = True) -> NodeExecutionResult:
+        node_start = time.perf_counter()
+        cached_outputs = self._try_get_cached(node_id, inputs) if allow_cache else None
+        if cached_outputs is not None:
+            end_time = time.perf_counter()
+            result = NodeExecutionResult(
+                node_id=node_id,
+                node_type=self.nodes[node_id].type,
+                status=NodeStatus.COMPLETED,
+                outputs=cached_outputs,
+                logs=[f"[CACHED] Skipped execution, using cached result"],
+                start_time=node_start,
+                end_time=end_time,
+                duration_ms=(end_time - node_start) * 1000,
+                level=self._node_levels.get(node_id, 0),
+                from_cache=True,
+            )
+            self._finalize_node_result(node_id, inputs, result, cached=True)
+            return result
+        result = self._execute_node_work(node_id, inputs)
+        self._finalize_node_result(node_id, inputs, result, cached=False)
+        return result
+
+    def _execute_loop_sync(
+        self,
+        loop_id: str,
+        executed_count: int,
+        max_steps: Optional[int],
+        breakpoints: Set[str],
+    ) -> int:
+        loop_node = self.nodes[loop_id]
+        loop_start = time.perf_counter()
+        body_nodes = self._loop_body_nodes.get(loop_id, set())
+        body_order = [node_id for node_id in self._topo_order if node_id in body_nodes]
+        iterations = 0
+        last_index = 0
+
+        def _should_stop() -> bool:
+            return (
+                self._cancel_all
+                or (max_steps is not None and executed_count >= max_steps)
+            )
+
+        if loop_node.type == "core.control.for":
+            inputs = self._prepare_inputs(loop_id)
+            first_index = int(inputs.get("first_index") or 0)
+            last_index_input = int(inputs.get("last_index") or 0)
+            step = 1 if last_index_input >= first_index else -1
+            indices = range(first_index, last_index_input + step, step)
+        elif loop_node.type == "core.control.repeat":
+            inputs = self._prepare_inputs(loop_id)
+            count = int(inputs.get("count") or 0)
+            indices = range(max(0, count))
+        else:
+            indices = range(0)
+
+        if loop_node.type == "core.control.while":
+            max_iterations = int(loop_node.params.get("max_iterations", 100))
+            indices = range(max_iterations)
+
+        for idx in indices:
+            if _should_stop():
+                break
+            if loop_id in breakpoints:
+                break
+
+            if loop_node.type == "core.control.while":
+                inputs = self._prepare_inputs(loop_id)
+                if not bool(inputs.get("condition")):
+                    break
+
+            self._computed_values[loop_id] = {"loop_body": None, "index": idx, "completed": None}
+            last_index = idx
+            iterations += 1
+
+            for node_id in body_order:
+                if _should_stop():
+                    break
+                if node_id in breakpoints:
+                    return executed_count
+                if node_id in self._cancelled_nodes:
+                    skipped_result = NodeExecutionResult(
+                        node_id=node_id,
+                        node_type=self.nodes[node_id].type,
+                        status=NodeStatus.SKIPPED,
+                        logs=[f"Node {node_id} interrupted"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(node_id, 0),
+                    )
+                    self._finalize_node_result(node_id, {}, skipped_result, cached=False)
+                    executed_count += 1
+                    continue
+                if self._is_loop_node(self.nodes[node_id].type):
+                    executed_count = self._execute_loop_sync(node_id, executed_count, max_steps, breakpoints)
+                    continue
+                inputs = self._prepare_inputs(node_id)
+                result = self._execute_node_sync(node_id, inputs, allow_cache=False)
+                executed_count += 1
+                if result.status == NodeStatus.ERROR:
+                    break
+
+        outputs = {"loop_body": None, "index": last_index, "completed": None}
+        loop_end = time.perf_counter()
+        result = NodeExecutionResult(
+            node_id=loop_id,
+            node_type=loop_node.type,
+            status=NodeStatus.COMPLETED,
+            outputs=outputs,
+            logs=[f"Looped {iterations} iterations"],
+            start_time=loop_start,
+            end_time=loop_end,
+            duration_ms=(loop_end - loop_start) * 1000,
+            level=self._node_levels.get(loop_id, 0),
+            from_cache=False,
+        )
+        self._finalize_node_result(loop_id, {}, result, cached=False)
+        executed_count += 1
+        return executed_count
 
     def run(self) -> Dict[str, Any]:
         """Execute the graph synchronously (legacy interface)."""
@@ -411,29 +638,12 @@ class GraphExecutor:
             if node_id in breakpoints:
                 break
 
-            node_start = time.perf_counter()
+            if self._is_loop_node(self.nodes[node_id].type):
+                executed_count = self._execute_loop_sync(node_id, executed_count, max_steps, breakpoints)
+                continue
+
             inputs = self._prepare_inputs(node_id)
-            cached_outputs = self._try_get_cached(node_id, inputs)
-
-            if cached_outputs is not None:
-                end_time = time.perf_counter()
-                result = NodeExecutionResult(
-                    node_id=node_id,
-                    node_type=self.nodes[node_id].type,
-                    status=NodeStatus.COMPLETED,
-                    outputs=cached_outputs,
-                    logs=[f"[CACHED] Skipped execution, using cached result"],
-                    start_time=node_start,
-                    end_time=end_time,
-                    duration_ms=(end_time - node_start) * 1000,
-                    level=self._node_levels.get(node_id, 0),
-                    from_cache=True,
-                )
-                self._finalize_node_result(node_id, inputs, result, cached=True)
-            else:
-                result = self._execute_node_work(node_id, inputs)
-                self._finalize_node_result(node_id, inputs, result, cached=False)
-
+            result = self._execute_node_sync(node_id, inputs, allow_cache=True)
             executed_count += 1
             
             if result.status == NodeStatus.ERROR:
@@ -466,8 +676,295 @@ class GraphExecutor:
             "execution_id": self.execution_id,
         }
 
+    async def _run_streaming_sequential(self) -> AsyncIterator[ExecutionEvent]:
+        self._execution_order = self._resolve_execution_order()
+        self._reset_execution_state()
+        self._register_execution(self)
+
+        total_nodes = len(self._execution_order)
+        completed_nodes = 0
+        execution_plan = [
+            {
+                "node_id": node_id,
+                "node_type": self.nodes[node_id].type,
+                "level": self._node_levels.get(node_id, 0),
+            }
+            for node_id in self._execution_order
+        ]
+
+        try:
+            yield ExecutionEvent(
+                event_type="start",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                total_nodes=total_nodes,
+                execution_plan=execution_plan,
+                levels=self._levels,
+            )
+
+            for node_id in self._execution_order:
+                if self._cancel_all or node_id in self._cancelled_nodes:
+                    skipped = NodeExecutionResult(
+                        node_id=node_id,
+                        node_type=self.nodes[node_id].type,
+                        status=NodeStatus.SKIPPED,
+                        logs=[f"Node {node_id} interrupted"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(node_id, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(node_id, {}, skipped, cached=False)
+                    completed_nodes += 1
+                    yield ExecutionEvent(
+                        event_type="node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=skipped.node_type,
+                        status=NodeStatus.SKIPPED,
+                        level=skipped.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                    )
+                    continue
+
+                if self._is_loop_node(self.nodes[node_id].type):
+                    loop_node = self.nodes[node_id]
+                    body_nodes = self._loop_body_nodes.get(node_id, set())
+                    body_order = [nid for nid in self._topo_order if nid in body_nodes]
+
+                    yield ExecutionEvent(
+                        event_type="node_started",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=loop_node.type,
+                        status=NodeStatus.RUNNING,
+                        level=self._node_levels.get(node_id, 0),
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                    )
+
+                    iterations = 0
+                    last_index = 0
+
+                    if loop_node.type == "core.control.for":
+                        inputs = self._prepare_inputs(node_id)
+                        first_index = int(inputs.get("first_index") or 0)
+                        last_index_input = int(inputs.get("last_index") or 0)
+                        step = 1 if last_index_input >= first_index else -1
+                        indices = range(first_index, last_index_input + step, step)
+                        total_nodes += len(indices) * len(body_order)
+                    elif loop_node.type == "core.control.repeat":
+                        inputs = self._prepare_inputs(node_id)
+                        count = int(inputs.get("count") or 0)
+                        indices = range(max(0, count))
+                        total_nodes += len(indices) * len(body_order)
+                    else:
+                        max_iterations = int(loop_node.params.get("max_iterations", 100))
+                        indices = range(max_iterations)
+                        total_nodes += len(indices) * len(body_order)
+
+                    for idx in indices:
+                        if loop_node.type == "core.control.while":
+                            inputs = self._prepare_inputs(node_id)
+                            if not bool(inputs.get("condition")):
+                                break
+                        self._computed_values[node_id] = {"loop_body": None, "index": idx, "completed": None}
+                        last_index = idx
+                        iterations += 1
+
+                        for body_id in body_order:
+                            if self._cancel_all:
+                                break
+                            if body_id in self._cancelled_nodes:
+                                skipped = NodeExecutionResult(
+                                    node_id=body_id,
+                                    node_type=self.nodes[body_id].type,
+                                    status=NodeStatus.SKIPPED,
+                                    logs=[f"Node {body_id} interrupted"],
+                                    duration_ms=0.0,
+                                    level=self._node_levels.get(body_id, 0),
+                                    from_cache=False,
+                                )
+                                self._finalize_node_result(body_id, {}, skipped, cached=False)
+                                completed_nodes += 1
+                                yield ExecutionEvent(
+                                    event_type="node_skipped",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=body_id,
+                                    node_type=skipped.node_type,
+                                    status=NodeStatus.SKIPPED,
+                                    level=skipped.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                )
+                                continue
+
+                            if self._is_loop_node(self.nodes[body_id].type):
+                                self._execute_loop_sync(body_id, 0, None, set())
+                                completed_nodes += 1
+                                continue
+
+                            yield ExecutionEvent(
+                                event_type="node_started",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=body_id,
+                                node_type=self.nodes[body_id].type,
+                                status=NodeStatus.RUNNING,
+                                level=self._node_levels.get(body_id, 0),
+                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                total_nodes=total_nodes,
+                                completed_nodes=completed_nodes,
+                            )
+                            inputs = self._prepare_inputs(body_id)
+                            result = self._execute_node_work(body_id, inputs)
+                            result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]
+                            self._finalize_node_result(body_id, inputs, result, cached=False)
+                            completed_nodes += 1
+
+                            if result.status == NodeStatus.ERROR:
+                                yield ExecutionEvent(
+                                    event_type="node_error",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=result.node_id,
+                                    node_type=result.node_type,
+                                    status=NodeStatus.ERROR,
+                                    error=result.error,
+                                    error_code=result.error_code,
+                                    duration_ms=result.duration_ms,
+                                    level=result.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                    from_cache=result.from_cache,
+                                )
+                                if self._fail_fast:
+                                    break
+                            else:
+                                yield ExecutionEvent(
+                                    event_type="node_completed",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=result.node_id,
+                                    node_type=result.node_type,
+                                    status=result.status,
+                                    outputs=result.outputs,
+                                    logs=result.logs,
+                                    duration_ms=result.duration_ms,
+                                    level=result.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                    from_cache=result.from_cache,
+                                )
+
+                    loop_outputs = {"loop_body": None, "index": last_index, "completed": None}
+                    loop_result = NodeExecutionResult(
+                        node_id=node_id,
+                        node_type=loop_node.type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=loop_outputs,
+                        logs=[f"Looped {iterations} iterations"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(node_id, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(node_id, {}, loop_result, cached=False)
+                    completed_nodes += 1
+                    yield ExecutionEvent(
+                        event_type="node_completed",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=loop_node.type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=loop_outputs,
+                        logs=loop_result.logs,
+                        duration_ms=loop_result.duration_ms,
+                        level=loop_result.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                        from_cache=False,
+                    )
+                    continue
+
+                yield ExecutionEvent(
+                    event_type="node_started",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=node_id,
+                    node_type=self.nodes[node_id].type,
+                    status=NodeStatus.RUNNING,
+                    level=self._node_levels.get(node_id, 0),
+                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                    total_nodes=total_nodes,
+                    completed_nodes=completed_nodes,
+                )
+                inputs = self._prepare_inputs(node_id)
+                result = self._execute_node_sync(node_id, inputs, allow_cache=True)
+                completed_nodes += 1
+
+                if result.status == NodeStatus.ERROR:
+                    yield ExecutionEvent(
+                        event_type="node_error",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=result.node_id,
+                        node_type=result.node_type,
+                        status=NodeStatus.ERROR,
+                        error=result.error,
+                        error_code=result.error_code,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                        from_cache=result.from_cache,
+                    )
+                    if self._fail_fast:
+                        break
+                else:
+                    yield ExecutionEvent(
+                        event_type="node_cached" if result.from_cache else "node_completed",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=result.node_id,
+                        node_type=result.node_type,
+                        status=result.status,
+                        outputs=result.outputs,
+                        logs=result.logs,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                        from_cache=result.from_cache,
+                    )
+
+            self.outputs = self._collect_outputs()
+            yield ExecutionEvent(
+                event_type="complete",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                progress=1.0,
+                total_nodes=total_nodes,
+                completed_nodes=completed_nodes,
+            )
+        finally:
+            self._unregister_execution(self.execution_id)
+
     async def run_async(self) -> Dict[str, Any]:
         """Execute the graph with dynamic readiness (no level barrier)."""
+        if self._loop_nodes:
+            return await asyncio.to_thread(self.run)
         self._execution_order = self._resolve_execution_order()
         execution_set = set(self._execution_order)
         self._reset_execution_state()
@@ -477,7 +974,7 @@ class GraphExecutor:
 
         # Track remaining dependencies per node
         remaining_inputs: Dict[str, int] = {
-          node_id: len(self.input_map.get(node_id, {})) for node_id in execution_set
+          node_id: len(self.input_map.get(node_id, {})) + len(self.control_inputs.get(node_id, [])) for node_id in execution_set
         }
         ready: deque[str] = deque([nid for nid, deg in remaining_inputs.items() if deg == 0])
 
@@ -651,6 +1148,10 @@ class GraphExecutor:
 
     async def run_streaming(self) -> AsyncIterator[ExecutionEvent]:
         """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
+        if self._loop_nodes:
+            async for event in self._run_streaming_sequential():
+                yield event
+            return
         self._execution_order = self._resolve_execution_order()
         execution_set = set(self._execution_order)
         self._reset_execution_state()
@@ -685,7 +1186,7 @@ class GraphExecutor:
         )
         
         remaining_inputs: Dict[str, int] = {
-            node_id: len(self.input_map.get(node_id, {})) for node_id in execution_set
+            node_id: len(self.input_map.get(node_id, {})) + len(self.control_inputs.get(node_id, [])) for node_id in execution_set
         }
         ready: deque[str] = deque([nid for nid, deg in remaining_inputs.items() if deg == 0])
         tasks: Dict[asyncio.Task[NodeExecutionResult], Tuple[str, Dict[str, Any]]] = {}
@@ -722,6 +1223,7 @@ class GraphExecutor:
                     node_type=result.node_type,
                     status=NodeStatus.ERROR,
                     error=reason,
+                    error_code="dependency_failed",
                     duration_ms=0.0,
                     level=result.level,
                     progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
@@ -883,6 +1385,7 @@ class GraphExecutor:
                             node_type=result.node_type,
                             status=NodeStatus.ERROR,
                             error=result.error,
+                            error_code=result.error_code,
                             duration_ms=result.duration_ms,
                             level=result.level,
                             progress=completed_nodes / total_nodes if total_nodes > 0 else 0,

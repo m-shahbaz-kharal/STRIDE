@@ -1,18 +1,26 @@
-import { NodeExecutionStatus } from "../types";
+import { NodeExecutionStatus, TypeDescriptor } from "../types";
 
 export const PORT_TYPE_COLORS: Record<string, string> = {
-  number: "#4a9eff",
+  int: "#4a9eff",
+  float: "#60a5fa",
+  number: "#60a5fa",
   image: "#e85aad",
   stream: "#0fb5a9",
   url: "#7c3aed",
   boolean: "#f59e0b",
   string: "#10b981",
   any: "#94a3b8",
+  unknown: "#cbd5e1",
+  list: "#7dd3fc",
+  map: "#facc15",
+  record: "#a855f7",
+  tensor: "#22d3ee",
+  control: "#f97316",
 };
 
-export const PORT_ROW_HEIGHT = 34;
+export const PORT_ROW_HEIGHT = 42;
 export const HEADER_HEIGHT = 70;
-export const MIN_NODE_WIDTH = 220;
+export const MIN_NODE_WIDTH = 260;
 
 export const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {
   switch (status) {
@@ -29,22 +37,40 @@ export const getExecutionStatusClass = (status?: NodeExecutionStatus): string =>
   }
 };
 
-export const getPortTypeColor = (type?: string): string => {
-  if (!type) return PORT_TYPE_COLORS.any;
-  const key = type.toLowerCase();
+const typeToColorKey = (type?: TypeDescriptor | string): string => {
+  if (!type) return "any";
+  if (typeof type === "string") return type.toLowerCase();
+  if (type.kind === "list" || type.kind === "map" || type.kind === "record" || type.kind === "tensor") {
+    return type.kind;
+  }
+  return type.kind || "any";
+};
+
+export const getPortTypeColor = (type?: TypeDescriptor | string): string => {
+  const key = typeToColorKey(type);
   return PORT_TYPE_COLORS[key] || PORT_TYPE_COLORS.any;
 };
 
-export const formatPortTypeLabel = (type?: string): string => {
+export const formatPortTypeLabel = (type?: TypeDescriptor | string): string => {
   if (!type) return "Any";
-  const normalized = type.toLowerCase();
-  if (normalized === "any") return "Any";
-  const label = normalized.replace(/_/g, " ");
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  if (typeof type === "string") {
+    const normalized = type.toLowerCase();
+    if (normalized === "any") return "Any";
+    const label = normalized.replace(/_/g, " ");
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+  const { kind } = type;
+  if (kind === "list" && type.item) return `List<${formatPortTypeLabel(type.item)}>`;
+  if (kind === "map" && type.value) return `Map<${formatPortTypeLabel(type.value)}>`;
+  if (kind === "tensor") {
+    const dtype = type.metadata?.dtype ?? "tensor";
+    return `Tensor<${dtype}>`;
+  }
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
 };
 
 export const computeNodeDimensions = (maxPorts: number) => {
-  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT;
+  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT + 8;
   return {
     width: MIN_NODE_WIDTH,
     height,
