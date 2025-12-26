@@ -200,18 +200,32 @@ class GraphExecutor:
             key = (link.from_node, link.from_port, link.to_node, link.to_port, link.kind)
             if key in seen_links:
                 raise GraphExecutionError(
-                    f"Duplicate link detected: {link.from_node}.{link.from_port} -> {link.to_node}.{link.to_port}"
+                    f"Duplicate link detected: {link.from_node}.{link.from_port} -> {link.to_node}.{link.to_port}",
+                    code="duplicate_link",
                 )
 
             from_node = self.nodes[link.from_node]
             to_node = self.nodes[link.to_node]
             if link.kind == "control":
+                if any(
+                    parent == link.from_node and port == link.from_port
+                    for parent, port in self.control_inputs.get(link.to_node, [])
+                ):
+                    raise GraphExecutionError(
+                        f"Duplicate control link detected: {link.from_node}.{link.from_port} -> {link.to_node}.{link.to_port}",
+                        code="duplicate_link",
+                    )
                 # Control edge only enforces ordering; no port binding required.
                 self.control_inputs[link.to_node].append((link.from_node, link.from_port))
                 self.control_outputs[link.from_node].append((link.to_node, link.from_port, link.to_port))
                 self.output_map[link.from_node].append((link.to_node, link.from_port, link.to_port))
                 self._dependents[link.from_node].append(link.to_node)
             else:
+                if link.to_port in self.input_map.get(link.to_node, {}):
+                    raise GraphExecutionError(
+                        f"Duplicate input link detected: {link.from_node}.{link.from_port} -> {link.to_node}.{link.to_port}",
+                        code="duplicate_link",
+                    )
                 if link.from_port not in from_node.output_ports:
                     raise GraphExecutionError(
                         f"Link from '{link.from_node}' references missing output port '{link.from_port}'",
@@ -234,7 +248,8 @@ class GraphExecutor:
                     if not from_type.is_assignable_to(to_type):
                         raise GraphExecutionError(
                             f"Type mismatch: {from_node.type}.{link.from_port} ({from_type.label()}) -> "
-                            f"{to_node.type}.{link.to_port} ({to_type.label()})"
+                            f"{to_node.type}.{link.to_port} ({to_type.label()})",
+                            code="type_mismatch",
                         )
 
                 self.input_map[link.to_node][link.to_port] = link
@@ -255,7 +270,8 @@ class GraphExecutor:
             node = self.nodes[node_id]
             if port not in node.output_ports:
                 raise GraphExecutionError(
-                    f"Output references unknown port '{port}' on node '{node_id}'"
+                    f"Output references unknown port '{port}' on node '{node_id}'",
+                    code="missing_output_port",
                 )
 
     def _topological_sort(self) -> List[str]:
@@ -339,7 +355,13 @@ class GraphExecutor:
             if node_id in body_nodes:
                 continue
             body_nodes.add(node_id)
-            for child, _, _ in self.control_outputs.get(node_id, []):
+            child_outputs = self.control_outputs.get(node_id, [])
+            if self._is_loop_node(self.nodes[node_id].type) and node_id != loop_id:
+                for child, from_port, _ in child_outputs:
+                    if from_port == "completed" and child not in body_nodes:
+                        queue.append(child)
+                continue
+            for child, _, _ in child_outputs:
                 if child not in body_nodes:
                     queue.append(child)
         return body_nodes
