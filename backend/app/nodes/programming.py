@@ -288,7 +288,7 @@ class StringConcatNode(NodeBase):
         b = inputs.get("b", "")
         result = f"{a}{b}"
         ctx.log(f"Concat -> {result}")
-        return {"result": result}
+        return {"control_out": None, "result": result}
 
 
 LENGTH_SPEC = NodeSpec(
@@ -329,6 +329,7 @@ MAP_GET_SPEC = NodeSpec(
     summary="Get value from map/object.",
     description="Returns map[key] with optional default.",
     inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="map", type=t_any(), required=False, default=None),
         PortSpec(name="key", type=t_any(), required=False, default=None),
         PortSpec(name="default", type=t_any(), required=False, default=None),

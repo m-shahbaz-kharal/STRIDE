@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from . import register_node
 from .base import ExecutionContext, NodeBase
 from ..node_spec import NodeSpec, PortSpec
-from ..typesystem import t_any, t_int, t_list
+from ..typesystem import t_any, t_control, t_int, t_list
 
 
 MAKE_ARRAY_SPEC = NodeSpec(
@@ -16,8 +16,11 @@ MAKE_ARRAY_SPEC = NodeSpec(
     summary="Create an array from inputs.",
     description="Collects item inputs into an array.",
     icon="list",
-    inputs=[],
-    outputs=[PortSpec(name="array", type=t_list(t_any()))],
+    inputs=[PortSpec(name="control_in", type=t_control(), required=False, default=None)],
+    outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="array", type=t_list(t_any())),
+    ],
     params={},
 )
 
@@ -29,7 +32,7 @@ class MakeArrayNode(NodeBase):
         for port in sorted(inputs.keys(), key=lambda name: int(name.split("_")[1]) if "_" in name and name.split("_")[1].isdigit() else 0):
             items.append(inputs.get(port))
         ctx.log(f"{self.id} make array ({len(items)} items)")
-        return {"array": items}
+        return {"control_out": None, "array": items}
 
 
 APPEND_ARRAY_SPEC = NodeSpec(
@@ -41,10 +44,14 @@ APPEND_ARRAY_SPEC = NodeSpec(
     description="Returns a new array with the value appended.",
     icon="list",
     inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="array", type=t_list(t_any()), required=False, default=None),
         PortSpec(name="value", type=t_any(), required=False, default=None),
     ],
-    outputs=[PortSpec(name="array", type=t_list(t_any()))],
+    outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="array", type=t_list(t_any())),
+    ],
     params={},
 )
 
@@ -58,7 +65,7 @@ class AppendArrayNode(NodeBase):
         value = inputs.get("value")
         result = list(array) + [value]
         ctx.log(f"{self.id} append -> {len(result)} items")
-        return {"array": result}
+        return {"control_out": None, "array": result}
 
 
 GET_INDEX_SPEC = NodeSpec(
@@ -70,10 +77,14 @@ GET_INDEX_SPEC = NodeSpec(
     description="Returns the value at index if present.",
     icon="list",
     inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="array", type=t_list(t_any()), required=False, default=None),
         PortSpec(name="index", type=t_int(), required=False, default=0),
     ],
-    outputs=[PortSpec(name="value", type=t_any())],
+    outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="value", type=t_any()),
+    ],
     params={},
 )
 
@@ -87,7 +98,7 @@ class GetIndexNode(NodeBase):
             array = list(array) if array is not None else []
         value = array[index] if 0 <= index < len(array) else None
         ctx.log(f"{self.id} get index {index} -> {value}")
-        return {"value": value}
+        return {"control_out": None, "value": value}
 
 
 RANGE_SPEC = NodeSpec(
@@ -99,11 +110,15 @@ RANGE_SPEC = NodeSpec(
     description="Creates a list of integers from start to end (inclusive).",
     icon="list",
     inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="start", type=t_int(), required=False, default=0),
         PortSpec(name="end", type=t_int(), required=False, default=0),
         PortSpec(name="step", type=t_int(), required=False, default=1),
     ],
-    outputs=[PortSpec(name="array", type=t_list(t_int()))],
+    outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="array", type=t_list(t_int())),
+    ],
     params={},
 )
 
@@ -122,4 +137,4 @@ class RangeNode(NodeBase):
             step = -step
         values = list(range(start, end + (1 if step > 0 else -1), step))
         ctx.log(f"{self.id} range {start}->{end} step {step} ({len(values)})")
-        return {"array": values}
+        return {"control_out": None, "array": values}

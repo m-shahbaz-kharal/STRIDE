@@ -99,11 +99,13 @@ const App = () => {
     position: { x: number; y: number };
     flowPosition: { x: number; y: number };
     source: { nodeId: string; handleId: string; type: "source" | "target" } | null;
+    sourcePortKind?: string;
   }>({
     isOpen: false,
     position: { x: 0, y: 0 },
     flowPosition: { x: 0, y: 0 },
     source: null,
+    sourcePortKind: undefined,
   });
   const [connectionMessage, setConnectionMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const connectionMessageTimeout = useRef<number | null>(null);
@@ -1033,8 +1035,8 @@ const App = () => {
   const getInitialPorts = useCallback((nodeType: NodeTypeDefinition) => {
     if (nodeType.node_type === "core.container.make_array") {
       return {
-        input_ports: ["item_0"],
-        input_port_types: { item_0: { kind: "any" } },
+        input_ports: ["control_in", "item_0"],
+        input_port_types: { control_in: { kind: "control" }, item_0: { kind: "any" } },
       };
     }
     return {
@@ -1256,6 +1258,10 @@ const App = () => {
         const sourceType = getPortTypeForHandle(source.nodeId, source.handleId, "source");
         for (const port of nodeType.input_ports) {
           const targetType = nodeType.input_port_types?.[port] || "any";
+          const resolvedTarget = typeof targetType === "string" ? { kind: targetType } : targetType;
+          if (sourceType.kind === "control" && resolvedTarget?.kind !== "control") {
+            continue;
+          }
           if (arePortTypesCompatible(sourceType, targetType)) {
             return { targetHandle: port, sourceType, targetType };
           }
@@ -1266,6 +1272,10 @@ const App = () => {
       const targetType = getPortTypeForHandle(source.nodeId, source.handleId, "target");
       for (const port of nodeType.output_ports) {
         const sourceType = nodeType.output_port_types?.[port] || "any";
+        const resolvedSource = typeof sourceType === "string" ? { kind: sourceType } : sourceType;
+        if (targetType.kind === "control" && resolvedSource?.kind !== "control") {
+          continue;
+        }
         if (arePortTypesCompatible(sourceType, targetType)) {
           return { sourceHandle: port, sourceType, targetType };
         }
@@ -1530,6 +1540,12 @@ const App = () => {
           y: clientY,
         });
 
+        const sourceRole = connectStartParams.handleType || "source";
+        const sourcePortType = getPortTypeForHandle(
+          connectStartParams.nodeId,
+          connectStartParams.handleId,
+          sourceRole
+        );
         setSmartConnectMenu({
           isOpen: true,
           position: { x: clientX, y: clientY },
@@ -1539,6 +1555,7 @@ const App = () => {
             handleId: connectStartParams.handleId,
             type: connectStartParams.handleType || "source",
           },
+          sourcePortKind: sourcePortType?.kind,
         });
       }
 
@@ -1546,7 +1563,7 @@ const App = () => {
       setConnectionLineColor(undefined);
       setConnectionLineIsInvalid(false);
     },
-    [connectStartParams, reactFlowInstance]
+    [connectStartParams, reactFlowInstance, getPortTypeForHandle]
   );
 
   const handleSmartConnectSelect = useCallback(
@@ -1571,6 +1588,12 @@ const App = () => {
       for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
         params[key] = schema.default ?? defaults[key] ?? "";
       }
+      const { input_ports, input_port_types } = getInitialPorts(nodeType);
+      const inputValues = buildDefaultInputValues(nodeType);
+      const seededInputValues =
+        nodeType.node_type === "core.container.make_array"
+          ? { ...inputValues, item_0: null }
+          : inputValues;
 
       const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
       const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
@@ -1582,7 +1605,7 @@ const App = () => {
 
       // Header ~50px, Port stride ~26px, Handle center +10px
       const matchedPortIndex = source.type === "source"
-        ? nodeType.input_ports.indexOf(compatiblePort.targetHandle!)
+        ? input_ports.indexOf(compatiblePort.targetHandle!)
         : nodeType.output_ports.indexOf(compatiblePort.sourceHandle!);
       const resolvedPortIndex = matchedPortIndex >= 0 ? matchedPortIndex : 0;
       const portYOffset = HEADER_HEIGHT + resolvedPortIndex * PORT_ROW_HEIGHT + PORT_ROW_HEIGHT / 2;
@@ -1610,6 +1633,7 @@ const App = () => {
           input_port_types,
           output_port_types: nodeType.output_port_types,
           params,
+          inputValues: seededInputValues,
           breakpoint: false,
           metadata: nodeType,
           onDelete: handleDeleteNode,
@@ -1620,6 +1644,8 @@ const App = () => {
           executionLogs: [],
           onInterrupt: handleInterruptNode,
           onPortHover: setHoveredPort,
+          onInputValueChange: handleInputValueChange,
+          onAddInputPort: handleAddInputPort,
         },
       };
 
@@ -1680,10 +1706,14 @@ const App = () => {
     },
       [
         smartConnectMenu,
+        buildDefaultInputValues,
+        getInitialPorts,
         handleDeleteNode,
         handleRunFromNode,
         handleClearNodeCache,
         handleInterruptNode,
+        handleInputValueChange,
+        handleAddInputPort,
         setNodes,
         setEdges,
         arePortTypesCompatible,
@@ -2223,6 +2253,7 @@ const App = () => {
           onSelect={handleSmartConnectSelect}
           nodeTypes={smartConnectNodeTypes}
           sourceHandleType={smartConnectMenu.source?.type}
+          sourcePortKind={smartConnectMenu.sourcePortKind}
         />
       </div>
       </ReactFlowProvider>

@@ -8,6 +8,7 @@ interface SmartConnectModalProps {
     onSelect: (nodeType: NodeTypeDefinition) => void;
     nodeTypes: NodeTypeDefinition[];
     sourceHandleType?: "source" | "target";
+    sourcePortKind?: string;
 }
 
 // Helper to get category icon (simple mapping for now)
@@ -32,12 +33,14 @@ const SmartConnectModal = ({
     onSelect,
     nodeTypes,
     sourceHandleType,
+    sourcePortKind,
 }: SmartConnectModalProps) => {
     const [query, setQuery] = useState("");
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
+    const lastInteractionRef = useRef<"mouse" | "keyboard" | null>(null);
 
     // Parse and prioritize nodes
     const filteredNodes = useMemo(() => {
@@ -45,8 +48,14 @@ const SmartConnectModal = ({
 
         // 1. Filter
         let nodes = nodeTypes;
+        if (sourcePortKind === "control") {
+            nodes = nodes.filter((node) =>
+                (node.inputs ?? []).some((input) => input.type?.kind === "control") ||
+                (node.outputs ?? []).some((output) => output.type?.kind === "control")
+            );
+        }
         if (normalizedQuery) {
-            nodes = nodeTypes.filter((node) =>
+            nodes = nodes.filter((node) =>
                 node.display_name.toLowerCase().includes(normalizedQuery) ||
                 node.node_type.toLowerCase().includes(normalizedQuery)
             );
@@ -104,7 +113,7 @@ const SmartConnectModal = ({
         }
 
         return nodes;
-    }, [nodeTypes, query, sourceHandleType]);
+    }, [nodeTypes, query, sourceHandleType, sourcePortKind]);
 
     // Reset selection when query changes
     useEffect(() => {
@@ -127,9 +136,11 @@ const SmartConnectModal = ({
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === "ArrowDown") {
                 e.preventDefault();
+                lastInteractionRef.current = "keyboard";
                 setSelectedIndex((prev) => Math.min(prev + 1, filteredNodes.length - 1));
             } else if (e.key === "ArrowUp") {
                 e.preventDefault();
+                lastInteractionRef.current = "keyboard";
                 setSelectedIndex((prev) => Math.max(prev - 1, 0));
             } else if (e.key === "Enter") {
                 e.preventDefault();
@@ -165,6 +176,9 @@ const SmartConnectModal = ({
 
     // Scroll selected item into view
     useEffect(() => {
+        if (lastInteractionRef.current === "mouse") {
+            return;
+        }
         if (listRef.current) {
             const selectedElement = listRef.current.children[selectedIndex] as HTMLElement;
             if (selectedElement) {
@@ -250,7 +264,10 @@ const SmartConnectModal = ({
                             key={node.node_type}
                             className={`smart-connect-item ${index === selectedIndex ? "selected" : ""}`}
                             onClick={() => onSelect(node)}
-                            onMouseEnter={() => setSelectedIndex(index)}
+                            onMouseEnter={() => {
+                                lastInteractionRef.current = "mouse";
+                                setSelectedIndex(index);
+                            }}
                         >
                             <div className="item-icon">{getCategoryIcon(category)}</div>
                             <div className="item-content">

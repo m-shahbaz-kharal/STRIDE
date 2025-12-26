@@ -5,7 +5,7 @@ from typing import Any, Dict
 from .base import ExecutionContext, NodeBase
 from . import register_node
 from ..node_spec import NodeSpec, PortSpec
-from ..typesystem import t_any
+from ..typesystem import t_any, t_control
 from .coercion import coerce_add
 
 
@@ -18,10 +18,12 @@ ADDITION_SPEC = NodeSpec(
     description="Combines two numeric inputs.",
     icon="plus",
     inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="a", type=t_any(), required=False, default=None),
         PortSpec(name="b", type=t_any(), required=False, default=None),
     ],
     outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="sum", type=t_any()),
     ],
     params={},
@@ -46,4 +48,4 @@ class AdditionNode(NodeBase):
         ctx.log(f"[AdditionNode] Computed ({mode}): {a_value} + {b_value} = {result}")
         ctx.log(f"[AdditionNode] Operation completed successfully")
         
-        return {"sum": result}
+        return {"control_out": None, "sum": result}
