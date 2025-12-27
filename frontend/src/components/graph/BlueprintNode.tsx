@@ -62,7 +62,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const resizeCornerRef = useRef<Corner>(null);
   const zoomRef = useRef(1);
   const { getZoom } = useReactFlow();
-  const edges = useStore((state) => state.edges);
+  const edges = useStore((state) => state.edges || []);
+  const nodeInternals = useStore((state) => state.nodeInternals);
   const { showLogsPopup } = usePopups();
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
@@ -115,6 +116,22 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     (port: string) =>
       edges.some((edge) => edge.target === id && edge.targetHandle === port),
     [edges, id]
+  );
+
+  const getConnectedOutput = useCallback(
+    (port: string) => {
+      const edge = edges.find((item) => item.target === id && item.targetHandle === port);
+      if (!edge || !edge.sourceHandle) {
+        return { hasValue: false, value: undefined };
+      }
+      const sourceNode = nodeInternals?.get(edge.source);
+      const outputs = sourceNode?.data?.last_outputs;
+      if (outputs && Object.prototype.hasOwnProperty.call(outputs, edge.sourceHandle)) {
+        return { hasValue: true, value: outputs[edge.sourceHandle] };
+      }
+      return { hasValue: false, value: undefined };
+    },
+    [edges, id, nodeInternals]
   );
 
   const getInputDefault = useCallback(
@@ -409,7 +426,11 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const defaultValue = getInputDefault(port);
             const hasInputValue = Object.prototype.hasOwnProperty.call(data.inputValues ?? {}, port);
             const resolvedValue = hasInputValue ? inputValue : defaultValue;
-            const placeholderValue = defaultValue == null ? "" : String(defaultValue);
+            const connectedInfo = isConnected ? getConnectedOutput(port) : null;
+            const hasCachedValue = Boolean(connectedInfo?.hasValue);
+            const displayValue = isConnected ? (hasCachedValue ? connectedInfo?.value : "") : resolvedValue;
+            const isEmptyConnected = isConnected && !hasCachedValue;
+            const placeholderValue = isEmptyConnected ? "" : (defaultValue == null ? "" : String(defaultValue));
             const inputSpec = inputSpecMap.get(port);
             const inputUi = inputSpec?.ui as { control?: string; options?: string[] } | undefined;
             const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -452,11 +473,14 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   <div className="node-port-input-control">
                     {inputUi?.control === "select" && inputUi.options ? (
                       <select
-                        className="node-input-field nodrag"
-                        value={`${resolvedValue ?? ""}`}
+                        className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
+                        value={`${displayValue ?? ""}`}
                         disabled={isConnected}
                         onChange={(event) => data.onInputValueChange?.(id, port, event.target.value)}
                       >
+                        {isEmptyConnected && (
+                          <option value="">No cached value</option>
+                        )}
                         {inputUi.options.map((option) => (
                           <option key={option} value={option}>
                             {option}
@@ -466,8 +490,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                     ) : portKind === "boolean" ? (
                       <input
                         type="checkbox"
-                        className="node-input-checkbox nodrag"
-                        checked={Boolean(resolvedValue)}
+                        className={`node-input-checkbox nodrag${isEmptyConnected ? " empty" : ""}`}
+                        checked={hasCachedValue ? Boolean(displayValue) : false}
                         disabled={isConnected}
                         onChange={(event) =>
                           data.onInputValueChange?.(id, port, event.target.checked)
@@ -477,8 +501,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                       <input
                         type={portKind === "int" || portKind === "float" || portKind === "number" ? "number" : "text"}
                         step={portKind === "int" ? 1 : "any"}
-                        className="node-input-field nodrag"
-                        value={`${resolvedValue ?? ""}`}
+                        className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
+                        value={`${displayValue ?? ""}`}
                         placeholder={placeholderValue}
                         disabled={isConnected}
                         onChange={(event) => {
@@ -495,6 +519,9 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                           data.onInputValueChange?.(id, port, raw);
                         }}
                       />
+                    )}
+                    {isEmptyConnected && (
+                      <span className="node-input-empty-label">no cache</span>
                     )}
                   </div>
                 )}
