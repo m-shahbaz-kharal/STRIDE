@@ -491,7 +491,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                       <input
                         type="checkbox"
                         className={`node-input-checkbox nodrag${isEmptyConnected ? " empty" : ""}`}
-                        checked={hasCachedValue ? Boolean(displayValue) : false}
+                        checked={isConnected ? (hasCachedValue ? Boolean(displayValue) : false) : Boolean(displayValue)}
                         disabled={isConnected}
                         onChange={(event) =>
                           data.onInputValueChange?.(id, port, event.target.checked)

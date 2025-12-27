@@ -141,6 +141,8 @@ class _StreamWorker:
         self._running.set()
         self._thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._proc: Optional[subprocess.Popen] = None
+        self._last_frame_time = 0.0
+        self._lock = threading.Lock()
 
     def _ffmpeg_cmd(self) -> list[str]:
         return [
@@ -183,19 +185,22 @@ class _StreamWorker:
 
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((self.height, self.width, 3))
             try:
-                self._queue.put(frame, timeout=0.01)
+                self._queue.put(frame, timeout=1.0)
             except queue.Full:
-                try:
-                    _ = self._queue.get_nowait()
-                except queue.Empty:
-                    pass
-                try:
-                    self._queue.put(frame, timeout=0.01)
-                except queue.Full:
-                    pass
+                # Buffer full, skip this frame to avoid deadlock.
+                pass
         self._running.clear()
 
-    def latest_frame(self, timeout: float) -> Optional["np.ndarray"]:
+    def latest_frame(self, timeout: float, pace: bool = True) -> Optional["np.ndarray"]:
+        if pace:
+            interval = 1.0 / float(self.target_fps)
+            with self._lock:
+                now = time.perf_counter()
+                if self._last_frame_time:
+                    remaining = interval - (now - self._last_frame_time)
+                    if remaining > 0:
+                        time.sleep(remaining)
+                self._last_frame_time = time.perf_counter()
         try:
             return self._queue.get(timeout=timeout)
         except queue.Empty:
@@ -266,7 +271,6 @@ FL511_RESOLVE_SPEC = NodeSpec(
         PortSpec(name="width", type=t_int()),
         PortSpec(name="height", type=t_int()),
     ],
-    cache_policy="disabled",
 )
 
 
@@ -369,9 +373,10 @@ FL511_TICK_SPEC = NodeSpec(
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="stream_id", type=t_string(), required=False, default=None),
-        PortSpec(name="timeout", type=t_float(), required=False, default=0.2),
+        PortSpec(name="timeout", type=t_float(), required=False, default=1.0),
         PortSpec(name="jpeg_quality", type=t_int(), required=False, default=85),
-        PortSpec(name="require_frame", type=t_boolean(), required=False, default=False),
+        PortSpec(name="require_frame", type=t_boolean(), required=False, default=True),
+        PortSpec(name="pace", type=t_boolean(), required=False, default=True),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -396,11 +401,13 @@ class Fl511TickNode(NodeBase):
         timeout_value = inputs.get("timeout")
         jpeg_quality_value = inputs.get("jpeg_quality")
         require_frame_value = inputs.get("require_frame")
-        timeout = float(timeout_value if timeout_value is not None else self.params.get("timeout", 0.2))
+        pace_value = inputs.get("pace")
+        timeout = float(timeout_value if timeout_value is not None else self.params.get("timeout", 1.0))
         jpeg_quality = int(jpeg_quality_value if jpeg_quality_value is not None else self.params.get("jpeg_quality", 85))
-        require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", False))
+        require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", True))
+        pace = bool(pace_value) if pace_value is not None else bool(self.params.get("pace", True))
 
-        frame = worker.latest_frame(timeout=timeout)
+        frame = worker.latest_frame(timeout=timeout, pace=pace)
         if frame is None:
             if require_frame:
                 raise TimeoutError(f"No frame available within {timeout}s")

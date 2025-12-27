@@ -174,6 +174,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "complete":
           setCurrentNodeId(null);
           setProgress(1);
+          setExecutionId(null);
           activeRunRef.current = false;
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
@@ -185,6 +186,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           if (data.levels) setLevels(data.levels as string[][]);
           setCurrentNodeId(null);
           setProgress(1);
+          setExecutionId(null);
           activeRunRef.current = false;
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
@@ -193,6 +195,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setError(data.error ?? "Unknown error");
           setErrorCode(data.error_code ?? null);
           setCurrentNodeId(null);
+          setExecutionId(null);
           activeRunRef.current = false;
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
@@ -275,6 +278,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setOutputs({});
     setStats(null);
     setProgress(0);
+    setExecutionId(null);
     setCurrentNodeId(null);
     setNodeStatuses((prev) => {
       const updated = new Map(prev);
@@ -299,6 +303,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setOutputs({});
     setStats(null);
     setProgress(0);
+    setExecutionId(null);
     setNodeStatuses((prev) => {
       const updated = new Map(prev);
       runNodeIds.forEach((id) => updated.set(id, "running"));

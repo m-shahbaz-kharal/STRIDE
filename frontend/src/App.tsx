@@ -880,12 +880,15 @@ const App = () => {
 
     takeSnapshot();
 
-    const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+    const selectedNodeSet = new Set(selectedNodeIds);
+    const selectedNodes = nodes.filter((node) => selectedNodeSet.has(node.id));
     const newNodes: Node<BlueprintNodeData>[] = [];
+    const nodeIdMap = new Map<string, string>();
 
     // Create new nodes with offset positions
     selectedNodes.forEach((node) => {
       const newId = `node-${nodeIdRef.current++}`;
+      nodeIdMap.set(node.id, newId);
       newNodes.push({
         ...node,
         id: newId,
@@ -907,13 +910,46 @@ const App = () => {
       });
     });
 
+    const edgesToCopy = edges.filter((edge) =>
+      selectedNodeSet.has(edge.source) || selectedNodeSet.has(edge.target)
+    );
+    const newEdges = [];
+    const existingEdges = [...edges];
+    const isDuplicateEdge = (edge: typeof edges[number], list: typeof edges) =>
+      list.some(
+        (item) =>
+          item.source === edge.source &&
+          item.target === edge.target &&
+          item.sourceHandle === edge.sourceHandle &&
+          item.targetHandle === edge.targetHandle
+      );
+
+    edgesToCopy.forEach((edge) => {
+      const source = nodeIdMap.get(edge.source) ?? edge.source;
+      const target = nodeIdMap.get(edge.target) ?? edge.target;
+      const newEdge = {
+        ...edge,
+        id: `edge-${Math.random().toString(36).slice(2, 10)}`,
+        source,
+        target,
+        selected: false,
+      };
+      if (!isDuplicateEdge(newEdge, existingEdges) && !isDuplicateEdge(newEdge, newEdges)) {
+        newEdges.push(newEdge);
+      }
+    });
+
     setNodes((current) => [...current, ...newNodes]);
+    if (newEdges.length > 0) {
+      setEdges((current) => [...current, ...newEdges]);
+    }
 
     // Select the new nodes
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [selectedNodeIds, nodes, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
+    setSelectedEdgeIds(newEdges.map((edge) => edge.id));
+  }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes, setEdges]);
 
   // Copy selected nodes to clipboard (no edges - edges can only be deleted)
   const handleCopy = useCallback(() => {

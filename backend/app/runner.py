@@ -803,6 +803,8 @@ class GraphExecutor:
                         total_nodes += len(indices) * len(body_order)
 
                     for idx in indices:
+                        if self._cancel_all:
+                            break
                         if loop_node.type == "core.control.while":
                             inputs = self._prepare_inputs(node_id)
                             if not bool(inputs.get("condition")):
