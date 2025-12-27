@@ -15,6 +15,9 @@ const parseParamValue = (
   raw: string,
   schema: ParamSchemaField
 ): string | number | boolean => {
+  if (schema.type === "boolean") {
+    return raw === "true";
+  }
   if (schema.type === "number") {
     const numeric = Number(raw);
     return Number.isNaN(numeric) ? 0 : numeric;
@@ -142,6 +145,15 @@ const NodeCard = ({
                         </option>
                       ))}
                     </select>
+                  ) : field.type === "boolean" ? (
+                    <label className="inspector-checkbox">
+                      <input
+                        id={`param-${node.id}-${param}`}
+                        type="checkbox"
+                        checked={Boolean(node.data.params[param] ?? field.default ?? false)}
+                        onChange={(event) => onParamChange(node.id, param, event.target.checked)}
+                      />
+                    </label>
                   ) : (
                     <input
                       id={`param-${node.id}-${param}`}

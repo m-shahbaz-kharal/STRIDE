@@ -51,6 +51,7 @@ from . import casting  # noqa: E402,F401
 from . import containers  # noqa: E402,F401
 from . import math_ops  # noqa: E402,F401
 from . import programming  # noqa: E402,F401
+from . import fl511  # noqa: E402,F401
 
 
 __all__ = [

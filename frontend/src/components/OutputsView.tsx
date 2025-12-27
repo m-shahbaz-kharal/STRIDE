@@ -12,6 +12,9 @@ type ValueOutput = { key: string; value: unknown };
 
 const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
   const [refreshToken, setRefreshToken] = useState(0);
+  const [streamsCollapsed, setStreamsCollapsed] = useState(false);
+  const [imagesCollapsed, setImagesCollapsed] = useState(false);
+  const [valuesCollapsed, setValuesCollapsed] = useState(false);
 
   const formatValue = (val: unknown): string => {
     if (val === null) return "null";
@@ -25,18 +28,34 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
   const { images, values, streams } = useMemo(() => {
     const img: ImageOutput[] = [];
     const val: ValueOutput[] = [];
-    const streamIds: string[] = [];
+    const streamIds = new Set<string>();
 
     // Inline display nodes
     for (const node of nodes) {
       const nodeOutputs = node.data.last_outputs;
-      if (nodeOutputs?.display && typeof nodeOutputs.display === "string" && nodeOutputs.display.startsWith("data:image")) {
+      if (!nodeOutputs) continue;
+
+      if (nodeOutputs.display && typeof nodeOutputs.display === "string" && nodeOutputs.display.startsWith("data:image")) {
         img.push({
           nodeId: node.id,
           nodeName: node.data.displayName,
           image: nodeOutputs.display,
           source: "node",
         });
+      }
+
+      if (typeof nodeOutputs.image === "string" && nodeOutputs.image.startsWith("data:image")) {
+        img.push({
+          nodeId: node.id,
+          nodeName: node.data.displayName,
+          image: nodeOutputs.image,
+          source: "node",
+        });
+      }
+
+      const streamId = nodeOutputs.stream_id;
+      if (typeof streamId === "string") {
+        streamIds.add(streamId);
       }
     }
 
@@ -50,13 +69,13 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
           source: "graph",
         });
       } else if (typeof value === "string" && key.toLowerCase().includes("stream_id")) {
-        streamIds.push(value);
+        streamIds.add(value);
       } else {
         val.push({ key, value });
       }
     }
 
-    return { images: img, values: val, streams: streamIds };
+    return { images: img, values: val, streams: Array.from(streamIds) };
   }, [nodes, outputs]);
 
   // Heartbeat refresh for stream snapshots
@@ -76,15 +95,11 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
             <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
           </svg>
           <p>No outputs yet</p>
-          <p className="outputs-empty-hint">Run a graph or attach a Display node to see live results.</p>
+          <p className="outputs-empty-hint">Run a graph to see results.</p>
         </div>
       </div>
     );
   }
-
-  const [streamsCollapsed, setStreamsCollapsed] = useState(false);
-  const [imagesCollapsed, setImagesCollapsed] = useState(false);
-  const [valuesCollapsed, setValuesCollapsed] = useState(false);
 
   return (
     <div className="outputs-view">
@@ -116,7 +131,7 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
                 <div key={id} className="output-card stream">
                   <div className="output-card__bar">
                     <span className="badge live">LIVE</span>
-                    <span className="meta">camera.stream_start</span>
+                    <span className="meta">fl511.stream.start</span>
                     <span className="mono">#{id}</span>
                   </div>
                   <div className="output-card__body">

@@ -177,13 +177,22 @@ const App = () => {
 
   const outputsSummary = useMemo(() => {
     let images = 0;
-    let streams = 0;
+    const streamIds = new Set<string>();
     let values = 0;
 
     for (const node of nodes) {
-      const display = node.data.last_outputs?.display;
+      const nodeOutputs = node.data.last_outputs;
+      const display = nodeOutputs?.display;
       if (typeof display === "string" && display.startsWith("data:image")) {
         images += 1;
+      }
+      const image = nodeOutputs?.image;
+      if (typeof image === "string" && image.startsWith("data:image")) {
+        images += 1;
+      }
+      const streamId = nodeOutputs?.stream_id;
+      if (typeof streamId === "string") {
+        streamIds.add(streamId);
       }
     }
 
@@ -191,13 +200,13 @@ const App = () => {
       if (typeof value === "string" && value.startsWith("data:image")) {
         images += 1;
       } else if (typeof value === "string" && key.toLowerCase().includes("stream_id")) {
-        streams += 1;
+        streamIds.add(value);
       } else {
         values += 1;
       }
     }
 
-    return { images, streams, values };
+    return { images, streams: streamIds.size, values };
   }, [nodes, outputs]);
 
   const graphSummary = useMemo(() => {
@@ -296,10 +305,15 @@ const App = () => {
   useEffect(() => {
     if (nodeStatuses.size === 0 && !isRunning) return;
 
+    const latestTraceByNode = new Map<string, ExecutionTraceEntry>();
+    for (const entry of trace) {
+      latestTraceByNode.set(entry.node_id, entry);
+    }
+
     setNodes((existing) =>
       existing.map((node) => {
         const status = nodeStatuses.get(node.id);
-        const traceEntry = trace.find((t) => t.node_id === node.id);
+        const traceEntry = latestTraceByNode.get(node.id);
 
         return {
           ...node,

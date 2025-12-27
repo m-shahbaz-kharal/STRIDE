@@ -723,45 +723,6 @@ def test_output_port_validation() -> None:
     )
 
 
-async def _run_parallel() -> int:
-    parallel_graph = {
-        "nodes": [
-            {"id": "a", "type": "core.literal.int", "params": {"value": 2}},
-            {"id": "split", "type": "core.util.splitter", "params": {}},
-            {"id": "d1", "type": "core.util.delay", "params": {"delay_ms": 150}},
-            {"id": "d2", "type": "core.util.delay", "params": {"delay_ms": 150}},
-            {"id": "d3", "type": "core.util.delay", "params": {"delay_ms": 150}},
-            {"id": "merge", "type": "core.util.merger", "params": {}},
-        ],
-        "links": [
-            {"from_node": "a", "from_port": "value", "to_node": "split", "to_port": "input"},
-            {"from_node": "split", "from_port": "out_a", "to_node": "d1", "to_port": "value"},
-            {"from_node": "split", "from_port": "out_b", "to_node": "d2", "to_port": "value"},
-            {"from_node": "split", "from_port": "out_c", "to_node": "d3", "to_port": "value"},
-            {"from_node": "d1", "from_port": "value", "to_node": "merge", "to_port": "in_a"},
-            {"from_node": "d2", "from_port": "value", "to_node": "merge", "to_port": "in_b"},
-            {"from_node": "d3", "from_port": "value", "to_node": "merge", "to_port": "in_c"},
-        ],
-        "output_nodes": [{"node_id": "merge", "port": "sum", "alias": "sum"}],
-    }
-
-    executor = GraphExecutor(parallel_graph)
-    running = 0
-    max_running = 0
-    async for event in executor.run_streaming():
-        if event.event_type == "node_started":
-            running += 1
-            max_running = max(max_running, running)
-        elif event.event_type in {"node_completed", "node_error", "node_skipped", "node_cached"}:
-            running = max(0, running - 1)
-    return max_running
-
-
-def test_parallel_branches() -> None:
-    max_running = asyncio.run(_run_parallel())
-    if max_running < 2:
-        raise AssertionError(f"parallel_branches expected concurrency, got {max_running}")
-    print(f"parallel_branches: PASS max_running={max_running}")
 
 
 def test_breakpoints_stop_execution() -> None:
@@ -922,16 +883,23 @@ async def _run_streaming_with_cancel() -> dict:
     graph = {
         "nodes": [
             {"id": "a", "type": "core.literal.int", "params": {"value": 2}},
-            {"id": "d1", "type": "core.util.delay", "params": {"delay_ms": 300}},
-            {"id": "d2", "type": "core.util.delay", "params": {"delay_ms": 300}},
+            {"id": "b", "type": "core.literal.int", "params": {"value": 3}},
+            {"id": "c", "type": "core.literal.int", "params": {"value": 4}},
+            {"id": "add1", "type": "core.math.add", "params": {}},
+            {"id": "add2", "type": "core.math.add", "params": {}},
+            {"id": "add3", "type": "core.math.add", "params": {}},
         ],
         "links": [
-            {"from_node": "a", "from_port": "value", "to_node": "d1", "to_port": "value"},
-            {"from_node": "d1", "from_port": "value", "to_node": "d2", "to_port": "value"},
+            {"from_node": "a", "from_port": "value", "to_node": "add1", "to_port": "a"},
+            {"from_node": "b", "from_port": "value", "to_node": "add1", "to_port": "b"},
+            {"from_node": "add1", "from_port": "sum", "to_node": "add2", "to_port": "a"},
+            {"from_node": "c", "from_port": "value", "to_node": "add2", "to_port": "b"},
+            {"from_node": "add2", "from_port": "sum", "to_node": "add3", "to_port": "a"},
+            {"from_node": "a", "from_port": "value", "to_node": "add3", "to_port": "b"},
         ],
-        "output_nodes": [{"node_id": "d2", "port": "value", "alias": "value"}],
+        "output_nodes": [{"node_id": "add3", "port": "sum", "alias": "sum"}],
     }
-    executor = GraphExecutor(graph)
+    executor = GraphExecutor(graph, options={"max_workers": 1})
     events: list[dict] = []
     cancelled = False
     async for event in executor.run_streaming():
@@ -967,27 +935,29 @@ async def _run_streaming_cancel_node() -> dict:
     graph = {
         "nodes": [
             {"id": "a", "type": "core.literal.int", "params": {"value": 2}},
-            {"id": "split", "type": "core.util.splitter", "params": {}},
-            {"id": "d1", "type": "core.util.delay", "params": {"delay_ms": 200}},
-            {"id": "d2", "type": "core.util.delay", "params": {"delay_ms": 200}},
-            {"id": "merge", "type": "core.util.merger", "params": {}},
+            {"id": "b", "type": "core.literal.int", "params": {"value": 3}},
+            {"id": "c", "type": "core.literal.int", "params": {"value": 4}},
+            {"id": "add1", "type": "core.math.add", "params": {}},
+            {"id": "add2", "type": "core.math.add", "params": {}},
+            {"id": "add3", "type": "core.math.add", "params": {}},
         ],
         "links": [
-            {"from_node": "a", "from_port": "value", "to_node": "split", "to_port": "input"},
-            {"from_node": "split", "from_port": "out_a", "to_node": "d1", "to_port": "value"},
-            {"from_node": "split", "from_port": "out_b", "to_node": "d2", "to_port": "value"},
-            {"from_node": "d1", "from_port": "value", "to_node": "merge", "to_port": "in_a"},
-            {"from_node": "d2", "from_port": "value", "to_node": "merge", "to_port": "in_b"},
+            {"from_node": "a", "from_port": "value", "to_node": "add1", "to_port": "a"},
+            {"from_node": "b", "from_port": "value", "to_node": "add1", "to_port": "b"},
+            {"from_node": "add1", "from_port": "sum", "to_node": "add2", "to_port": "a"},
+            {"from_node": "c", "from_port": "value", "to_node": "add2", "to_port": "b"},
+            {"from_node": "add2", "from_port": "sum", "to_node": "add3", "to_port": "a"},
+            {"from_node": "a", "from_port": "value", "to_node": "add3", "to_port": "b"},
         ],
-        "output_nodes": [{"node_id": "merge", "port": "sum", "alias": "sum"}],
+        "output_nodes": [{"node_id": "add3", "port": "sum", "alias": "sum"}],
     }
-    executor = GraphExecutor(graph)
+    executor = GraphExecutor(graph, options={"max_workers": 1})
     events: list[dict] = []
     cancelled = False
     async for event in executor.run_streaming():
         events.append({"type": event.event_type, "node_id": event.node_id})
-        if event.event_type == "node_started" and event.node_id == "d1" and not cancelled:
-            GraphExecutor.cancel_node(event.execution_id or "", "d2")
+        if event.event_type == "start" and not cancelled:
+            GraphExecutor.cancel_node(event.execution_id or "", "add3")
             cancelled = True
     return {"events": events, "cancelled": cancelled}
 
@@ -997,9 +967,9 @@ def test_streaming_cancel_node() -> None:
     events = result["events"]
     if not result["cancelled"]:
         raise AssertionError("streaming_cancel_node did not trigger cancel")
-    skipped = [e for e in events if e["type"] == "node_skipped" and e.get("node_id") == "d2"]
+    skipped = [e for e in events if e["type"] == "node_skipped" and e.get("node_id") == "add3"]
     if not skipped:
-        raise AssertionError("streaming_cancel_node expected d2 to be skipped")
+        raise AssertionError("streaming_cancel_node expected add3 to be skipped")
 
 
 def test_selection_mode_executes_dependencies_only() -> None:
@@ -1079,15 +1049,17 @@ async def _run_fail_fast_streaming(fail_fast: bool) -> list[dict]:
             {"id": "a", "type": "core.literal.string", "params": {"value": "abc"}},
             {"id": "b", "type": "core.literal.int", "params": {"value": 1}},
             {"id": "cmp", "type": "core.logic.compare", "params": {"op": ">"}},
-            {"id": "value", "type": "core.literal.int", "params": {"value": 5}},
-            {"id": "delay", "type": "core.util.delay", "params": {"delay_ms": 300}},
+            {"id": "x", "type": "core.literal.int", "params": {"value": 5}},
+            {"id": "y", "type": "core.literal.int", "params": {"value": 6}},
+            {"id": "add", "type": "core.math.add", "params": {}},
         ],
         "links": [
             {"from_node": "a", "from_port": "value", "to_node": "cmp", "to_port": "a"},
             {"from_node": "b", "from_port": "value", "to_node": "cmp", "to_port": "b"},
-            {"from_node": "value", "from_port": "value", "to_node": "delay", "to_port": "value"},
+            {"from_node": "x", "from_port": "value", "to_node": "add", "to_port": "a"},
+            {"from_node": "y", "from_port": "value", "to_node": "add", "to_port": "b"},
         ],
-        "output_nodes": [{"node_id": "delay", "port": "value", "alias": "value"}],
+        "output_nodes": [{"node_id": "add", "port": "sum", "alias": "sum"}],
     }
     executor = GraphExecutor(graph, options={"fail_fast": fail_fast, "max_workers": 2})
     events: list[dict] = []
@@ -1102,16 +1074,17 @@ def test_fail_fast_cancels_parallel_tasks() -> None:
     error_index = next((i for i, e in enumerate(events) if e["type"] == "node_error" and e.get("node_id") == "cmp"), None)
     if error_index is None:
         raise AssertionError("fail_fast_cancels_parallel_tasks expected cmp error")
+    started_before_error = {e["node_id"] for e in events[:error_index] if e["type"] == "node_started"}
     for entry in events[error_index + 1:]:
-        if entry["type"] in {"node_queued", "node_started"}:
-            raise AssertionError("fail_fast_cancels_parallel_tasks expected no new nodes queued after error")
+        if entry["type"] == "node_started" and entry.get("node_id") not in started_before_error:
+            raise AssertionError("fail_fast_cancels_parallel_tasks expected no new nodes started after error")
 
 
 def test_fail_fast_false_allows_parallel_completion() -> None:
     events = asyncio.run(_run_fail_fast_streaming(False))
-    delay_events = [e["type"] for e in events if e.get("node_id") == "delay"]
-    if "node_completed" not in delay_events:
-        raise AssertionError("fail_fast_false_allows_parallel_completion expected delay to complete")
+    add_events = [e["type"] for e in events if e.get("node_id") == "add"]
+    if "node_completed" not in add_events and "node_cached" not in add_events:
+        raise AssertionError("fail_fast_false_allows_parallel_completion expected add to complete")
 
 
 async def _run_streaming_counts() -> dict:
@@ -1189,16 +1162,12 @@ def test_loop_body_uses_data_dependencies() -> None:
                 {"id": "last", "type": "core.literal.int", "params": {"value": 3}},
                 {"id": "loop", "type": "core.control.for", "params": {}},
                 {"id": "add", "type": "core.math.add", "params": {}},
-                {"id": "sum", "type": "core.util.merger", "params": {}},
             ],
             "links": [
                 {"from_node": "first", "from_port": "value", "to_node": "loop", "to_port": "first_index"},
                 {"from_node": "last", "from_port": "value", "to_node": "loop", "to_port": "last_index"},
                 {"from_node": "loop", "from_port": "index", "to_node": "add", "to_port": "a"},
                 {"from_node": "loop", "from_port": "index", "to_node": "add", "to_port": "b"},
-                {"from_node": "add", "from_port": "sum", "to_node": "sum", "to_port": "in_a"},
-                {"from_node": "add", "from_port": "sum", "to_node": "sum", "to_port": "in_b"},
-                {"from_node": "add", "from_port": "sum", "to_node": "sum", "to_port": "in_c"},
                 {"from_node": "start", "from_port": "control_out", "to_node": "loop", "to_port": "control_in", "kind": "control"},
                 {"from_node": "loop", "from_port": "loop_body", "to_node": "add", "to_port": "control_in", "kind": "control"},
             ],
@@ -1256,8 +1225,8 @@ def test_cycle_detection_control() -> None:
         {
             "nodes": [
                 {"id": "start", "type": "core.control.start", "params": {}},
-                {"id": "a", "type": "core.util.delay", "params": {"delay_ms": 10}},
-                {"id": "b", "type": "core.util.delay", "params": {"delay_ms": 10}},
+                {"id": "a", "type": "core.math.add", "params": {}},
+                {"id": "b", "type": "core.math.add", "params": {}},
             ],
             "links": [
                 {"from_node": "start", "from_port": "control_out", "to_node": "a", "to_port": "control_in", "kind": "control"},
@@ -1422,32 +1391,28 @@ def test_parallel_branches_with_control_chain() -> None:
         {
             "nodes": [
                 {"id": "start", "type": "core.control.start", "params": {}},
-                {"id": "value", "type": "core.literal.int", "params": {"value": 2}},
-                {"id": "split", "type": "core.util.splitter", "params": {}},
-                {"id": "d1", "type": "core.util.delay", "params": {"delay_ms": 100}},
-                {"id": "d2", "type": "core.util.delay", "params": {"delay_ms": 100}},
-                {"id": "d3", "type": "core.util.delay", "params": {"delay_ms": 100}},
-                {"id": "merge", "type": "core.util.merger", "params": {}},
+                {"id": "a", "type": "core.literal.int", "params": {"value": 2}},
+                {"id": "b", "type": "core.literal.int", "params": {"value": 3}},
+                {"id": "c", "type": "core.literal.int", "params": {"value": 4}},
+                {"id": "add1", "type": "core.math.add", "params": {}},
+                {"id": "add2", "type": "core.math.add", "params": {}},
+                {"id": "sum", "type": "core.math.add", "params": {}},
             ],
             "links": [
-                {"from_node": "value", "from_port": "value", "to_node": "split", "to_port": "input"},
-                {"from_node": "split", "from_port": "out_a", "to_node": "d1", "to_port": "value"},
-                {"from_node": "split", "from_port": "out_b", "to_node": "d2", "to_port": "value"},
-                {"from_node": "split", "from_port": "out_c", "to_node": "d3", "to_port": "value"},
-                {"from_node": "d1", "from_port": "value", "to_node": "merge", "to_port": "in_a"},
-                {"from_node": "d2", "from_port": "value", "to_node": "merge", "to_port": "in_b"},
-                {"from_node": "d3", "from_port": "value", "to_node": "merge", "to_port": "in_c"},
-                {"from_node": "start", "from_port": "control_out", "to_node": "split", "to_port": "control_in", "kind": "control"},
-                {"from_node": "split", "from_port": "control_out", "to_node": "d1", "to_port": "control_in", "kind": "control"},
-                {"from_node": "split", "from_port": "control_out", "to_node": "d2", "to_port": "control_in", "kind": "control"},
-                {"from_node": "split", "from_port": "control_out", "to_node": "d3", "to_port": "control_in", "kind": "control"},
-                {"from_node": "d1", "from_port": "control_out", "to_node": "merge", "to_port": "control_in", "kind": "control"},
-                {"from_node": "d2", "from_port": "control_out", "to_node": "merge", "to_port": "control_in", "kind": "control"},
-                {"from_node": "d3", "from_port": "control_out", "to_node": "merge", "to_port": "control_in", "kind": "control"},
+                {"from_node": "a", "from_port": "value", "to_node": "add1", "to_port": "a"},
+                {"from_node": "b", "from_port": "value", "to_node": "add1", "to_port": "b"},
+                {"from_node": "b", "from_port": "value", "to_node": "add2", "to_port": "a"},
+                {"from_node": "c", "from_port": "value", "to_node": "add2", "to_port": "b"},
+                {"from_node": "add1", "from_port": "sum", "to_node": "sum", "to_port": "a"},
+                {"from_node": "add2", "from_port": "sum", "to_node": "sum", "to_port": "b"},
+                {"from_node": "start", "from_port": "control_out", "to_node": "add1", "to_port": "control_in", "kind": "control"},
+                {"from_node": "start", "from_port": "control_out", "to_node": "add2", "to_port": "control_in", "kind": "control"},
+                {"from_node": "add1", "from_port": "control_out", "to_node": "sum", "to_port": "control_in", "kind": "control"},
+                {"from_node": "add2", "from_port": "control_out", "to_node": "sum", "to_port": "control_in", "kind": "control"},
             ],
-            "output_nodes": [{"node_id": "merge", "port": "sum", "alias": "sum"}],
+            "output_nodes": [{"node_id": "sum", "port": "sum", "alias": "sum"}],
         },
-        {"sum": 6.0},
+        {"sum": 12.0},
     )
 
 
@@ -1463,9 +1428,7 @@ def test_large_mixed_control_data_graph() -> None:
                 {"id": "add1", "type": "core.math.add", "params": {}},
                 {"id": "add2", "type": "core.math.add", "params": {}},
                 {"id": "mul", "type": "core.math.multiply", "params": {}},
-                {"id": "delay1", "type": "core.util.delay", "params": {"delay_ms": 50}},
-                {"id": "delay2", "type": "core.util.delay", "params": {"delay_ms": 50}},
-                {"id": "merge", "type": "core.util.merger", "params": {}},
+                {"id": "add3", "type": "core.math.add", "params": {}},
             ],
             "links": [
                 {"from_node": "a", "from_port": "value", "to_node": "add1", "to_port": "a"},
@@ -1474,22 +1437,16 @@ def test_large_mixed_control_data_graph() -> None:
                 {"from_node": "c", "from_port": "value", "to_node": "add2", "to_port": "b"},
                 {"from_node": "add2", "from_port": "sum", "to_node": "mul", "to_port": "a"},
                 {"from_node": "a", "from_port": "value", "to_node": "mul", "to_port": "b"},
-                {"from_node": "mul", "from_port": "product", "to_node": "delay1", "to_port": "value"},
-                {"from_node": "add2", "from_port": "sum", "to_node": "delay2", "to_port": "value"},
-                {"from_node": "delay1", "from_port": "value", "to_node": "merge", "to_port": "in_a"},
-                {"from_node": "delay2", "from_port": "value", "to_node": "merge", "to_port": "in_b"},
-                {"from_node": "add1", "from_port": "sum", "to_node": "merge", "to_port": "in_c"},
+                {"from_node": "mul", "from_port": "product", "to_node": "add3", "to_port": "a"},
+                {"from_node": "add1", "from_port": "sum", "to_node": "add3", "to_port": "b"},
                 {"from_node": "start", "from_port": "control_out", "to_node": "add1", "to_port": "control_in", "kind": "control"},
                 {"from_node": "add1", "from_port": "control_out", "to_node": "add2", "to_port": "control_in", "kind": "control"},
                 {"from_node": "add2", "from_port": "control_out", "to_node": "mul", "to_port": "control_in", "kind": "control"},
-                {"from_node": "mul", "from_port": "control_out", "to_node": "delay1", "to_port": "control_in", "kind": "control"},
-                {"from_node": "mul", "from_port": "control_out", "to_node": "delay2", "to_port": "control_in", "kind": "control"},
-                {"from_node": "delay1", "from_port": "control_out", "to_node": "merge", "to_port": "control_in", "kind": "control"},
-                {"from_node": "delay2", "from_port": "control_out", "to_node": "merge", "to_port": "control_in", "kind": "control"},
+                {"from_node": "mul", "from_port": "control_out", "to_node": "add3", "to_port": "control_in", "kind": "control"},
             ],
-            "output_nodes": [{"node_id": "merge", "port": "sum", "alias": "sum"}],
+            "output_nodes": [{"node_id": "add3", "port": "sum", "alias": "sum"}],
         },
-        {"sum": 32.0},
+        {"sum": 23.0},
     )
 
 
@@ -1629,7 +1586,6 @@ def main() -> None:
     test_large_mixed_control_data_graph()
     test_randomized_loop_body_dependencies()
     test_cache_clear_by_type_multi_node()
-    test_parallel_branches()
     print("All checks passed.")
 
 

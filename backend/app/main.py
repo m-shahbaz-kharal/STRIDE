@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
-from .nodes.camera import STREAM_MANAGER
+from .nodes.fl511 import STREAM_MANAGER
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
@@ -110,7 +110,10 @@ async def get_stream_frame(stream_id: str) -> Response:
     if frame is None:
         return Response(status_code=204)
 
-    import cv2
+    try:
+        import cv2
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="OpenCV not installed for stream encoding") from exc
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     ok, buffer = cv2.imencode(".jpg", frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, 80])

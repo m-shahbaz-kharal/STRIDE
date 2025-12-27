@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import time
 from typing import Any, Dict
 
 from .base import ExecutionContext, NodeBase
 from . import register_node
-from ..node_spec import NodeSpec, ParamSpec, PortSpec
+from ..node_spec import NodeSpec, PortSpec
 from ..typesystem import t_any, t_control, t_float
 from .coercion import coerce_number
 
@@ -179,121 +178,3 @@ class AbsoluteNode(NodeBase):
         result = abs(value)
         ctx.log(f"{self.id} abs({value}) -> {result}")
         return {"control_out": None, "result": result}
-
-
-DELAY_SPEC = NodeSpec(
-    type="core.util.delay",
-    version="1.0.0",
-    display_name="Delay",
-    category="Utility",
-    summary="Sleep for a bit then pass the value through.",
-    description="Passes through value after a configurable delay. Useful for testing parallel execution.",
-    icon="clock",
-    inputs=[
-        PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="value", type=t_any(), required=False, default=None),
-    ],
-    outputs=[
-        PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="value", type=t_any()),
-    ],
-    params={
-        "delay_ms": ParamSpec(
-            name="delay_ms",
-            type="number",
-            label="Delay (ms)",
-            description="Milliseconds to wait before producing output.",
-            default=100,
-        )
-    },
-    stability="experimental",
-)
-
-
-@register_node(DELAY_SPEC)
-class DelayNode(NodeBase):
-    """Simulates a slow operation for testing parallel execution."""
-
-    def __init__(self, config: Dict[str, Any], spec: NodeSpec = DELAY_SPEC) -> None:
-        super().__init__(config, spec=spec)
-        self._delay_ms = config.get("params", {}).get("delay_ms", spec.params["delay_ms"].default)
-
-    def forward(
-        self, inputs: Dict[str, Any], ctx: ExecutionContext
-    ) -> Dict[str, Any]:
-        value = inputs.get("value")
-        time.sleep(self._delay_ms / 1000.0)
-        ctx.log(f"{self.id} delayed {self._delay_ms}ms, passing {value}")
-        return {"control_out": None, "value": value}
-
-
-SPLITTER_SPEC = NodeSpec(
-    type="core.util.splitter",
-    version="1.0.0",
-    display_name="Splitter",
-    category="Utility",
-    summary="Fork a value to three outputs.",
-    description="Splits a single value into multiple outputs for parallel processing branches.",
-    icon="split",
-    inputs=[
-        PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="input", type=t_any(), required=False, default=None),
-    ],
-    outputs=[
-        PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="out_a", type=t_any()),
-        PortSpec(name="out_b", type=t_any()),
-        PortSpec(name="out_c", type=t_any()),
-    ],
-    params={},
-    stability="experimental",
-)
-
-
-@register_node(SPLITTER_SPEC)
-class SplitterNode(NodeBase):
-    """Splits a single input into multiple identical outputs for parallel branches."""
-
-    def forward(
-        self, inputs: Dict[str, Any], ctx: ExecutionContext
-    ) -> Dict[str, Any]:
-        value = inputs.get("input")
-        ctx.log(f"{self.id} splitting {value} to 3 outputs")
-        return {"control_out": None, "out_a": value, "out_b": value, "out_c": value}
-
-
-MERGER_SPEC = NodeSpec(
-    type="core.util.merger",
-    version="1.0.0",
-    display_name="Merger",
-    category="Utility",
-    summary="Sum three numbers.",
-    description="Merges multiple inputs by summing them together.",
-    icon="merge",
-    inputs=[
-        PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="in_a", type=t_any(), required=False, default=None),
-        PortSpec(name="in_b", type=t_any(), required=False, default=None),
-        PortSpec(name="in_c", type=t_any(), required=False, default=None),
-    ],
-    outputs=[
-        PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="sum", type=t_float()),
-    ],
-    params={},
-)
-
-
-@register_node(MERGER_SPEC)
-class MergerNode(NodeBase):
-    """Merges multiple inputs by summing them."""
-
-    def forward(
-        self, inputs: Dict[str, Any], ctx: ExecutionContext
-    ) -> Dict[str, Any]:
-        a = coerce_number(inputs.get("in_a")) or 0.0
-        b = coerce_number(inputs.get("in_b")) or 0.0
-        c = coerce_number(inputs.get("in_c")) or 0.0
-        result = a + b + c
-        ctx.log(f"{self.id} merged {a} + {b} + {c} -> {result}")
-        return {"control_out": None, "sum": result}

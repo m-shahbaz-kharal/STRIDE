@@ -118,7 +118,7 @@ const SmartConnectModal = ({
     // Reset selection when query changes
     useEffect(() => {
         setSelectedIndex(0);
-    }, [query, filteredNodes]);
+    }, [query, filteredNodes.length]);
 
     // Auto-focus input when opened
     useEffect(() => {
