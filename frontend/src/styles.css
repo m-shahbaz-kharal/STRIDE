@@ -2765,6 +2765,17 @@ body {
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
+.node-input-field[type="number"]::-webkit-outer-spin-button,
+.node-input-field[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.node-input-field[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .node-input-field:focus {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.2);
