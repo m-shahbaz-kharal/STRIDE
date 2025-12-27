@@ -300,8 +300,8 @@ FL511_START_SPEC = NodeSpec(
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="url", type=t_string(), required=False, default=None),
         PortSpec(name="camera_id", type=t_int(), required=False, default=2130),
+        PortSpec(name="url", type=t_string(), required=False, default=None),
         PortSpec(name="target_fps", type=t_int(), required=False, default=15),
         PortSpec(name="buffer_seconds", type=t_int(), required=False, default=4),
     ],
