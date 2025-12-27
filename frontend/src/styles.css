@@ -1084,6 +1084,79 @@ body {
   color: var(--text-muted);
 }
 
+.inspector-meta {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.inspector-meta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.inspector-meta-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+
+.inspector-meta-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.inspector-description {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.inspector-port-group {
+  margin-bottom: 10px;
+}
+
+.inspector-port-title {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.inspector-port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-port-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+
+.inspector-port-name {
+  color: var(--text-primary);
+}
+
+.inspector-port-type {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
 .inspector-field {
   margin-bottom: 8px;
 }
@@ -2387,6 +2460,42 @@ body {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.node-params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.node-param-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.node-param-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.node-param-boolean .node-param-label {
+  margin-right: auto;
+}
+
+.node-param-select {
+  width: 100px;
+  padding: 3px 6px;
+  font-size: 10px;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  outline: none;
 }
 
 .node-title-section {

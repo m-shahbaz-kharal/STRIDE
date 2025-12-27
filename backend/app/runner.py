@@ -430,6 +430,9 @@ class GraphExecutor:
             if port in input_values:
                 inputs[port] = input_values[port]
                 continue
+            if port in node.params:
+                inputs[port] = node.params.get(port)
+                continue
             port_spec = port_specs.get(port)
             if port_spec and port_spec.default is not None:
                 inputs[port] = port_spec.default
@@ -571,7 +574,11 @@ class GraphExecutor:
             indices = range(0)
 
         if loop_node.type == "core.control.while":
-            max_iterations = int(loop_node.params.get("max_iterations", 100))
+            inputs = self._prepare_inputs(loop_id)
+            max_iterations_value = inputs.get("max_iterations")
+            if max_iterations_value is None:
+                max_iterations_value = loop_node.params.get("max_iterations", 100)
+            max_iterations = int(max_iterations_value)
             indices = range(max_iterations)
 
         for idx in indices:
@@ -787,7 +794,11 @@ class GraphExecutor:
                         indices = range(max(0, count))
                         total_nodes += len(indices) * len(body_order)
                     else:
-                        max_iterations = int(loop_node.params.get("max_iterations", 100))
+                        inputs = self._prepare_inputs(node_id)
+                        max_iterations_value = inputs.get("max_iterations")
+                        if max_iterations_value is None:
+                            max_iterations_value = loop_node.params.get("max_iterations", 100)
+                        max_iterations = int(max_iterations_value)
                         indices = range(max_iterations)
                         total_nodes += len(indices) * len(body_order)
 

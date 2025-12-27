@@ -1,39 +1,15 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Node } from "reactflow";
-import { BlueprintNodeData, ParamSchemaField } from "../types";
+import { BlueprintNodeData } from "../types";
+import { formatPortTypeLabel } from "../graph/utils";
 
 type InspectorProps = {
   nodes: Node<BlueprintNodeData>[];
-  onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
+  onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
    hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
    onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
-};
-
-const parseParamValue = (
-  raw: string,
-  schema: ParamSchemaField
-): string | number | boolean => {
-  if (schema.type === "boolean") {
-    return raw === "true";
-  }
-  if (schema.type === "number") {
-    const numeric = Number(raw);
-    return Number.isNaN(numeric) ? 0 : numeric;
-  }
-  if (schema.type === "float") {
-    const numeric = Number(raw);
-    return Number.isNaN(numeric) ? 0 : numeric;
-  }
-  if (schema.type === "int") {
-    const numeric = parseInt(raw, 10);
-    return Number.isNaN(numeric) ? 0 : numeric;
-  }
-  if (schema.type === "select" && schema.options?.length) {
-    return raw;
-  }
-  return raw;
 };
 
 // Single node inspector card
@@ -49,7 +25,7 @@ const NodeCard = ({
   onOutputHover,
 }: {
   node: Node<BlueprintNodeData>;
-  onParamChange: (nodeId: string, param: string, value: string | number | boolean) => void;
+  onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
   isExpanded: boolean;
@@ -58,9 +34,24 @@ const NodeCard = ({
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
   onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
 }) => {
-  const schema = node.data.metadata?.params_schema ?? {};
-  const schemaEntries = Object.entries(schema);
   const hasOutputs = node.data.last_outputs && Object.keys(node.data.last_outputs).length > 0;
+  const inputPorts = useMemo(() => {
+    const inputs = node.data.metadata?.inputs ?? [];
+    if (!inputs.length) return [];
+    return inputs.map((input) => ({
+      name: input.name,
+      type: formatPortTypeLabel(input.type),
+    }));
+  }, [node.data.metadata?.inputs]);
+
+  const outputPorts = useMemo(() => {
+    const outputs = node.data.metadata?.outputs ?? [];
+    if (!outputs.length) return [];
+    return outputs.map((output) => ({
+      name: output.name,
+      type: formatPortTypeLabel(output.type),
+    }));
+  }, [node.data.metadata?.outputs]);
 
   return (
     <div className={`inspector-node-card ${isSingleNode ? "single" : ""}`}>
@@ -125,49 +116,54 @@ const NodeCard = ({
 
       {(isExpanded || isSingleNode) && (
         <div className="inspector-node-content">
-          {schemaEntries.length > 0 && (
-            <div className="inspector-section">
-              <h4>Parameters</h4>
-              {schemaEntries.map(([param, field]) => (
-                <div key={param} className="inspector-field">
-                  <label htmlFor={`param-${node.id}-${param}`}>{field.label ?? param}</label>
-                  {field.type === "select" && field.options ? (
-                    <select
-                      id={`param-${node.id}-${param}`}
-                      value={`${node.data.params[param] ?? field.default ?? ""}`}
-                      onChange={(event) =>
-                        onParamChange(node.id, param, parseParamValue(event.target.value, field))
-                      }
-                    >
-                      {field.options.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  ) : field.type === "boolean" ? (
-                    <label className="inspector-checkbox">
-                      <input
-                        id={`param-${node.id}-${param}`}
-                        type="checkbox"
-                        checked={Boolean(node.data.params[param] ?? field.default ?? false)}
-                        onChange={(event) => onParamChange(node.id, param, event.target.checked)}
-                      />
-                    </label>
-                  ) : (
-                    <input
-                      id={`param-${node.id}-${param}`}
-                      type={field.type === "number" || field.type === "float" || field.type === "int" ? "number" : "text"}
-                      step={field.type === "int" ? 1 : "any"}
-                      value={`${node.data.params[param] ?? field.default ?? ""}`}
-                      onChange={(event) =>
-                        onParamChange(node.id, param, parseParamValue(event.target.value, field))
-                      }
-                    />
-                  )}
-                  {field.description && <small>{field.description}</small>}
+          <div className="inspector-section">
+            <h4>Info</h4>
+            <div className="inspector-meta">
+              <div>
+                <span className="inspector-meta-label">Type</span>
+                <span className="inspector-meta-value mono">{node.data.nodeType}</span>
+              </div>
+              {node.data.metadata?.category && (
+                <div>
+                  <span className="inspector-meta-label">Category</span>
+                  <span className="inspector-meta-value">{node.data.metadata.category}</span>
                 </div>
-              ))}
+              )}
+            </div>
+            {node.data.description && (
+              <p className="inspector-description">{node.data.description}</p>
+            )}
+          </div>
+
+          {(inputPorts.length > 0 || outputPorts.length > 0) && (
+            <div className="inspector-section">
+              <h4>Ports</h4>
+              {inputPorts.length > 0 && (
+                <div className="inspector-port-group">
+                  <span className="inspector-port-title">Inputs</span>
+                  <div className="inspector-port-list">
+                    {inputPorts.map((port) => (
+                      <div key={`input-${port.name}`} className="inspector-port-item">
+                        <span className="inspector-port-name">{port.name}</span>
+                        <span className="inspector-port-type">{port.type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {outputPorts.length > 0 && (
+                <div className="inspector-port-group">
+                  <span className="inspector-port-title">Outputs</span>
+                  <div className="inspector-port-list">
+                    {outputPorts.map((port) => (
+                      <div key={`output-${port.name}`} className="inspector-port-item">
+                        <span className="inspector-port-name">{port.name}</span>
+                        <span className="inspector-port-type">{port.type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -198,8 +194,8 @@ const NodeCard = ({
             </div>
           )}
 
-          {schemaEntries.length === 0 && !node.data.last_outputs && (
-            <div className="inspector-empty">No parameters or outputs</div>
+          {!node.data.last_outputs && !node.data.description && inputPorts.length === 0 && outputPorts.length === 0 && (
+            <div className="inspector-empty">No outputs yet</div>
           )}
         </div>
       )}

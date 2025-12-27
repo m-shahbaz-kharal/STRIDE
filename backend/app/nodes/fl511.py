@@ -35,7 +35,7 @@ except ImportError:
 
 from . import register_node
 from .base import ExecutionContext, NodeBase
-from ..node_spec import NodeSpec, ParamSpec, PortSpec
+from ..node_spec import NodeSpec, PortSpec
 from ..typesystem import t_boolean, t_control, t_float, t_int, t_string
 
 
@@ -257,7 +257,7 @@ FL511_RESOLVE_SPEC = NodeSpec(
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="camera_id", type=t_int(), required=False, default=None),
+        PortSpec(name="camera_id", type=t_int(), required=False, default=2130),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -266,15 +266,6 @@ FL511_RESOLVE_SPEC = NodeSpec(
         PortSpec(name="width", type=t_int()),
         PortSpec(name="height", type=t_int()),
     ],
-    params={
-        "camera_id": ParamSpec(
-            name="camera_id",
-            type="number",
-            label="Camera ID",
-            description="FL511 camera ID (e.g., 2130).",
-            default=2130,
-        ),
-    },
     cache_policy="disabled",
 )
 
@@ -310,7 +301,9 @@ FL511_START_SPEC = NodeSpec(
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="url", type=t_string(), required=False, default=None),
-        PortSpec(name="camera_id", type=t_int(), required=False, default=None),
+        PortSpec(name="camera_id", type=t_int(), required=False, default=2130),
+        PortSpec(name="target_fps", type=t_int(), required=False, default=15),
+        PortSpec(name="buffer_seconds", type=t_int(), required=False, default=4),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -319,29 +312,6 @@ FL511_START_SPEC = NodeSpec(
         PortSpec(name="width", type=t_int()),
         PortSpec(name="height", type=t_int()),
     ],
-    params={
-        "camera_id": ParamSpec(
-            name="camera_id",
-            type="number",
-            label="Camera ID",
-            description="FL511 camera ID when URL is not provided.",
-            default=2130,
-        ),
-        "target_fps": ParamSpec(
-            name="target_fps",
-            type="number",
-            label="Target FPS",
-            description="Decode the stream at this frame rate.",
-            default=15,
-        ),
-        "buffer_seconds": ParamSpec(
-            name="buffer_seconds",
-            type="number",
-            label="Buffer Seconds",
-            description="Seconds of frames to keep buffered.",
-            default=4,
-        ),
-    },
     cache_policy="disabled",
 )
 
@@ -372,8 +342,10 @@ class Fl511StartNode(NodeBase):
             camera_id = int(camera_id)
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
-        target_fps = int(self.params.get("target_fps", 15))
-        buffer_seconds = int(self.params.get("buffer_seconds", 4))
+        target_fps_value = inputs.get("target_fps")
+        buffer_seconds_value = inputs.get("buffer_seconds")
+        target_fps = int(target_fps_value if target_fps_value is not None else self.params.get("target_fps", 15))
+        buffer_seconds = int(buffer_seconds_value if buffer_seconds_value is not None else self.params.get("buffer_seconds", 4))
 
         stream_id, worker = self._ensure_stream(str(hls_url), target_fps, buffer_seconds)
         ctx.log(f"Started stream {stream_id} at {worker.width}x{worker.height}")
@@ -397,6 +369,9 @@ FL511_TICK_SPEC = NodeSpec(
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="stream_id", type=t_string(), required=False, default=None),
+        PortSpec(name="timeout", type=t_float(), required=False, default=0.2),
+        PortSpec(name="jpeg_quality", type=t_int(), required=False, default=85),
+        PortSpec(name="require_frame", type=t_boolean(), required=False, default=False),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -406,29 +381,6 @@ FL511_TICK_SPEC = NodeSpec(
         PortSpec(name="width", type=t_int()),
         PortSpec(name="height", type=t_int()),
     ],
-    params={
-        "timeout": ParamSpec(
-            name="timeout",
-            type="number",
-            label="Timeout (seconds)",
-            description="How long to wait for a frame before returning empty.",
-            default=0.2,
-        ),
-        "jpeg_quality": ParamSpec(
-            name="jpeg_quality",
-            type="number",
-            label="JPEG Quality",
-            description="JPEG encoding quality (0-100).",
-            default=85,
-        ),
-        "require_frame": ParamSpec(
-            name="require_frame",
-            type="boolean",
-            label="Require Frame",
-            description="Raise an error if no frame is available.",
-            default=False,
-        ),
-    },
     cache_policy="disabled",
 )
 
@@ -441,9 +393,12 @@ class Fl511TickNode(NodeBase):
             raise ValueError("Missing required input: stream_id")
         worker = STREAM_MANAGER.get_stream(str(stream_id))
 
-        timeout = float(self.params.get("timeout", 0.2))
-        require_frame = bool(self.params.get("require_frame", False))
-        jpeg_quality = int(self.params.get("jpeg_quality", 85))
+        timeout_value = inputs.get("timeout")
+        jpeg_quality_value = inputs.get("jpeg_quality")
+        require_frame_value = inputs.get("require_frame")
+        timeout = float(timeout_value if timeout_value is not None else self.params.get("timeout", 0.2))
+        jpeg_quality = int(jpeg_quality_value if jpeg_quality_value is not None else self.params.get("jpeg_quality", 85))
+        require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", False))
 
         frame = worker.latest_frame(timeout=timeout)
         if frame is None:

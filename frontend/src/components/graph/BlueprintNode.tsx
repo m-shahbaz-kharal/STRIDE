@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, NodeProps, Position, useReactFlow, useStore } from "reactflow";
 
 import { usePopups } from "../../context/PopupContext";
@@ -83,11 +83,16 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     setIsResizing(true);
   }, [getZoom]);
 
-  const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
-  const maxPorts = Math.max(data.input_ports.length + extraInputRows, data.output_ports.length);
-  const MIN_HEIGHT = computeNodeDimensions(maxPorts).height;
   const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
   const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
+  const paramEntries = useMemo(() => Object.entries(data.metadata?.params_schema ?? {}), [data.metadata?.params_schema]);
+  const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
+  const maxPorts = Math.max(data.input_ports.length + extraInputRows, data.output_ports.length);
+  const MIN_HEIGHT = computeNodeDimensions(maxPorts, { paramCount: paramEntries.length }).height;
+  const inputSpecMap = useMemo(() => {
+    const specs = data.metadata?.inputs ?? [];
+    return new Map(specs.map((spec) => [spec.name, spec]));
+  }, [data.metadata?.inputs]);
 
   const resolvePortType = useCallback(
     (port: string, direction: "input" | "output") => {
@@ -116,6 +121,22 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     (port: string) => data.metadata?.inputs?.find((input) => input.name === port)?.default,
     [data.metadata?.inputs]
   );
+
+  const desiredDimensions = useMemo(() => {
+    const estimateTextWidth = (value: string) => value.length * 7;
+    const inputLabels = data.input_ports ?? [];
+    const outputLabels = data.output_ports ?? [];
+    const paramLabels = paramEntries.map(([_, field]) => field.label ?? "");
+    const maxInput = Math.max(0, ...inputLabels.map((label) => estimateTextWidth(label)));
+    const maxOutput = Math.max(0, ...outputLabels.map((label) => estimateTextWidth(label)));
+    const maxParam = Math.max(0, ...paramLabels.map((label) => estimateTextWidth(label)));
+    const headerWidth = estimateTextWidth(data.displayName ?? "") + 120;
+    const portRowWidth = maxInput + maxOutput + 84 + 120;
+    const paramRowWidth = maxParam > 0 ? maxParam + 84 + 24 : 0;
+    const width = Math.max(MIN_NODE_WIDTH, headerWidth, portRowWidth, paramRowWidth);
+    const { height } = computeNodeDimensions(maxPorts, { paramCount: paramEntries.length, minWidth: width });
+    return { width, height };
+  }, [data.displayName, data.input_ports, data.output_ports, maxPorts, paramEntries]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -164,6 +185,17 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isResizing, MIN_HEIGHT]);
+
+  useEffect(() => {
+    if (isResizing) return;
+    if (nodeSize.width >= desiredDimensions.width && nodeSize.height >= desiredDimensions.height) {
+      return;
+    }
+    setNodeSize((prev) => ({
+      width: Math.max(prev.width, desiredDimensions.width),
+      height: Math.max(prev.height, desiredDimensions.height),
+    }));
+  }, [desiredDimensions.height, desiredDimensions.width, isResizing, nodeSize.height, nodeSize.width]);
 
   const sizeStyle: React.CSSProperties = {
     minWidth: MIN_NODE_WIDTH,
@@ -297,6 +329,71 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         </div>
       </div>
 
+      {paramEntries.length > 0 && (
+        <div className="node-params">
+          {paramEntries.map(([param, field]) => {
+            const value =
+              data.params[param] ??
+              field.default ??
+              data.metadata?.params_defaults?.[param] ??
+              "";
+            const label = field.label ?? param;
+            if (field.type === "select" && field.options) {
+              return (
+                <label key={param} className="node-param-field">
+                  <span className="node-param-label">{label}</span>
+                  <select
+                    className="node-param-select nodrag"
+                    value={`${value}`}
+                    onChange={(event) => data.onParamChange?.(id, param, event.target.value)}
+                  >
+                    {field.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            }
+            if (field.type === "boolean") {
+              return (
+                <label key={param} className="node-param-field node-param-boolean">
+                  <span className="node-param-label">{label}</span>
+                  <input
+                    type="checkbox"
+                    className="node-input-checkbox nodrag"
+                    checked={Boolean(value)}
+                    onChange={(event) => data.onParamChange?.(id, param, event.target.checked)}
+                  />
+                </label>
+              );
+            }
+            const inputType = field.type === "number" || field.type === "float" || field.type === "int" ? "number" : "text";
+            return (
+              <label key={param} className="node-param-field">
+                <span className="node-param-label">{label}</span>
+                <input
+                  type={inputType}
+                  step={field.type === "int" ? 1 : "any"}
+                  className="node-input-field nodrag"
+                  value={`${value}`}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    if (inputType === "number") {
+                      const numeric = raw === "" ? null : field.type === "int" ? parseInt(raw, 10) : Number(raw);
+                      data.onParamChange?.(id, param, Number.isNaN(numeric) ? null : numeric);
+                      return;
+                    }
+                    data.onParamChange?.(id, param, raw);
+                  }}
+                />
+              </label>
+            );
+          })}
+        </div>
+      )}
+
       <div className="node-ports">
         <div className="node-port-column">
           {data.input_ports.map((port, index) => {
@@ -313,6 +410,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const hasInputValue = Object.prototype.hasOwnProperty.call(data.inputValues ?? {}, port);
             const resolvedValue = hasInputValue ? inputValue : defaultValue;
             const placeholderValue = defaultValue == null ? "" : String(defaultValue);
+            const inputSpec = inputSpecMap.get(port);
+            const inputUi = inputSpec?.ui as { control?: string; options?: string[] } | undefined;
             const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div
@@ -351,7 +450,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 )}
                 {!isControl && (
                   <div className="node-port-input-control">
-                    {portKind === "boolean" ? (
+                    {inputUi?.control === "select" && inputUi.options ? (
+                      <select
+                        className="node-input-field nodrag"
+                        value={`${resolvedValue ?? ""}`}
+                        disabled={isConnected}
+                        onChange={(event) => data.onInputValueChange?.(id, port, event.target.value)}
+                      >
+                        {inputUi.options.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : portKind === "boolean" ? (
                       <input
                         type="checkbox"
                         className="node-input-checkbox nodrag"

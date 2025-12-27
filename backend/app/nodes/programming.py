@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from . import register_node
 from .base import ExecutionContext, NodeBase
-from ..node_spec import NodeSpec, ParamSpec, PortSpec
+from ..node_spec import NodeSpec, PortSpec
 from ..typesystem import (
     t_any,
     t_boolean,
@@ -24,21 +24,13 @@ VAR_DECLARE_SPEC = NodeSpec(
     description="Creates or resets a graph-scoped variable.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        PortSpec(name="name", type=t_string(), required=False, default="var"),
         PortSpec(name="value", type=t_any(), required=False, default=None),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_any()),
     ],
-    params={
-        "name": ParamSpec(
-            name="name",
-            type="string",
-            label="Name",
-            description="Variable name",
-            default="var",
-        )
-    },
     cache_policy="disabled",
 )
 
@@ -46,8 +38,8 @@ VAR_DECLARE_SPEC = NodeSpec(
 @register_node(VAR_DECLARE_SPEC)
 class VariableDeclareNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(self.params.get("name", "var"))
-        value = inputs.get("value", self.params.get("default"))
+        name = str(inputs.get("name") or self.params.get("name", "var"))
+        value = inputs.get("value")
         ctx.set_var(name, value)
         ctx.log(f"Declared variable '{name}' = {value}")
         return {"control_out": None, "value": value}
@@ -62,21 +54,13 @@ VAR_SET_SPEC = NodeSpec(
     description="Assigns a value to a graph-scoped variable.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        PortSpec(name="name", type=t_string(), required=False, default="var"),
         PortSpec(name="value", type=t_any(), required=False, default=None),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_any()),
     ],
-    params={
-        "name": ParamSpec(
-            name="name",
-            type="string",
-            label="Name",
-            description="Variable name",
-            default="var",
-        )
-    },
     cache_policy="disabled",
 )
 
@@ -84,7 +68,7 @@ VAR_SET_SPEC = NodeSpec(
 @register_node(VAR_SET_SPEC)
 class VariableSetNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(self.params.get("name", "var"))
+        name = str(inputs.get("name") or self.params.get("name", "var"))
         value = inputs.get("value")
         ctx.set_var(name, value)
         ctx.log(f"Set variable '{name}' = {value}")
@@ -98,27 +82,15 @@ VAR_GET_SPEC = NodeSpec(
     category="Variables",
     summary="Read a variable.",
     description="Reads a graph-scoped variable, returning a default if missing.",
-    inputs=[PortSpec(name="control_in", type=t_control(), required=False, default=None)],
+    inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        PortSpec(name="name", type=t_string(), required=False, default="var"),
+        PortSpec(name="default", type=t_any(), required=False, default=""),
+    ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_any()),
     ],
-    params={
-        "name": ParamSpec(
-            name="name",
-            type="string",
-            label="Name",
-            description="Variable name",
-            default="var",
-        ),
-        "default": ParamSpec(
-            name="default",
-            type="string",
-            label="Default",
-            description="Returned when variable is missing.",
-            default="",
-        ),
-    },
     cache_policy="disabled",
 )
 
@@ -126,8 +98,8 @@ VAR_GET_SPEC = NodeSpec(
 @register_node(VAR_GET_SPEC)
 class VariableGetNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(self.params.get("name", "var"))
-        default = self.params.get("default")
+        name = str(inputs.get("name") or self.params.get("name", "var"))
+        default = inputs.get("default") if "default" in inputs else self.params.get("default", "")
         value = ctx.get_var(name, default)
         ctx.log(f"Get variable '{name}' -> {value}")
         return {"control_out": None, "value": value}
@@ -145,20 +117,18 @@ COMPARE_SPEC = NodeSpec(
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="a", type=t_any(), required=False, default=None),
         PortSpec(name="b", type=t_any(), required=False, default=None),
+        PortSpec(
+            name="op",
+            type=t_string(),
+            required=False,
+            default="==",
+            ui={"control": "select", "options": ["==", "!=", ">", ">=", "<", "<="]},
+        ),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="result", type=t_boolean()),
     ],
-    params={
-        "op": ParamSpec(
-            name="op",
-            type="select",
-            label="Operator",
-            default="==",
-            options=["==", "!=", ">", ">=", "<", "<="],
-        )
-    },
 )
 
 
@@ -167,7 +137,7 @@ class CompareNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         a = inputs.get("a")
         b = inputs.get("b")
-        op = self.params.get("op", "==")
+        op = inputs.get("op") or self.params.get("op", "==")
         result = False
         if op == "==":
             result = a == b
@@ -451,21 +421,13 @@ WHILE_LOOP_SPEC = NodeSpec(
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="condition", type=t_boolean(), required=False, default=False),
+        PortSpec(name="max_iterations", type=t_int(), required=False, default=100),
     ],
     outputs=[
         PortSpec(name="loop_body", type=t_control(), required=False, default=None),
         PortSpec(name="index", type=t_int()),
         PortSpec(name="completed", type=t_control(), required=False, default=None),
     ],
-    params={
-        "max_iterations": ParamSpec(
-            name="max_iterations",
-            type="int",
-            label="Max Iterations",
-            description="Safety limit for while loops.",
-            default=100,
-        )
-    },
 )
 
 

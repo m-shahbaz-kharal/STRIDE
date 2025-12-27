@@ -35,6 +35,7 @@ export interface PortDefinition {
   required?: boolean;
   default?: unknown;
   description?: string;
+  ui?: Record<string, unknown>;
 }
 
 export interface ParamSchemaField {
@@ -165,6 +166,7 @@ export interface BlueprintNodeData {
   onRunSelection?: (nodeId: string) => void;
   onClearCache?: (nodeId: string) => void;
   onInterrupt?: (nodeId: string) => void;
+  onParamChange?: (nodeId: string, param: string, value: string | number | boolean | null) => void;
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
   onInputValueChange?: (nodeId: string, port: string, value: string | number | boolean | null) => void;
   onAddInputPort?: (nodeId: string) => void;

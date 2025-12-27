@@ -19,6 +19,7 @@ export const PORT_TYPE_COLORS: Record<string, string> = {
 };
 
 export const PORT_ROW_HEIGHT = 42;
+export const PARAM_ROW_HEIGHT = 26;
 export const HEADER_HEIGHT = 70;
 export const MIN_NODE_WIDTH = 260;
 
@@ -69,10 +70,15 @@ export const formatPortTypeLabel = (type?: TypeDescriptor | string): string => {
   return kind.charAt(0).toUpperCase() + kind.slice(1);
 };
 
-export const computeNodeDimensions = (maxPorts: number) => {
-  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT + 8;
+export const computeNodeDimensions = (
+  maxPorts: number,
+  options?: { paramCount?: number; minWidth?: number }
+) => {
+  const paramCount = options?.paramCount ?? 0;
+  const minWidth = options?.minWidth ?? MIN_NODE_WIDTH;
+  const height = HEADER_HEIGHT + maxPorts * PORT_ROW_HEIGHT + paramCount * PARAM_ROW_HEIGHT + 8;
   return {
-    width: MIN_NODE_WIDTH,
+    width: minWidth,
     height,
   };
 };

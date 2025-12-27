@@ -450,9 +450,15 @@ const App = () => {
 
       // Calculate edge endpoints (approximate - right side of source, left side of target)
       const sourceX = sourceNode.position.x + (sourceNode.width || MIN_NODE_WIDTH);
-      const sourceY = sourceNode.position.y + (sourceNode.height || computeNodeDimensions(Math.max(sourceNode.data.input_ports.length, sourceNode.data.output_ports.length)).height) / 2;
+      const sourceParamCount = Object.keys(sourceNode.data.metadata?.params_schema ?? {}).length;
+      const sourceMaxPorts = Math.max(sourceNode.data.input_ports.length, sourceNode.data.output_ports.length);
+      const sourceFallbackHeight = computeNodeDimensions(sourceMaxPorts, { paramCount: sourceParamCount }).height;
+      const sourceY = sourceNode.position.y + (sourceNode.height || sourceFallbackHeight) / 2;
       const targetX = targetNode.position.x;
-      const targetY = targetNode.position.y + (targetNode.height || computeNodeDimensions(Math.max(targetNode.data.input_ports.length, targetNode.data.output_ports.length)).height) / 2;
+      const targetParamCount = Object.keys(targetNode.data.metadata?.params_schema ?? {}).length;
+      const targetMaxPorts = Math.max(targetNode.data.input_ports.length, targetNode.data.output_ports.length);
+      const targetFallbackHeight = computeNodeDimensions(targetMaxPorts, { paramCount: targetParamCount }).height;
+      const targetY = targetNode.position.y + (targetNode.height || targetFallbackHeight) / 2;
 
       // Check if the bezier curve intersects the selection box
       if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
@@ -527,7 +533,7 @@ const App = () => {
   );
 
   const handleParamChange = useCallback(
-    (nodeId: string, param: string, value: string | number | boolean) =>
+    (nodeId: string, param: string, value: string | number | boolean | null) =>
       updateNodeData(nodeId, (data) => ({
         ...data,
         params: { ...data.params, [param]: value },
@@ -557,7 +563,8 @@ const App = () => {
         const inputValues = { ...(data.inputValues ?? {}), [nextPort]: null };
         const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
         const maxPorts = Math.max(input_ports.length + extraInputRows, data.output_ports.length);
-        const { width, height } = computeNodeDimensions(maxPorts);
+        const paramCount = Object.keys(data.metadata?.params_schema ?? {}).length;
+        const { width, height } = computeNodeDimensions(maxPorts, { paramCount });
         return {
           ...data,
           input_ports,
@@ -894,6 +901,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onParamChange: handleParamChange,
           onPortHover: setHoveredPort,
         },
       });
@@ -939,6 +947,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onParamChange: handleParamChange,
           onPortHover: setHoveredPort,
         },
       });
@@ -1079,7 +1088,8 @@ const App = () => {
       // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
       const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
       const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
+      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
 
       const payload: Node<BlueprintNodeData> = {
         id,
@@ -1101,6 +1111,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onParamChange: handleParamChange,
           onPortHover: setHoveredPort,
           onInputValueChange: handleInputValueChange,
           onAddInputPort: handleAddInputPort,
@@ -1136,6 +1147,7 @@ const App = () => {
           onRunSelection: handleRunFromNode,
           onClearCache: handleClearNodeCache,
           onInterrupt: handleInterruptNode,
+          onParamChange: handleParamChange,
           onPortHover: setHoveredPort,
           onInputValueChange: handleInputValueChange,
           onAddInputPort: handleAddInputPort,
@@ -1147,6 +1159,7 @@ const App = () => {
     handleRunFromNode,
     handleClearNodeCache,
     handleInterruptNode,
+    handleParamChange,
     handleInputValueChange,
     handleAddInputPort,
     setNodes,
@@ -1611,7 +1624,8 @@ const App = () => {
 
       const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
       const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
+      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
 
       // Calculate position to align the connecting handle with the drop location
       let xOffset = 0;
@@ -1834,7 +1848,8 @@ const App = () => {
       // Calculate initial size based on ports
       const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
       const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts);
+      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
+      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
 
       const newNode: Node<BlueprintNodeData> = {
         id,
