@@ -6,6 +6,7 @@ import ReactFlow, {
   Connection,
   MiniMap,
   Node,
+  Edge,
   OnSelectionChangeParams,
   ReactFlowProvider,
   SelectionMode,
@@ -23,19 +24,28 @@ import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
 import OutputsView from "./components/OutputsView";
 import SmartConnectModal from "./components/SmartConnectModal";
+import AppHeader from "./components/layout/AppHeader";
+import ConnectionToast from "./components/ConnectionToast";
+import SmartConnectLine from "./components/SmartConnectLine";
+import { ChevronLeft, ChevronRight, CopyIcon, DeleteIcon } from "./components/Icons";
 import { PopupProvider } from "./context/PopupContext";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
+import { useNodeLibrary } from "./hooks/useNodeLibrary";
+import { usePanelResize } from "./hooks/usePanelResize";
+import { useConnectionValidation } from "./hooks/useConnectionValidation";
+import { useConnectionToast } from "./hooks/useConnectionToast";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useNodeOperations } from "./hooks/useNodeOperations";
+import { useSmartConnect } from "./hooks/useSmartConnect";
 import {
   BlueprintNodeData,
   NodeTypeDefinition,
-  TypeDescriptor,
 } from "./types";
 import {
   MIN_NODE_WIDTH,
   bezierIntersectsRect,
   computeNodeDimensions,
-  formatPortTypeLabel,
   getPortTypeColor,
   HEADER_HEIGHT,
   PORT_ROW_HEIGHT,
@@ -43,39 +53,7 @@ import {
 
 type RightPanelTab = "inspector" | "execution";
 
-// Icons
-const PlayIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M8 5v14l11-7z" />
-  </svg>
-);
-
-const ChevronLeft = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
-  </svg>
-);
-
-const ChevronRight = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" />
-  </svg>
-);
-
-const ConnectionIcon = ({ connected }: { connected: boolean }) => (
-  <div className={`connection-indicator ${connected ? "connected" : "disconnected"}`} title={connected ? "WebSocket Connected" : "WebSocket Disconnected"}>
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-      {connected ? (
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-      ) : (
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" />
-      )}
-    </svg>
-  </div>
-);
-
 const App = () => {
-  const [nodeLibrary, setNodeLibrary] = useState<NodeTypeDefinition[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -83,7 +61,6 @@ const App = () => {
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
   const [hoveredPort, setHoveredPort] = useState<{ nodeId: string; port: string; direction: "input" | "output" } | null>(null);
   const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
-  const nodeIdRef = useRef(1);
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
@@ -94,46 +71,14 @@ const App = () => {
     handleType: "source" | "target" | null;
   } | null>(null);
 
-  const [smartConnectMenu, setSmartConnectMenu] = useState<{
-    isOpen: boolean;
-    position: { x: number; y: number };
-    flowPosition: { x: number; y: number };
-    source: { nodeId: string; handleId: string; type: "source" | "target" } | null;
-    sourcePortKind?: string;
-  }>({
-    isOpen: false,
-    position: { x: 0, y: 0 },
-    flowPosition: { x: 0, y: 0 },
-    source: null,
-    sourcePortKind: undefined,
-  });
-  const [connectionMessage, setConnectionMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
-  const connectionMessageTimeout = useRef<number | null>(null);
   const [connectionLineColor, setConnectionLineColor] = useState<string | undefined>(undefined);
   const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
   const [connectionLineDash, setConnectionLineDash] = useState<string | undefined>(undefined);
   const connectSucceededRef = useRef(false);
 
-  // Ensure connection toast timers are cleaned up
-  useEffect(() => {
-    return () => {
-      if (connectionMessageTimeout.current) {
-        window.clearTimeout(connectionMessageTimeout.current);
-      }
-    };
-  }, []);
-
-  // Panel collapse states
-  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
-  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(260);
-  const [rightPanelWidth, setRightPanelWidth] = useState(340);
-  const [isResizingLeft, setIsResizingLeft] = useState(false);
-  const [isResizingRight, setIsResizingRight] = useState(false);
-
   // Right panel tab state
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
-  
+
   // Header tab state
   const [headerTab, setHeaderTab] = useState<"graph-editor" | "outputs">("graph-editor");
 
@@ -143,20 +88,84 @@ const App = () => {
   // Custom selection box tracking for edge intersection selection
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
-  const [previewEdgeIds, setPreviewEdgeIds] = useState<string[]>([]); // Edges highlighted during selection drag
+  const [previewEdgeIds, setPreviewEdgeIds] = useState<string[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+
+  // ========== Use extracted hooks ==========
+
+  // Node library hook
+  const { nodeLibrary } = useNodeLibrary();
+
+  // Panel resize hook
+  const {
+    leftPanelCollapsed,
+    rightPanelCollapsed,
+    leftPanelWidth,
+    rightPanelWidth,
+    actualLeftWidth,
+    actualRightWidth,
+    toggleLeftPanel,
+    toggleRightPanel,
+    startResizingLeft,
+    startResizingRight,
+  } = usePanelResize();
 
   // Undo/Redo hook
-  const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo({
+  const { undo, redo, takeSnapshot } = useUndoRedo({
     nodes,
     edges,
     setNodes,
     setEdges,
   });
+
+  // Node operations hook
+  const {
+    createNodeFromType,
+    updateNodeData,
+    handleParamChange,
+    handleInputValueChange,
+    handleAddInputPort,
+    handleDeleteNode,
+    clearNodeCache,
+    clearAllCache,
+    getPortYOffset,
+  } = useNodeOperations({
+    setNodes,
+    setEdges,
+    takeSnapshot,
+  });
+
+  // Connection validation hook
+  const {
+    nodeMap,
+    arePortTypesCompatible,
+    getPortTypeForHandle,
+    getHandleRole,
+    normalizeConnection,
+    validateConnection,
+  } = useConnectionValidation({
+    nodes,
+    connectStartParams,
+  });
+
+  // Smart connect hook
+  const {
+    smartConnectMenu,
+    setSmartConnectMenu,
+    openSmartConnect,
+    closeSmartConnect,
+    findCompatiblePortForSmartConnect,
+    getCompatibleNodeTypes,
+  } = useSmartConnect({
+    getPortTypeForHandle,
+    arePortTypesCompatible,
+  });
+
+  // Connection toast hook
+  const { message: connectionMessage, showMessage: showConnectionMessage } = useConnectionToast();
 
   // Use the execution hook
   const {
@@ -174,6 +183,40 @@ const App = () => {
     runGraph,
     runGraphSync,
   } = useGraphExecution();
+
+  const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
+  const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
+
+  // Create handlers object for node data
+  const nodeHandlers = useMemo(() => ({
+    onDelete: handleDeleteNode,
+    onRunSelection: (nodeId: string) => handleRunGraph("selection", [nodeId]),
+    onClearCache: async (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node) {
+        try {
+          await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
+        } catch (e) {
+          console.error("Failed to clear backend cache for node type:", e);
+        }
+      }
+      clearNodeCache(nodeId);
+    },
+    onInterrupt: async (nodeId: string) => {
+      if (!executionId) return;
+      try {
+        await fetch(`/api/executions/${executionId}/cancel/${nodeId}`, { method: "POST" });
+      } catch (e) {
+        console.error("Failed to interrupt node:", e);
+      }
+    },
+    onParamChange: handleParamChange,
+    onPortHover: setHoveredPort,
+    onInputValueChange: handleInputValueChange,
+    onAddInputPort: handleAddInputPort,
+  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodes]);
+
+  // ========== Computed values ==========
 
   const outputsSummary = useMemo(() => {
     let images = 0;
@@ -209,103 +252,29 @@ const App = () => {
     return { images, streams: streamIds.size, values };
   }, [nodes, outputs]);
 
-  const graphSummary = useMemo(() => {
-    const nodeCount = nodes.length;
-    const edgeCount = edges.length;
-    const selectedCount = selectedNodeIds.length + selectedEdgeIds.length;
-    return { nodeCount, edgeCount, selectedCount };
-  }, [nodes.length, edges.length, selectedNodeIds.length, selectedEdgeIds.length]);
+  const graphSummary = useMemo(() => ({
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    selectedCount: selectedNodeIds.length + selectedEdgeIds.length,
+  }), [nodes.length, edges.length, selectedNodeIds.length, selectedEdgeIds.length]);
 
-  const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
-  const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
+    [nodes, selectedNodeIds]
+  );
 
-  const normalizeDefinition = useCallback((def: any): NodeTypeDefinition => {
-    const inputs: { name: string; type: TypeDescriptor }[] =
-      def.inputs ??
-      (def.input_ports || []).map((name: string) => ({
-        name,
-        type: typeof def.input_port_types?.[name] === "object"
-          ? def.input_port_types[name]
-          : { kind: def.input_port_types?.[name] || "any" },
-      }));
-    const outputs: { name: string; type: TypeDescriptor }[] =
-      def.outputs ??
-      (def.output_ports || []).map((name: string) => ({
-        name,
-        type: typeof def.output_port_types?.[name] === "object"
-          ? def.output_port_types[name]
-          : { kind: def.output_port_types?.[name] || "any" },
-      }));
+  const smartConnectNodeTypes = useMemo(
+    () => getCompatibleNodeTypes(nodeLibrary),
+    [getCompatibleNodeTypes, nodeLibrary]
+  );
 
-    return {
-      ...def,
-      inputs,
-      outputs,
-      input_ports: inputs.map((p) => p.name),
-      output_ports: outputs.map((p) => p.name),
-      input_port_types: Object.fromEntries(inputs.map((p) => [p.name, p.type])),
-      output_port_types: Object.fromEntries(outputs.map((p) => [p.name, p.type])),
-    };
-  }, []);
-
-  // Load node types
-  useEffect(() => {
-    const load = async () => {
-      const urls = ["/api/node-definitions", "/api/node-types"];
-      for (const url of urls) {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) continue;
-          const data: any[] = await response.json();
-          setNodeLibrary(data.map((d) => normalizeDefinition(d)));
-          return;
-        } catch (err) {
-          continue;
-        }
-      }
-      setNodeLibrary([]);
-    };
-    load();
-  }, [normalizeDefinition]);
-
-  // Handle panel resizing
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isResizingLeft) {
-        const newWidth = Math.min(Math.max(180, e.clientX), 400);
-        setLeftPanelWidth(newWidth);
-      }
-      if (isResizingRight) {
-        const newWidth = Math.min(Math.max(280, window.innerWidth - e.clientX), 600);
-        setRightPanelWidth(newWidth);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsResizingLeft(false);
-      setIsResizingRight(false);
-    };
-
-    if (isResizingLeft || isResizingRight) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-  }, [isResizingLeft, isResizingRight]);
+  // ========== Effects ==========
 
   // Update node execution states when nodeStatuses change
   useEffect(() => {
     if (nodeStatuses.size === 0 && !isRunning) return;
 
-    const latestTraceByNode = new Map<string, ExecutionTraceEntry>();
+    const latestTraceByNode = new Map<string, typeof trace[number]>();
     for (const entry of trace) {
       latestTraceByNode.set(entry.node_id, entry);
     }
@@ -340,10 +309,8 @@ const App = () => {
       if (visited.has(nodeId)) continue;
       visited.add(nodeId);
 
-      // Find all edges that connect TO this node
       for (const edge of edges) {
         if (edge.target === nodeId && !dependentIds.has(edge.source)) {
-          // Check if source node already has output (skip if it does)
           const sourceNode = nodes.find((n) => n.id === edge.source);
           if (!sourceNode?.data.last_outputs) {
             dependentIds.add(edge.source);
@@ -356,18 +323,12 @@ const App = () => {
     return dependentIds;
   }, [edges, nodes]);
 
-  // Update edges for running state (animated flow) - only for edges where source has no cached output
+  // Update edges for running state
   useEffect(() => {
     setEdges((existing) =>
       existing.map((edge) => {
-        // Find the source node to check if it has cached output
         const sourceNode = nodes.find((n) => n.id === edge.source);
         const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
-
-        // Edge should only animate if:
-        // 1. Graph is running
-        // 2. The target node is in the running set (needs this edge's data)
-        // 3. The source node does NOT have cached output (data needs to be computed)
         const targetInRunningSet = runningNodeIds.has(edge.target);
         const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
 
@@ -376,17 +337,13 @@ const App = () => {
         const isLoopBodyEdge = isLoopNode && edge.sourceHandle === "loop_body";
         const isLoopRunning = isLoopNode && nodeStatuses.get(edge.source) === "running";
 
-        // Determine edge color
-        let strokeColor = "#4a9eff"; // default
+        let strokeColor = "#4a9eff";
         if (isRunning && targetInRunningSet) {
           if (sourceHasCachedOutput) {
-            // Source already computed - show green solid line
             strokeColor = "var(--accent-green)";
           } else if (nodeStatuses.get(edge.source) === "completed") {
-            // Source just completed - show green
             strokeColor = "var(--accent-green)";
           } else {
-            // Source still computing - show blue animated
             strokeColor = "var(--accent-blue)";
           }
         }
@@ -407,189 +364,26 @@ const App = () => {
     );
   }, [isRunning, nodeStatuses, runningNodeIds, nodes, setEdges]);
 
-  const handleSelectionChange = useCallback(
-    (params: OnSelectionChangeParams) => {
-      const nodeIds = (params.nodes ?? []).map((node) => node.id);
-      const edgeIds = (params.edges ?? []).map((edge) => edge.id);
-      setSelectedNodeIds(nodeIds);
-      setSelectedEdgeIds(edgeIds);
-      setSelectedNodeId(nodeIds[0] ?? null);
-    },
-    []
-  );
-
-  // Find edges that intersect with the selection box (in flow coordinates)
-  const findIntersectingEdges = useCallback((
-    box: { startX: number; startY: number; endX: number; endY: number },
-    viewport: { x: number; y: number; zoom: number }
-  ): string[] => {
-    // Convert screen coordinates to flow coordinates
-    const toFlowCoord = (screenX: number, screenY: number) => ({
-      x: (screenX - viewport.x) / viewport.zoom,
-      y: (screenY - viewport.y) / viewport.zoom,
-    });
-
-    const start = toFlowCoord(box.startX, box.startY);
-    const end = toFlowCoord(box.endX, box.endY);
-
-    const rx = Math.min(start.x, end.x);
-    const ry = Math.min(start.y, end.y);
-    const rw = Math.abs(end.x - start.x);
-    const rh = Math.abs(end.y - start.y);
-
-    // Skip if box is too small
-    if (rw < 5 && rh < 5) return [];
-
-    const intersectingEdgeIds: string[] = [];
-
-    edges.forEach((edge) => {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      const targetNode = nodes.find((n) => n.id === edge.target);
-
-      if (!sourceNode || !targetNode) return;
-
-      // Calculate edge endpoints (approximate - right side of source, left side of target)
-      const sourceX = sourceNode.position.x + (sourceNode.width || MIN_NODE_WIDTH);
-      const sourceParamCount = Object.keys(sourceNode.data.metadata?.params_schema ?? {}).length;
-      const sourceMaxPorts = Math.max(sourceNode.data.input_ports.length, sourceNode.data.output_ports.length);
-      const sourceFallbackHeight = computeNodeDimensions(sourceMaxPorts, { paramCount: sourceParamCount }).height;
-      const sourceY = sourceNode.position.y + (sourceNode.height || sourceFallbackHeight) / 2;
-      const targetX = targetNode.position.x;
-      const targetParamCount = Object.keys(targetNode.data.metadata?.params_schema ?? {}).length;
-      const targetMaxPorts = Math.max(targetNode.data.input_ports.length, targetNode.data.output_ports.length);
-      const targetFallbackHeight = computeNodeDimensions(targetMaxPorts, { paramCount: targetParamCount }).height;
-      const targetY = targetNode.position.y + (targetNode.height || targetFallbackHeight) / 2;
-
-      // Check if the bezier curve intersects the selection box
-      if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
-        intersectingEdgeIds.push(edge.id);
-      }
-    });
-
-    return intersectingEdgeIds;
-  }, [edges, nodes]);
-
-  // Get viewport from ReactFlow DOM
-  const getViewport = useCallback(() => {
-    const wrapper = reactFlowWrapper.current;
-    if (wrapper) {
-      const rfInstance = wrapper.querySelector('.react-flow__viewport');
-      if (rfInstance) {
-        const transform = rfInstance.getAttribute('style');
-        const match = transform?.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/);
-        if (match) {
-          return {
-            x: parseFloat(match[1]),
-            y: parseFloat(match[2]),
-            zoom: parseFloat(match[3]),
-          };
-        }
-      }
-    }
-    return { x: 0, y: 0, zoom: 1 };
-  }, []);
-
-  // Update preview edges during selection drag
-  const updatePreviewEdges = useCallback((box: { startX: number; startY: number; endX: number; endY: number }) => {
-    const viewport = getViewport();
-    const intersectingEdges = findIntersectingEdges(box, viewport);
-    setPreviewEdgeIds(intersectingEdges);
-  }, [getViewport, findIntersectingEdges]);
-
-  // Handle selection end - finalize edge selection
-  const handleSelectionEnd = useCallback(() => {
-    if (previewEdgeIds.length > 0) {
-      // Add preview edges to selection
-      setSelectedEdgeIds((prev) => {
-        const combined = new Set([...prev, ...previewEdgeIds]);
-        return Array.from(combined);
-      });
-      // Also update the edges' selected state
-      setEdges((eds) =>
-        eds.map((e) => ({
-          ...e,
-          selected: previewEdgeIds.includes(e.id) || e.selected,
-        }))
-      );
-    }
-    setSelectionBox(null);
-    setPreviewEdgeIds([]);
-    setIsSelecting(false);
-  }, [previewEdgeIds, setEdges]);
-
+  // Clear running node set when execution completes
   useEffect(() => {
-    if (selectedNodeId && !nodes.some((node) => node.id === selectedNodeId)) {
-      setSelectedNodeId(null);
+    if (!isRunning) {
+      setRunningNodeIds(new Set());
     }
-  }, [nodes, selectedNodeId]);
+  }, [isRunning]);
 
-  const updateNodeData = useCallback(
-    (nodeId: string, updater: (data: BlueprintNodeData) => BlueprintNodeData) => {
-      setNodes((nd) =>
-        nd.map((node) => (node.id === nodeId ? { ...node, data: updater(node.data) } : node))
-      );
-    },
-    [setNodes]
-  );
-
-  const handleParamChange = useCallback(
-    (nodeId: string, param: string, value: string | number | boolean | null) =>
-      updateNodeData(nodeId, (data) => ({
-        ...data,
-        params: { ...data.params, [param]: value },
-      })),
-    [updateNodeData]
-  );
-
-  const handleInputValueChange = useCallback(
-    (nodeId: string, port: string, value: string | number | boolean | null) =>
-      updateNodeData(nodeId, (data) => ({
-        ...data,
-        inputValues: { ...(data.inputValues ?? {}), [port]: value },
-      })),
-    [updateNodeData]
-  );
-
-  const handleAddInputPort = useCallback(
-    (nodeId: string) =>
-      updateNodeData(nodeId, (data) => {
-        const existing = data.input_ports.filter((port) => port.startsWith("item_"));
-        const nextIndex = existing.length > 0
-          ? Math.max(...existing.map((port) => Number(port.split("_")[1]) || 0)) + 1
-          : 0;
-        const nextPort = `item_${nextIndex}`;
-        const input_ports = [...data.input_ports, nextPort];
-        const input_port_types = { ...(data.input_port_types ?? {}), [nextPort]: { kind: "any" } };
-        const inputValues = { ...(data.inputValues ?? {}), [nextPort]: null };
-        const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
-        const maxPorts = Math.max(input_ports.length + extraInputRows, data.output_ports.length);
-        const paramCount = Object.keys(data.metadata?.params_schema ?? {}).length;
-        const { width, height } = computeNodeDimensions(maxPorts, { paramCount });
-        return {
-          ...data,
-          input_ports,
-          input_port_types,
-          inputValues,
-          width,
-          height,
-        };
-      }),
-    [updateNodeData]
-  );
-
-  const handleDeleteNode = useCallback((nodeId: string) => {
-    setNodes((current) => current.filter((node) => node.id !== nodeId));
-    setEdges((current) =>
-      current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
-    );
-    if (selectedNodeId === nodeId) setSelectedNodeId(null);
-    setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
-  }, [selectedNodeId, setEdges, setNodes]);
-
-  // Handle highlighting nodes from timeline/performance panel hover
-  const handleHighlightNodes = useCallback((nodeIds: string[]) => {
-    setHighlightedNodeIds(nodeIds);
-  }, []);
+  // Trim running set as nodes finish
+  useEffect(() => {
+    if (nodeStatuses.size === 0) return;
+    setRunningNodeIds((prev) => {
+      const next = new Set(prev);
+      nodeStatuses.forEach((status, nodeId) => {
+        if (status === "completed" || status === "skipped" || status === "error") {
+          next.delete(nodeId);
+        }
+      });
+      return next;
+    });
+  }, [nodeStatuses]);
 
   // Update nodes with highlighted state
   useEffect(() => {
@@ -604,7 +398,7 @@ const App = () => {
     );
   }, [highlightedNodeIds, setNodes]);
 
-  // Highlight specific ports (from inspector or node hover)
+  // Highlight specific ports
   useEffect(() => {
     setNodes((existing) =>
       existing.map((node) => ({
@@ -633,21 +427,46 @@ const App = () => {
     );
   }, [previewEdgeIds, setEdges]);
 
-  const getPortTypeForHandle = useCallback(
-    (nodeId: string, handleId: string, role: "source" | "target"): TypeDescriptor => {
-      const node = nodeMap.get(nodeId);
-      if (!node) return { kind: "any" };
-      const map =
-        role === "source"
-          ? node.data.output_port_types || node.data.metadata?.output_port_types
-          : node.data.input_port_types || node.data.metadata?.input_port_types;
-      const value = map?.[handleId];
-      if (!value) return { kind: "any" };
-      if (typeof value === "string") return { kind: value as TypeDescriptor["kind"] };
-      return value as TypeDescriptor;
-    },
-    [nodeMap]
-  );
+  // Sync edge colors with port types
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (!edge.sourceHandle) return edge;
+        const desiredStroke = getPortTypeColor(getPortTypeForHandle(edge.source, edge.sourceHandle, "source"));
+        const currentStroke = (edge.style as React.CSSProperties | undefined)?.stroke as string | undefined;
+        if (currentStroke === desiredStroke) return edge;
+        return {
+          ...edge,
+          style: {
+            ...(edge.style as React.CSSProperties | undefined),
+            stroke: desiredStroke,
+            strokeWidth: (edge.style as React.CSSProperties | undefined)?.strokeWidth || 2,
+          },
+        };
+      })
+    );
+  }, [getPortTypeForHandle, setEdges]);
+
+  // Update existing nodes with handlers
+  useEffect(() => {
+    setNodes((existing) =>
+      existing.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          ...nodeHandlers,
+        },
+      }))
+    );
+  }, [nodeHandlers, setNodes]);
+
+  useEffect(() => {
+    if (selectedNodeId && !nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+  }, [nodes, selectedNodeId]);
+
+  // ========== Graph operations ==========
 
   const buildGraphPayload = useCallback(
     (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
@@ -687,10 +506,7 @@ const App = () => {
       }
 
       return {
-        graph: {
-          nodes: nodePayload,
-          links: linkPayload,
-        },
+        graph: { nodes: nodePayload, links: linkPayload },
         options,
       };
     },
@@ -701,7 +517,6 @@ const App = () => {
     async (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
       if (nodes.length === 0) return;
 
-      // Determine which nodes will be running
       const runNodes = mode === "full"
         ? new Set(nodes.map((n) => n.id))
         : getDependentNodes(targetNodes || selectedNodeIds);
@@ -714,7 +529,6 @@ const App = () => {
 
       const payload = buildGraphPayload(mode, targetNodes || (mode === "selection" ? selectedNodeIds : undefined), extras);
 
-      // Clear previous execution states for running nodes only
       setNodes((existing) =>
         existing.map((node) => ({
           ...node,
@@ -741,95 +555,6 @@ const App = () => {
     [buildGraphPayload, getDependentNodes, isConnected, isRunning, nodes, runGraph, runGraphSync, selectedNodeIds, setNodes, useStreaming]
   );
 
-  // Handle run selection from individual node
-  const handleRunFromNode = useCallback((nodeId: string) => {
-    handleRunGraph("selection", [nodeId]);
-  }, [handleRunGraph]);
-
-  // Handle clearing cache for a single node (also clears backend cache for that node type)
-  const handleClearNodeCache = useCallback(async (nodeId: string) => {
-    // Find the node to get its type
-    const node = nodes.find((n) => n.id === nodeId);
-    if (node) {
-      // Clear backend cache for this node type
-      try {
-        await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
-      } catch (e) {
-        console.error("Failed to clear backend cache for node type:", e);
-      }
-    }
-
-    // Clear frontend state
-    setNodes((existing) =>
-      existing.map((n) =>
-        n.id === nodeId
-          ? {
-            ...n,
-            data: {
-              ...n.data,
-              last_outputs: undefined,
-              executionStatus: undefined,
-              executionDuration: undefined,
-              executionLogs: [],
-            },
-          }
-          : n
-      )
-    );
-  }, [nodes, setNodes]);
-
-  // Clear running node set when execution completes
-  useEffect(() => {
-    if (!isRunning) {
-      setRunningNodeIds(new Set());
-    }
-  }, [isRunning]);
-
-  // Trim running set as nodes finish to keep animation focused
-  useEffect(() => {
-    if (nodeStatuses.size === 0) return;
-    setRunningNodeIds((prev) => {
-      const next = new Set(prev);
-      nodeStatuses.forEach((status, nodeId) => {
-        if (status === "completed" || status === "skipped" || status === "error") {
-          next.delete(nodeId);
-        }
-      });
-      return next;
-    });
-  }, [nodeStatuses]);
-
-  // Clear all cached outputs from nodes
-  const handleClearCache = useCallback(() => {
-    setNodes((existing) =>
-      existing.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          last_outputs: undefined,
-          executionStatus: undefined,
-          executionDuration: undefined,
-          executionLogs: [],
-        },
-      }))
-    );
-  }, [setNodes]);
-
-  // Clear the backend execution cache
-  const handleClearBackendCache = useCallback(async () => {
-    try {
-      const response = await fetch("/api/cache/clear", { method: "POST" });
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`Cleared ${data.cleared} cached entries`);
-        // Also clear frontend state
-        handleClearCache();
-      }
-    } catch (e) {
-      console.error("Failed to clear backend cache:", e);
-    }
-  }, [handleClearCache]);
-
   const handleInterruptAll = useCallback(async () => {
     if (!executionId) return;
     try {
@@ -839,27 +564,41 @@ const App = () => {
     }
   }, [executionId]);
 
-  const handleInterruptNode = useCallback(async (nodeId: string) => {
-    if (!executionId) return;
+  const handleClearBackendCache = useCallback(async () => {
     try {
-      await fetch(`/api/executions/${executionId}/cancel/${nodeId}`, { method: "POST" });
+      const response = await fetch("/api/cache/clear", { method: "POST" });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Cleared ${data.cleared} cached entries`);
+        clearAllCache();
+      }
     } catch (e) {
-      console.error("Failed to interrupt node:", e);
+      console.error("Failed to clear backend cache:", e);
     }
-  }, [executionId]);
+  }, [clearAllCache]);
 
-  // Delete selected nodes and edges
+  // ========== Selection operations ==========
+
+  const handleSelectionChange = useCallback(
+    (params: OnSelectionChangeParams) => {
+      const nodeIds = (params.nodes ?? []).map((node) => node.id);
+      const edgeIds = (params.edges ?? []).map((edge) => edge.id);
+      setSelectedNodeIds(nodeIds);
+      setSelectedEdgeIds(edgeIds);
+      setSelectedNodeId(nodeIds[0] ?? null);
+    },
+    []
+  );
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
 
     takeSnapshot();
 
-    // Delete selected nodes
     if (selectedNodeIds.length > 0) {
       setNodes((current) => current.filter((node) => !selectedNodeIds.includes(node.id)));
     }
 
-    // Delete selected edges AND edges connected to deleted nodes
     setEdges((current) =>
       current.filter(
         (edge) =>
@@ -872,40 +611,32 @@ const App = () => {
     setSelectedNodeIds([]);
     setSelectedEdgeIds([]);
     setSelectedNodeId(null);
-  }, [selectedNodeIds, selectedEdgeIds, setNodes, setEdges]);
+  }, [selectedNodeIds, selectedEdgeIds, setNodes, setEdges, takeSnapshot]);
 
-  // Duplicate selected nodes (no edges - edges can only be deleted)
   const handleDuplicateSelected = useCallback(() => {
     if (selectedNodeIds.length === 0) return;
 
     takeSnapshot();
 
     const selectedNodeSet = new Set(selectedNodeIds);
-    const selectedNodes = nodes.filter((node) => selectedNodeSet.has(node.id));
+    const selectedNodesArray = nodes.filter((node) => selectedNodeSet.has(node.id));
     const newNodes: Node<BlueprintNodeData>[] = [];
     const nodeIdMap = new Map<string, string>();
 
-    // Create new nodes with offset positions
-    selectedNodes.forEach((node) => {
-      const newId = `node-${nodeIdRef.current++}`;
-      nodeIdMap.set(node.id, newId);
+    selectedNodesArray.forEach((node) => {
+      if (!node.data.metadata) return;
+      const newNode = createNodeFromType(
+        node.data.metadata,
+        { x: node.position.x + 50, y: node.position.y + 50 },
+        nodeHandlers
+      );
+      nodeIdMap.set(node.id, newNode.id);
       newNodes.push({
-        ...node,
-        id: newId,
-        position: { x: node.position.x + 50, y: node.position.y + 50 },
-        selected: false,
+        ...newNode,
         data: {
-          ...node.data,
-          last_outputs: undefined,
-          executionStatus: undefined,
-          executionDuration: undefined,
-          executionLogs: [],
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          onInterrupt: handleInterruptNode,
-          onParamChange: handleParamChange,
-          onPortHover: setHoveredPort,
+          ...newNode.data,
+          params: { ...node.data.params },
+          inputValues: { ...node.data.inputValues },
         },
       });
     });
@@ -913,9 +644,9 @@ const App = () => {
     const edgesToCopy = edges.filter((edge) =>
       selectedNodeSet.has(edge.source) || selectedNodeSet.has(edge.target)
     );
-    const newEdges = [];
+    const newEdges: Edge[] = [];
     const existingEdges = [...edges];
-    const isDuplicateEdge = (edge: typeof edges[number], list: typeof edges) =>
+    const isDuplicateEdge = (edge: Edge, list: Edge[]) =>
       list.some(
         (item) =>
           item.source === edge.source &&
@@ -944,21 +675,18 @@ const App = () => {
       setEdges((current) => [...current, ...newEdges]);
     }
 
-    // Select the new nodes
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
     setSelectedEdgeIds(newEdges.map((edge) => edge.id));
-  }, [selectedNodeIds, nodes, edges, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes, setEdges]);
+  }, [selectedNodeIds, nodes, edges, createNodeFromType, nodeHandlers, setNodes, setEdges, takeSnapshot]);
 
-  // Copy selected nodes to clipboard (no edges - edges can only be deleted)
   const handleCopy = useCallback(() => {
-    if (selectedNodeIds.length === 0) return; // Only copy if nodes are selected
-    const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
-    setClipboard(selectedNodes);
+    if (selectedNodeIds.length === 0) return;
+    const selectedNodesArray = nodes.filter((node) => selectedNodeIds.includes(node.id));
+    setClipboard(selectedNodesArray);
   }, [selectedNodeIds, nodes]);
 
-  // Paste from clipboard (nodes only, no edges)
   const handlePaste = useCallback(() => {
     if (!clipboard || clipboard.length === 0) return;
 
@@ -967,472 +695,77 @@ const App = () => {
     const newNodes: Node<BlueprintNodeData>[] = [];
 
     clipboard.forEach((node) => {
-      const newId = `node-${nodeIdRef.current++}`;
+      if (!node.data.metadata) return;
+      const newNode = createNodeFromType(
+        node.data.metadata,
+        { x: node.position.x + 80, y: node.position.y + 80 },
+        nodeHandlers
+      );
       newNodes.push({
-        ...node,
-        id: newId,
-        position: { x: node.position.x + 80, y: node.position.y + 80 },
-        selected: false,
+        ...newNode,
         data: {
-          ...node.data,
-          last_outputs: undefined,
-          executionStatus: undefined,
-          executionDuration: undefined,
-          executionLogs: [],
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          onInterrupt: handleInterruptNode,
-          onParamChange: handleParamChange,
-          onPortHover: setHoveredPort,
+          ...newNode.data,
+          params: { ...node.data.params },
+          inputValues: { ...node.data.inputValues },
         },
       });
     });
 
     setNodes((current) => [...current, ...newNodes]);
 
-    // Select the new nodes
     const newIds = newNodes.map((n) => n.id);
     setSelectedNodeIds(newIds);
     setSelectedNodeId(newIds[0] ?? null);
-  }, [clipboard, handleDeleteNode, handleRunFromNode, handleClearNodeCache, handleInterruptNode, setNodes]);
+  }, [clipboard, createNodeFromType, nodeHandlers, setNodes, takeSnapshot]);
 
-  // Select all nodes and edges
   const handleSelectAll = useCallback(() => {
     const allNodeIds = nodes.map((n) => n.id);
     const allEdgeIds = edges.map((e) => e.id);
     setSelectedNodeIds(allNodeIds);
     setSelectedEdgeIds(allEdgeIds);
     setSelectedNodeId(allNodeIds[0] ?? null);
-    // Also update ReactFlow's internal selection state
     setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
     setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
   }, [nodes, edges, setNodes, setEdges]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Don't trigger shortcuts when typing in inputs
-      const target = event.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
-        return;
-      }
+  // ========== Keyboard shortcuts ==========
 
-      const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+  useKeyboardShortcuts({
+    onDelete: handleDeleteSelected,
+    onSelectAll: handleSelectAll,
+    onDuplicate: handleDuplicateSelected,
+    onCopy: handleCopy,
+    onPaste: handlePaste,
+    onUndo: undo,
+    onRedo: redo,
+    canDuplicate: selectedNodeIds.length > 0,
+    canCopy: selectedNodeIds.length > 0,
+  });
 
-      // Delete selected nodes and edges
-      if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault();
-        handleDeleteSelected();
-        return;
-      }
-
-      // Ctrl+A - Select all
-      if (isCtrlOrCmd && event.key === "a") {
-        event.preventDefault();
-        handleSelectAll();
-        return;
-      }
-
-      // Ctrl+D - Duplicate (only for nodes)
-      if (isCtrlOrCmd && event.key === "d") {
-        event.preventDefault();
-        if (selectedNodeIds.length > 0) {
-          handleDuplicateSelected();
-        }
-        return;
-      }
-
-      // Ctrl+C - Copy (only for nodes)
-      if (isCtrlOrCmd && event.key === "c") {
-        event.preventDefault();
-        if (selectedNodeIds.length > 0) {
-          handleCopy();
-        }
-        return;
-      }
-
-      // Ctrl+V - Paste
-      if (isCtrlOrCmd && event.key === "v") {
-        event.preventDefault();
-        handlePaste();
-        return;
-      }
-
-      // Ctrl+Z - Undo
-      if (isCtrlOrCmd && !event.shiftKey && event.key === "z") {
-        event.preventDefault();
-        undo();
-        return;
-      }
-
-      // Ctrl+Shift+Z or Ctrl+Y - Redo
-      if ((isCtrlOrCmd && event.shiftKey && event.key === "z") || (isCtrlOrCmd && event.key === "y")) {
-        event.preventDefault();
-        redo();
-        return;
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleDeleteSelected, handleSelectAll, handleDuplicateSelected, handleCopy, handlePaste, selectedNodeIds]);
-
-  const buildDefaultInputValues = useCallback((nodeType: NodeTypeDefinition) => {
-    const inputValues: Record<string, unknown> = {};
-    for (const input of nodeType.inputs ?? []) {
-      if (input.type?.kind === "control") {
-        continue;
-      }
-      if (input.default !== undefined && input.default !== null) {
-        inputValues[input.name] = input.default;
-      }
-    }
-    return inputValues;
-  }, []);
-
-  const getInitialPorts = useCallback((nodeType: NodeTypeDefinition) => {
-    if (nodeType.node_type === "core.container.make_array") {
-      return {
-        input_ports: ["control_in", "item_0"],
-        input_port_types: { control_in: { kind: "control" }, item_0: { kind: "any" } },
-      };
-    }
-    return {
-      input_ports: nodeType.input_ports,
-      input_port_types: nodeType.input_port_types,
-    };
-  }, []);
+  // ========== Node adding ==========
 
   const handleAddNode = useCallback(
     (nodeType: NodeTypeDefinition) => {
       takeSnapshot();
-      const params: Record<string, unknown> = {};
-      const defaults = nodeType.params_defaults ?? {};
-      for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
-        params[key] = schema.default ?? defaults[key] ?? "";
-      }
-      const { input_ports, input_port_types } = getInitialPorts(nodeType);
-      const inputValues = buildDefaultInputValues(nodeType);
-      const seededInputValues =
-        nodeType.node_type === "core.container.make_array"
-          ? { ...inputValues, item_0: null }
-          : inputValues;
-      const id = `node-${nodeIdRef.current++}`;
       const position = { x: 120 + nodes.length * 36, y: 80 + nodes.length * 32 };
-
-      // Calculate initial size based on ports (matches MIN_WIDTH/MIN_HEIGHT in BlueprintNode)
-      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
-      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
-
-      const payload: Node<BlueprintNodeData> = {
-        id,
-        type: "blueprint",
-        position,
-        data: {
-          displayName: nodeType.display_name,
-          nodeType: nodeType.node_type,
-          description: nodeType.description,
-          input_ports,
-          output_ports: nodeType.output_ports,
-          input_port_types,
-          output_port_types: nodeType.output_port_types,
-          params,
-          inputValues: seededInputValues,
-          breakpoint: false,
-          metadata: nodeType,
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          onInterrupt: handleInterruptNode,
-          onParamChange: handleParamChange,
-          onPortHover: setHoveredPort,
-          onInputValueChange: handleInputValueChange,
-          onAddInputPort: handleAddInputPort,
-          width: initialWidth,
-          height: initialHeight,
-          executionLogs: [],
-        },
-      };
-      setNodes((existing) => existing.concat(payload));
+      const newNode = createNodeFromType(nodeType, position, nodeHandlers);
+      setNodes((existing) => existing.concat(newNode));
     },
-    [
-      buildDefaultInputValues,
-      getInitialPorts,
-      handleDeleteNode,
-      handleRunFromNode,
-      handleClearNodeCache,
-      handleInterruptNode,
-      handleInputValueChange,
-      handleAddInputPort,
-      nodes.length,
-      setNodes,
-    ]
+    [createNodeFromType, nodeHandlers, nodes.length, setNodes, takeSnapshot]
   );
 
-  // Update existing nodes with the run handler
-  useEffect(() => {
-    setNodes((existing) =>
-      existing.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          onInterrupt: handleInterruptNode,
-          onParamChange: handleParamChange,
-          onPortHover: setHoveredPort,
-          onInputValueChange: handleInputValueChange,
-          onAddInputPort: handleAddInputPort,
-        },
-      }))
-    );
-  }, [
-    handleDeleteNode,
-    handleRunFromNode,
-    handleClearNodeCache,
-    handleInterruptNode,
-    handleParamChange,
-    handleInputValueChange,
-    handleAddInputPort,
-    setNodes,
-  ]);
-
-  const graphStats = useMemo(
-    () => ({
-      nodes: nodes.length,
-      edges: edges.length,
-      selection: selectedNodeIds.length,
-    }),
-    [edges.length, nodes, selectedNodeIds.length]
-  );
-
-  const showConnectionMessage = useCallback((text: string, tone: "error" | "info" = "error") => {
-    if (connectionMessageTimeout.current) {
-      window.clearTimeout(connectionMessageTimeout.current);
-    }
-    setConnectionMessage({ text, tone });
-    connectionMessageTimeout.current = window.setTimeout(() => setConnectionMessage(null), 1800);
-  }, []);
-
-  const normalizeType = useCallback((type?: TypeDescriptor | string | null): TypeDescriptor => {
-    if (!type) return { kind: "any" };
-    if (typeof type === "string") {
-      if (type === "number") return { kind: "float" };
-      return { kind: type as TypeDescriptor["kind"] };
-    }
-    return type;
-  }, []);
-
-  const arePortTypesCompatible = useCallback((sourceType: TypeDescriptor | string | undefined, targetType: TypeDescriptor | string | undefined) => {
-    const src = normalizeType(sourceType);
-    const tgt = normalizeType(targetType);
-    if (tgt.kind === "any" || src.kind === "any") return true;
-    if (tgt.kind === "unknown" || src.kind === "unknown") return true;
-    if (src.kind === "int" && tgt.kind === "float") return true;
-    if (src.nullable && !tgt.nullable) return false;
-    if (src.kind !== tgt.kind) return false;
-    if (src.kind === "list" && src.item && tgt.item) {
-      return arePortTypesCompatible(src.item, tgt.item);
-    }
-    if (src.kind === "map" && src.value && tgt.value) {
-      return arePortTypesCompatible(src.value, tgt.value);
-    }
-    if (src.kind === "option" && src.item && tgt.item) {
-      return arePortTypesCompatible(src.item, tgt.item);
-    }
-    if (src.kind === "record" && src.fields && tgt.fields) {
-      const tgtKeys = Object.keys(tgt.fields);
-      return tgtKeys.every((key) => src.fields && src.fields[key] && arePortTypesCompatible(src.fields[key], tgt.fields![key]));
-    }
-    if (src.kind === "tensor") {
-      const srcDtype = src.metadata?.dtype;
-      const tgtDtype = tgt.metadata?.dtype;
-      if (srcDtype && tgtDtype && srcDtype !== tgtDtype) return false;
-    }
-    return true;
-  }, [normalizeType]);
-
-  const getHandleRoleFromDom = useCallback(
-    (
-      nodeId: string,
-      handleId: string,
-      side?: "source" | "target"
-    ): "source" | "target" | null => {
-      const escapeId = (value: string) =>
-        typeof CSS !== "undefined" && typeof CSS.escape === "function"
-          ? CSS.escape(value)
-          : value.replace(/["\\]/g, "\\$&");
-      const safeNodeId = escapeId(nodeId);
-      const safeHandleId = escapeId(handleId);
-      const nodeSelector = `.react-flow__node[data-id="${safeNodeId}"]`;
-      const baseSelector = `${nodeSelector} .react-flow__handle[data-handleid="${safeHandleId}"]`;
-      const leftSelector = `${baseSelector}[data-handlepos="left"], ${nodeSelector} .react-flow__handle-target[data-handleid="${safeHandleId}"]`;
-      const rightSelector = `${baseSelector}[data-handlepos="right"], ${nodeSelector} .react-flow__handle-source[data-handleid="${safeHandleId}"]`;
-      const hasLeft = Boolean(document.querySelector(leftSelector));
-      const hasRight = Boolean(document.querySelector(rightSelector));
-
-      if (side === "target" && hasLeft) return "target";
-      if (side === "source" && hasRight) return "source";
-      if (hasLeft && !hasRight) return "target";
-      if (hasRight && !hasLeft) return "source";
-      return null;
-    },
-    []
-  );
-
-  const getHandleRole = useCallback(
-    (
-      nodeId: string,
-      handleId: string,
-      side?: "source" | "target"
-    ): "source" | "target" | null => {
-      const node = nodeMap.get(nodeId);
-      if (!node) return null;
-      if (
-        side === "source" &&
-        connectStartParams?.nodeId === nodeId &&
-        connectStartParams.handleId === handleId &&
-        connectStartParams.handleType
-      ) {
-        return connectStartParams.handleType;
-      }
-      const domRole = getHandleRoleFromDom(nodeId, handleId, side);
-      if (domRole) return domRole;
-
-      const isOutput = node.data.output_ports.includes(handleId);
-      const isInput = node.data.input_ports.includes(handleId);
-      if (isOutput && isInput && side) {
-        return side;
-      }
-      if (isOutput) return "source";
-      if (isInput) return "target";
-      return null;
-    },
-    [connectStartParams, getHandleRoleFromDom, nodeMap]
-  );
-
-  const findCompatiblePortForSmartConnect = useCallback(
-    (nodeType: NodeTypeDefinition, source: { nodeId: string; handleId: string; type: "source" | "target" }) => {
-      if (source.type === "source") {
-        const sourceType = getPortTypeForHandle(source.nodeId, source.handleId, "source");
-        for (const port of nodeType.input_ports) {
-          const targetType = nodeType.input_port_types?.[port] || "any";
-          const resolvedTarget = typeof targetType === "string" ? { kind: targetType } : targetType;
-          if (sourceType.kind === "control" && resolvedTarget?.kind !== "control") {
-            continue;
-          }
-          if (arePortTypesCompatible(sourceType, targetType)) {
-            return { targetHandle: port, sourceType, targetType };
-          }
-        }
-        return null;
-      }
-
-      const targetType = getPortTypeForHandle(source.nodeId, source.handleId, "target");
-      for (const port of nodeType.output_ports) {
-        const sourceType = nodeType.output_port_types?.[port] || "any";
-        const resolvedSource = typeof sourceType === "string" ? { kind: sourceType } : sourceType;
-        if (targetType.kind === "control" && resolvedSource?.kind !== "control") {
-          continue;
-        }
-        if (arePortTypesCompatible(sourceType, targetType)) {
-          return { sourceHandle: port, sourceType, targetType };
-        }
-      }
-      return null;
-    },
-    [arePortTypesCompatible, getPortTypeForHandle]
-  );
-
-  const normalizeConnection = useCallback(
-    (connection: Connection) => {
-      if (!connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) {
-        return connection;
-      }
-
-      const sourceRole = getHandleRole(connection.source, connection.sourceHandle, "source");
-      const targetRole = getHandleRole(connection.target, connection.targetHandle, "target");
-
-      if (sourceRole === "target" && targetRole === "source") {
-        return {
-          ...connection,
-          source: connection.target,
-          sourceHandle: connection.targetHandle,
-          target: connection.source,
-          targetHandle: connection.sourceHandle,
-        };
-      }
-
-      return connection;
-    },
-    [getHandleRole]
-  );
-
-  const validateConnection = useCallback(
-    (connection: Connection) => {
-      if (!connection.source || !connection.sourceHandle) {
-        setConnectionLineIsInvalid(false);
-        return { valid: false, reason: "Select both connectors" };
-      }
-
-      if (!connection.target || !connection.targetHandle) {
-        const sourceRole = getHandleRole(connection.source, connection.sourceHandle, "source");
-        const sourceType = getPortTypeForHandle(
-          connection.source,
-          connection.sourceHandle,
-          sourceRole === "target" ? "target" : "source"
-        );
-        setConnectionLineIsInvalid(false);
-        setConnectionLineColor(getPortTypeColor(sourceType));
-        setConnectionLineDash(sourceType.kind === "control" ? "8 4" : undefined);
-        return { valid: true, sourceType };
-      }
-
-      const normalized = normalizeConnection(connection);
-      const sourceRole = getHandleRole(normalized.source!, normalized.sourceHandle!, "source");
-      const targetRole = getHandleRole(normalized.target!, normalized.targetHandle!, "target");
-
-      if (sourceRole !== "source" || targetRole !== "target") {
-        setConnectionLineIsInvalid(true);
-        return { valid: false, reason: "Connect outputs to inputs only" };
-      }
-
-      if (normalized.source === normalized.target) {
-        setConnectionLineIsInvalid(true);
-        return { valid: false, reason: "Cannot connect a node to itself" };
-      }
-
-      const sourceType = getPortTypeForHandle(normalized.source!, normalized.sourceHandle!, "source");
-      const targetType = getPortTypeForHandle(normalized.target!, normalized.targetHandle!, "target");
-      const compatible = arePortTypesCompatible(sourceType, targetType);
-
-      setConnectionLineIsInvalid(!compatible);
-      const desiredColor = getPortTypeColor(sourceType);
-      setConnectionLineDash(sourceType.kind === "control" || targetType.kind === "control" ? "8 4" : undefined);
-      if (connectionLineColor !== desiredColor) {
-        setConnectionLineColor(desiredColor);
-      }
-
-      return {
-        valid: compatible,
-        reason: compatible ? undefined : `Type mismatch: ${formatPortTypeLabel(sourceType)} -> ${formatPortTypeLabel(targetType)}`,
-        sourceType,
-        targetType,
-      };
-    },
-    [arePortTypesCompatible, connectionLineColor, getHandleRole, getPortTypeForHandle, normalizeConnection]
-  );
+  // ========== Connection handling ==========
 
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
       if (!connection.sourceHandle || !connection.targetHandle) return;
 
       const normalized = normalizeConnection(connection as Connection);
-      const validation = validateConnection(normalized);
+      const validation = validateConnection(normalized, {
+        setConnectionLineIsInvalid,
+        setConnectionLineColor,
+        setConnectionLineDash,
+      });
       if (!validation.valid) {
         showConnectionMessage(validation.reason || "These connectors cannot be linked");
         return;
@@ -1441,7 +774,6 @@ const App = () => {
       const sourceType = getPortTypeForHandle(normalized.source!, normalized.sourceHandle!, "source");
       const edgeColor = getPortTypeColor(sourceType);
 
-      // Check for duplicate edges (same source, target, sourceHandle, targetHandle)
       const isDuplicate = edges.some(
         (edge) =>
           edge.source === normalized.source &&
@@ -1452,14 +784,13 @@ const App = () => {
 
       if (isDuplicate) {
         connectSucceededRef.current = true;
-        return; // Don't add duplicate edge
+        return;
       }
 
       connectSucceededRef.current = true;
       takeSnapshot();
 
       setEdges((existing) => {
-        // Remove any existing edge that connects to the same target handle
         const filtered = existing.filter(
           (edge) =>
             !(edge.target === normalized.target && edge.targetHandle === normalized.targetHandle)
@@ -1480,36 +811,167 @@ const App = () => {
     [edges, getPortTypeForHandle, normalizeConnection, setEdges, showConnectionMessage, takeSnapshot, validateConnection]
   );
 
-  const isValidConnection = useCallback((connection: Connection) => validateConnection(connection).valid, [validateConnection]);
+  const isValidConnection = useCallback(
+    (connection: Connection) => validateConnection(connection).valid,
+    [validateConnection]
+  );
 
-  const smartConnectNodeTypes = useMemo(() => {
-    if (!smartConnectMenu.source) return nodeLibrary;
-    return nodeLibrary.filter((nodeType) =>
-      Boolean(findCompatiblePortForSmartConnect(nodeType, smartConnectMenu.source!))
-    );
-  }, [findCompatiblePortForSmartConnect, nodeLibrary, smartConnectMenu.source]);
+  const onConnectStart = useCallback(
+    (_: unknown, { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
+      setConnectStartParams({ nodeId, handleId, handleType });
+      if (nodeId && handleId && handleType) {
+        const type = handleType === "source"
+          ? getPortTypeForHandle(nodeId, handleId, "source")
+          : getPortTypeForHandle(nodeId, handleId, "target");
+        setConnectionLineColor(getPortTypeColor(type));
+        setConnectionLineIsInvalid(false);
+      } else {
+        setConnectionLineColor(undefined);
+        setConnectionLineIsInvalid(false);
+      }
+    },
+    [getPortTypeForHandle]
+  );
 
-  // Ensure all edges carry a color that matches their source port type
-  useEffect(() => {
-    setEdges((eds) =>
-      eds.map((edge) => {
-        if (!edge.sourceHandle) return edge;
-        const desiredStroke = getPortTypeColor(getPortTypeForHandle(edge.source, edge.sourceHandle, "source"));
-        const currentStroke = (edge.style as React.CSSProperties | undefined)?.stroke as string | undefined;
-        if (currentStroke === desiredStroke) return edge;
-        return {
-          ...edge,
-          style: {
-            ...(edge.style as React.CSSProperties | undefined),
-            stroke: desiredStroke,
-            strokeWidth: (edge.style as React.CSSProperties | undefined)?.strokeWidth || 2,
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      if (connectSucceededRef.current) {
+        connectSucceededRef.current = false;
+        return;
+      }
+      const target = event.target;
+      const isPane = target instanceof HTMLElement ? Boolean(target.closest(".react-flow__pane")) : false;
+      const isHandle = target instanceof HTMLElement ? Boolean(target.closest(".react-flow__handle")) : false;
+      const isNode = target instanceof HTMLElement ? Boolean(target.closest(".react-flow__node")) : false;
+      const isEdge = target instanceof HTMLElement ? Boolean(target.closest(".react-flow__edge")) : false;
+      const isEmptySpace = isPane && !isHandle && !isNode && !isEdge;
+
+      if (isEmptySpace && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
+        const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
+
+        const flowPosition = reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY });
+
+        const sourceRole = connectStartParams.handleType || "source";
+        const sourcePortType = getPortTypeForHandle(
+          connectStartParams.nodeId,
+          connectStartParams.handleId,
+          sourceRole
+        );
+
+        openSmartConnect(
+          { x: clientX, y: clientY },
+          flowPosition,
+          {
+            nodeId: connectStartParams.nodeId,
+            handleId: connectStartParams.handleId,
+            type: connectStartParams.handleType || "source",
           },
-        };
-      })
-    );
-  }, [getPortTypeForHandle, setEdges]);
+          sourcePortType
+        );
+      }
 
-  // Helper to calculate handle position for smart connect line
+      setConnectStartParams(null);
+      setConnectionLineColor(undefined);
+      setConnectionLineIsInvalid(false);
+    },
+    [connectStartParams, reactFlowInstance, getPortTypeForHandle, openSmartConnect]
+  );
+
+  // ========== Smart connect select ==========
+
+  const handleSmartConnectSelect = useCallback(
+    (nodeType: NodeTypeDefinition) => {
+      if (!smartConnectMenu.source) return;
+
+      takeSnapshot();
+
+      const { flowPosition, source } = smartConnectMenu;
+      const compatiblePort = findCompatiblePortForSmartConnect(nodeType, source);
+      if (!compatiblePort) {
+        showConnectionMessage("No compatible ports found for this node");
+        closeSmartConnect();
+        return;
+      }
+
+      // Calculate position to align the connecting handle
+      const { input_ports } = nodeType.node_type === "core.container.make_array"
+        ? { input_ports: ["control_in", "item_0"] }
+        : { input_ports: nodeType.input_ports };
+
+      const matchedPortIndex = source.type === "source"
+        ? input_ports.indexOf(compatiblePort.targetHandle!)
+        : nodeType.output_ports.indexOf(compatiblePort.sourceHandle!);
+      const resolvedPortIndex = matchedPortIndex >= 0 ? matchedPortIndex : 0;
+      const portYOffset = getPortYOffset(resolvedPortIndex);
+
+      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
+      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
+      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
+      const { width: initialWidth } = computeNodeDimensions(maxPorts, { paramCount });
+
+      let xOffset = 0;
+      if (source.type === "source") {
+        xOffset = 0;
+      } else {
+        xOffset = initialWidth;
+      }
+
+      const newNode = createNodeFromType(
+        nodeType,
+        { x: flowPosition.x - xOffset, y: flowPosition.y - portYOffset },
+        nodeHandlers
+      );
+
+      setNodes((nds) => nds.concat(newNode));
+
+      // Create connection
+      let sourceId, sourceHandle, targetId, targetHandle;
+
+      if (source.type === "source") {
+        sourceId = source.nodeId;
+        sourceHandle = source.handleId;
+        targetId = newNode.id;
+        targetHandle = compatiblePort.targetHandle;
+      } else {
+        sourceId = newNode.id;
+        sourceHandle = compatiblePort.sourceHandle;
+        targetId = source.nodeId;
+        targetHandle = source.handleId;
+      }
+
+      if (sourceHandle && targetHandle) {
+        const sourceType = compatiblePort.sourceType;
+        const targetType = compatiblePort.targetType;
+
+        if (arePortTypesCompatible(sourceType, targetType)) {
+          const edgeColor = getPortTypeColor(sourceType);
+          setEdges((eds) => {
+            const filtered = source.type === "target"
+              ? eds.filter((edge) => !(edge.target === targetId && edge.targetHandle === targetHandle))
+              : eds;
+            return addEdge(
+              {
+                source: sourceId,
+                sourceHandle: sourceHandle,
+                target: targetId,
+                targetHandle: targetHandle,
+                type: "default",
+                animated: false,
+                style: { stroke: edgeColor, strokeWidth: 2 },
+              },
+              filtered
+            );
+          });
+        }
+      }
+
+      closeSmartConnect();
+    },
+    [smartConnectMenu, createNodeFromType, nodeHandlers, setNodes, setEdges, arePortTypesCompatible, findCompatiblePortForSmartConnect, closeSmartConnect, showConnectionMessage, takeSnapshot, getPortYOffset]
+  );
+
+  // ========== Handle position for smart connect line ==========
+
   const getHandlePosition = useCallback((nodeId: string, handleId: string, type: "source" | "target") => {
     if (reactFlowInstance) {
       const escapeId = (value: string) =>
@@ -1544,10 +1006,7 @@ const App = () => {
 
     if (index === -1) return null;
 
-    // Matches BlueprintNode layout constants
     const yOffset = HEADER_HEIGHT + index * PORT_ROW_HEIGHT + PORT_ROW_HEIGHT / 2;
-
-    // Use measured width if available, otherwise fallback
     const nodeWidth = node.width ?? MIN_NODE_WIDTH;
 
     return {
@@ -1556,250 +1015,102 @@ const App = () => {
     };
   }, [nodes, reactFlowInstance]);
 
-  const onConnectStart = useCallback((_: unknown, { nodeId, handleId, handleType }: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
-    setConnectStartParams({ nodeId, handleId, handleType });
-    if (nodeId && handleId && handleType) {
-      const type = handleType === "source"
-        ? getPortTypeForHandle(nodeId, handleId, "source")
-        : getPortTypeForHandle(nodeId, handleId, "target");
-      setConnectionLineColor(getPortTypeColor(type));
-      setConnectionLineIsInvalid(false);
-    } else {
-      setConnectionLineColor(undefined);
-      setConnectionLineIsInvalid(false);
+  // ========== Edge selection ==========
+
+  const getViewport = useCallback(() => {
+    const wrapper = reactFlowWrapper.current;
+    if (wrapper) {
+      const rfInstance = wrapper.querySelector('.react-flow__viewport');
+      if (rfInstance) {
+        const transform = rfInstance.getAttribute('style');
+        const match = transform?.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/);
+        if (match) {
+          return {
+            x: parseFloat(match[1]),
+            y: parseFloat(match[2]),
+            zoom: parseFloat(match[3]),
+          };
+        }
+      }
     }
-  }, [getPortTypeForHandle]);
+    return { x: 0, y: 0, zoom: 1 };
+  }, []);
 
-    const onConnectEnd = useCallback(
-      (event: MouseEvent | TouchEvent) => {
-        if (connectSucceededRef.current) {
-          connectSucceededRef.current = false;
-          return;
-        }
-        const target = event.target;
-        const isPane =
-          target instanceof HTMLElement
-            ? Boolean(target.closest(".react-flow__pane"))
-            : false;
-        const isHandle =
-          target instanceof HTMLElement
-            ? Boolean(target.closest(".react-flow__handle"))
-            : false;
-        const isNode =
-          target instanceof HTMLElement
-            ? Boolean(target.closest(".react-flow__node"))
-            : false;
-        const isEdge =
-          target instanceof HTMLElement
-            ? Boolean(target.closest(".react-flow__edge"))
-            : false;
-        const isEmptySpace = isPane && !isHandle && !isNode && !isEdge;
+  const findIntersectingEdges = useCallback((
+    box: { startX: number; startY: number; endX: number; endY: number },
+    viewport: { x: number; y: number; zoom: number }
+  ): string[] => {
+    const toFlowCoord = (screenX: number, screenY: number) => ({
+      x: (screenX - viewport.x) / viewport.zoom,
+      y: (screenY - viewport.y) / viewport.zoom,
+    });
 
-        if (isEmptySpace && connectStartParams?.nodeId && connectStartParams?.handleId && reactFlowInstance) {
-          const { clientX, clientY } = "changedTouches" in event ? event.changedTouches[0] : (event as MouseEvent);
+    const start = toFlowCoord(box.startX, box.startY);
+    const end = toFlowCoord(box.endX, box.endY);
 
-          const position = reactFlowInstance.screenToFlowPosition({
-            x: clientX,
-          y: clientY,
-        });
+    const rx = Math.min(start.x, end.x);
+    const ry = Math.min(start.y, end.y);
+    const rw = Math.abs(end.x - start.x);
+    const rh = Math.abs(end.y - start.y);
 
-        const sourceRole = connectStartParams.handleType || "source";
-        const sourcePortType = getPortTypeForHandle(
-          connectStartParams.nodeId,
-          connectStartParams.handleId,
-          sourceRole
-        );
-        setSmartConnectMenu({
-          isOpen: true,
-          position: { x: clientX, y: clientY },
-          flowPosition: position,
-          source: {
-            nodeId: connectStartParams.nodeId,
-            handleId: connectStartParams.handleId,
-            type: connectStartParams.handleType || "source",
-          },
-          sourcePortKind: sourcePortType?.kind,
-        });
+    if (rw < 5 && rh < 5) return [];
+
+    const intersectingEdgeIds: string[] = [];
+
+    edges.forEach((edge) => {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      const targetNode = nodes.find((n) => n.id === edge.target);
+
+      if (!sourceNode || !targetNode) return;
+
+      const sourceX = sourceNode.position.x + (sourceNode.width || MIN_NODE_WIDTH);
+      const sourceParamCount = Object.keys(sourceNode.data.metadata?.params_schema ?? {}).length;
+      const sourceMaxPorts = Math.max(sourceNode.data.input_ports.length, sourceNode.data.output_ports.length);
+      const sourceFallbackHeight = computeNodeDimensions(sourceMaxPorts, { paramCount: sourceParamCount }).height;
+      const sourceY = sourceNode.position.y + (sourceNode.height || sourceFallbackHeight) / 2;
+      const targetX = targetNode.position.x;
+      const targetParamCount = Object.keys(targetNode.data.metadata?.params_schema ?? {}).length;
+      const targetMaxPorts = Math.max(targetNode.data.input_ports.length, targetNode.data.output_ports.length);
+      const targetFallbackHeight = computeNodeDimensions(targetMaxPorts, { paramCount: targetParamCount }).height;
+      const targetY = targetNode.position.y + (targetNode.height || targetFallbackHeight) / 2;
+
+      if (bezierIntersectsRect(sourceX, sourceY, targetX, targetY, rx, ry, rw, rh)) {
+        intersectingEdgeIds.push(edge.id);
       }
+    });
 
-      setConnectStartParams(null);
-      setConnectionLineColor(undefined);
-      setConnectionLineIsInvalid(false);
-    },
-    [connectStartParams, reactFlowInstance, getPortTypeForHandle]
-  );
+    return intersectingEdgeIds;
+  }, [edges, nodes]);
 
-  const handleSmartConnectSelect = useCallback(
-    (nodeType: NodeTypeDefinition) => {
-      if (!smartConnectMenu.source) return;
+  const updatePreviewEdges = useCallback((box: { startX: number; startY: number; endX: number; endY: number }) => {
+    const viewport = getViewport();
+    const intersectingEdges = findIntersectingEdges(box, viewport);
+    setPreviewEdgeIds(intersectingEdges);
+  }, [getViewport, findIntersectingEdges]);
 
-      takeSnapshot();
+  const handleSelectionEnd = useCallback(() => {
+    if (previewEdgeIds.length > 0) {
+      setSelectedEdgeIds((prev) => {
+        const combined = new Set([...prev, ...previewEdgeIds]);
+        return Array.from(combined);
+      });
+      setEdges((eds) =>
+        eds.map((e) => ({
+          ...e,
+          selected: previewEdgeIds.includes(e.id) || e.selected,
+        }))
+      );
+    }
+    setSelectionBox(null);
+    setPreviewEdgeIds([]);
+    setIsSelecting(false);
+  }, [previewEdgeIds, setEdges]);
 
-      const { flowPosition, source } = smartConnectMenu;
-      const newId = `node-${nodeIdRef.current++}`;
+  // ========== Mouse handlers ==========
 
-      const compatiblePort = findCompatiblePortForSmartConnect(nodeType, source);
-      if (!compatiblePort) {
-        showConnectionMessage("No compatible ports found for this node");
-        setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
-        return;
-      }
-
-      // Create new node
-      const params: Record<string, unknown> = {};
-      const defaults = nodeType.params_defaults ?? {};
-      for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
-        params[key] = schema.default ?? defaults[key] ?? "";
-      }
-      const { input_ports, input_port_types } = getInitialPorts(nodeType);
-      const inputValues = buildDefaultInputValues(nodeType);
-      const seededInputValues =
-        nodeType.node_type === "core.container.make_array"
-          ? { ...inputValues, item_0: null }
-          : inputValues;
-
-      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
-      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
-
-      // Calculate position to align the connecting handle with the drop location
-      let xOffset = 0;
-      let yOffset = 0;
-
-      // Header ~50px, Port stride ~26px, Handle center +10px
-      const matchedPortIndex = source.type === "source"
-        ? input_ports.indexOf(compatiblePort.targetHandle!)
-        : nodeType.output_ports.indexOf(compatiblePort.sourceHandle!);
-      const resolvedPortIndex = matchedPortIndex >= 0 ? matchedPortIndex : 0;
-      const portYOffset = HEADER_HEIGHT + resolvedPortIndex * PORT_ROW_HEIGHT + PORT_ROW_HEIGHT / 2;
-
-      if (source.type === "source") {
-        // Dragging from Source (Output) -> Connect to New Node's Input (Left side)
-        xOffset = 0;
-        yOffset = portYOffset;
-      } else {
-        // Dragging from Target (Input) -> Connect to New Node's Output (Right side)
-        xOffset = initialWidth;
-        yOffset = portYOffset;
-      }
-
-      const newNode: Node<BlueprintNodeData> = {
-        id: newId,
-        type: "blueprint",
-        position: { x: flowPosition.x - xOffset, y: flowPosition.y - yOffset },
-        data: {
-          displayName: nodeType.display_name,
-          nodeType: nodeType.node_type,
-          description: nodeType.description,
-          input_ports,
-          output_ports: nodeType.output_ports,
-          input_port_types,
-          output_port_types: nodeType.output_port_types,
-          params,
-          inputValues: seededInputValues,
-          breakpoint: false,
-          metadata: nodeType,
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          width: initialWidth,
-          height: initialHeight,
-          executionLogs: [],
-          onInterrupt: handleInterruptNode,
-          onPortHover: setHoveredPort,
-          onInputValueChange: handleInputValueChange,
-          onAddInputPort: handleAddInputPort,
-        },
-      };
-
-      setNodes((nds) => nds.concat(newNode));
-
-      // Create connection
-      // If dragging from source (output), connect to first input of new node
-      // If dragging from target (input), connect from first output of new node
-      let sourceId, sourceHandle, targetId, targetHandle;
-
-      if (source.type === "source") {
-        sourceId = source.nodeId;
-        sourceHandle = source.handleId;
-        targetId = newId;
-        targetHandle = compatiblePort.targetHandle; // Connect to compatible input
-      } else {
-        sourceId = newId;
-        sourceHandle = compatiblePort.sourceHandle; // Connect from compatible output
-        targetId = source.nodeId;
-        targetHandle = source.handleId;
-      }
-
-      if (sourceHandle && targetHandle) {
-        const sourceType = compatiblePort.sourceType;
-        const targetType = compatiblePort.targetType;
-
-        if (!arePortTypesCompatible(sourceType, targetType)) {
-          showConnectionMessage(
-            `Incompatible: ${formatPortTypeLabel(sourceType)} -> ${formatPortTypeLabel(targetType)}`
-          );
-        } else {
-          const edgeColor = getPortTypeColor(sourceType);
-          setEdges((eds) => {
-            const filtered =
-              source.type === "target"
-                ? eds.filter(
-                    (edge) =>
-                      !(edge.target === targetId && edge.targetHandle === targetHandle)
-                  )
-                : eds;
-            return addEdge(
-              {
-                source: sourceId,
-                sourceHandle: sourceHandle,
-                target: targetId,
-                targetHandle: targetHandle,
-                type: "default",
-                animated: false,
-                style: { stroke: edgeColor, strokeWidth: 2 },
-              },
-              filtered
-            );
-          });
-        }
-      }
-
-      setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }));
-    },
-      [
-        smartConnectMenu,
-        buildDefaultInputValues,
-        getInitialPorts,
-        handleDeleteNode,
-        handleRunFromNode,
-        handleClearNodeCache,
-        handleInterruptNode,
-        handleInputValueChange,
-        handleAddInputPort,
-        setNodes,
-        setEdges,
-        arePortTypesCompatible,
-        findCompatiblePortForSmartConnect,
-        showConnectionMessage,
-      ]
-    );
-
-  const selectedNodes = useMemo(
-    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
-    [nodes, selectedNodeIds]
-  );
-
-  const actualLeftWidth = leftPanelCollapsed ? 0 : leftPanelWidth;
-  const actualRightWidth = rightPanelCollapsed ? 0 : rightPanelWidth;
-
-  // Track selection box via mouse events
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only track left mouse button for selection
     if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       const target = e.target;
-      // Only start selection on the pane background
       if (target instanceof HTMLElement && target.classList.contains('react-flow__pane')) {
         const rect = reactFlowWrapper.current?.getBoundingClientRect();
         if (rect) {
@@ -1825,7 +1136,6 @@ const App = () => {
           endY: e.clientY - rect.top,
         };
         setSelectionBox(newBox);
-        // Update preview edges in real-time
         updatePreviewEdges(newBox);
       }
     }
@@ -1837,6 +1147,8 @@ const App = () => {
     }
   }, [isSelecting, handleSelectionEnd]);
 
+  // ========== Drag and drop ==========
+
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -1847,16 +1159,10 @@ const App = () => {
       event.preventDefault();
 
       const typeData = event.dataTransfer.getData("application/reactflow");
-      if (typeof typeData === "undefined" || !typeData) {
-        return;
-      }
+      if (!typeData) return;
 
       const nodeType: NodeTypeDefinition = JSON.parse(typeData);
-
-      // check if the dropped element is valid
-      if (typeof nodeType === "undefined" || !nodeType) {
-        return;
-      }
+      if (!nodeType) return;
 
       const position = reactFlowInstance?.screenToFlowPosition({
         x: event.clientX,
@@ -1867,460 +1173,281 @@ const App = () => {
 
       takeSnapshot();
 
-      const params: Record<string, unknown> = {};
-      const defaults = nodeType.params_defaults ?? {};
-      for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
-        params[key] = schema.default ?? defaults[key] ?? "";
-      }
-      const { input_ports, input_port_types } = getInitialPorts(nodeType);
-      const inputValues = buildDefaultInputValues(nodeType);
-      const seededInputValues =
-        nodeType.node_type === "core.container.make_array"
-          ? { ...inputValues, item_0: null }
-          : inputValues;
-
-      const id = `node-${nodeIdRef.current++}`;
-
-      // Calculate initial size based on ports
-      const extraInputRows = nodeType.node_type === "core.container.make_array" ? 1 : 0;
-      const maxPorts = Math.max(input_ports.length + extraInputRows, nodeType.output_ports.length);
-      const paramCount = Object.keys(nodeType.params_schema ?? {}).length;
-      const { width: initialWidth, height: initialHeight } = computeNodeDimensions(maxPorts, { paramCount });
-
-      const newNode: Node<BlueprintNodeData> = {
-        id,
-        type: "blueprint",
-        position,
-        data: {
-          displayName: nodeType.display_name,
-          nodeType: nodeType.node_type,
-          description: nodeType.description,
-          input_ports,
-          output_ports: nodeType.output_ports,
-          input_port_types,
-          output_port_types: nodeType.output_port_types,
-          params,
-          inputValues: seededInputValues,
-          breakpoint: false,
-          metadata: nodeType,
-          onDelete: handleDeleteNode,
-          onRunSelection: handleRunFromNode,
-          onClearCache: handleClearNodeCache,
-          onInterrupt: handleInterruptNode,
-          onPortHover: setHoveredPort,
-          onInputValueChange: handleInputValueChange,
-          onAddInputPort: handleAddInputPort,
-          width: initialWidth,
-          height: initialHeight,
-          executionLogs: [],
-        },
-      };
-
+      const newNode = createNodeFromType(nodeType, position, nodeHandlers);
       setNodes((nds) => nds.concat(newNode));
     },
-    [
-      reactFlowInstance,
-      setNodes,
-      buildDefaultInputValues,
-      getInitialPorts,
-      handleDeleteNode,
-      handleRunFromNode,
-      handleClearNodeCache,
-      handleInterruptNode,
-      handleInputValueChange,
-      handleAddInputPort,
-    ]
+    [reactFlowInstance, createNodeFromType, nodeHandlers, setNodes, takeSnapshot]
   );
+
+  // ========== Highlight handler ==========
+
+  const handleHighlightNodes = useCallback((nodeIds: string[]) => {
+    setHighlightedNodeIds(nodeIds);
+  }, []);
+
+  // ========== Render ==========
 
   return (
     <PopupProvider>
       <ReactFlowProvider>
         <div className="app-shell">
-        {headerTab === "graph-editor" ? (
-          <div
-            className="reactflow-fullpage"
-            ref={reactFlowWrapper}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onInit={setReactFlowInstance}
-              onConnect={handleConnect}
-              onConnectStart={onConnectStart}
-              onConnectEnd={onConnectEnd}
-              onNodeDragStart={() => takeSnapshot()}
-              onSelectionDragStart={() => takeSnapshot()}
-              onSelectionChange={handleSelectionChange}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              fitView
-              isValidConnection={isValidConnection}
-              connectionLineStyle={{
-                stroke: connectionLineColor || "#4a9eff",
-                strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
-                strokeDasharray: connectionLineDash,
-              }}
-              connectionLineComponent={TypeAwareConnectionLine}
-              attributionPosition="bottom-left"
-              selectionMode={SelectionMode.Partial}
-              selectionOnDrag
-              panOnDrag={[1, 2]}
-              selectNodesOnDrag
-              edgesFocusable
-              edgesUpdatable
-              elementsSelectable
+          {headerTab === "graph-editor" ? (
+            <div
+              className="reactflow-fullpage"
+              ref={reactFlowWrapper}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
             >
-            <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
-            <Controls
-              showZoom
-              showFitView
-              showInteractive={false}
-              position="bottom-left"
-              style={{ left: actualLeftWidth }}
-            />
-            <MiniMap
-              nodeColor={(node) => {
-                const status = nodeStatuses.get(node.id);
-                if (status === "running") return "#58a6ff";
-                if (status === "completed") return "#3fb950";
-                if (status === "error") return "#f85149";
-                return "#4a9eff";
-              }}
-              maskColor="rgba(0,0,0,0.8)"
-              style={{
-                backgroundColor: "rgba(20,25,35,0.9)",
-                right: actualRightWidth,
-              }}
-            />
-          </ReactFlow>
-          {connectionMessage && (
-            <div className={`connection-toast ${connectionMessage.tone}`}>
-              <span className="connection-toast-dot" />
-              <span className="connection-toast-text">{connectionMessage.text}</span>
-            </div>
-          )}
-        </div>
-        ) : (
-          <div className="outputs-fullpage">
-            <OutputsView nodes={nodes} outputs={outputs} />
-          </div>
-        )}
-
-        <header className="overlay-header">
-          <div className="header-left">
-            <div className="header-tabs">
-              <button
-                type="button"
-                className={`header-tab ${headerTab === "graph-editor" ? "active" : ""}`}
-                onClick={() => setHeaderTab("graph-editor")}
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onInit={setReactFlowInstance}
+                onConnect={handleConnect}
+                onConnectStart={onConnectStart}
+                onConnectEnd={onConnectEnd}
+                onNodeDragStart={() => takeSnapshot()}
+                onSelectionDragStart={() => takeSnapshot()}
+                onSelectionChange={handleSelectionChange}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                fitView
+                isValidConnection={isValidConnection}
+                connectionLineStyle={{
+                  stroke: connectionLineColor || "#4a9eff",
+                  strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+                  strokeDasharray: connectionLineDash,
+                }}
+                connectionLineComponent={TypeAwareConnectionLine}
+                attributionPosition="bottom-left"
+                selectionMode={SelectionMode.Partial}
+                selectionOnDrag
+                panOnDrag={[1, 2]}
+                selectNodesOnDrag
+                edgesFocusable
+                edgesUpdatable
+                elementsSelectable
               >
-                Graph Editor
-              </button>
-              <button
-                type="button"
-                className={`header-tab ${headerTab === "outputs" ? "active" : ""}`}
-                onClick={() => setHeaderTab("outputs")}
-              >
-                Outputs
-              </button>
-            </div>
-            {headerTab === "graph-editor" && (
-              <div className="outputs-pills header-pills">
-                <span className="pill">{graphSummary.nodeCount} node{graphSummary.nodeCount === 1 ? "" : "s"}</span>
-                <span className="pill">{graphSummary.edgeCount} edge{graphSummary.edgeCount === 1 ? "" : "s"}</span>
-                <span className="pill">{graphSummary.selectedCount} selected</span>
-              </div>
-            )}
-            {headerTab === "outputs" && (
-              <div className="outputs-pills header-pills">
-                <span className="pill">{outputsSummary.images} image{outputsSummary.images === 1 ? "" : "s"}</span>
-                <span className="pill">{outputsSummary.streams} stream{outputsSummary.streams === 1 ? "" : "s"}</span>
-                <span className="pill">{outputsSummary.values} value{outputsSummary.values === 1 ? "" : "s"}</span>
-              </div>
-            )}
-            {headerTab === "graph-editor" && isRunning && (
-              <div className="header-stats">
-                <span className="stat-badge running">
-                  <span className="pulse-dot" />
-                  {Math.round(progress * 100)}%
-                </span>
-              </div>
-            )}
-          </div>
-          {headerTab === "graph-editor" && (
-            <div className="header-controls">
-              <ConnectionIcon connected={isConnected} />
-              <button
-                className="icon-btn primary"
-                onClick={() => handleRunGraph("full")}
-                disabled={nodes.length === 0}
-                title="Run Graph"
-              >
-                <PlayIcon />
-                {isRunning && <span className="btn-spinner" />}
-              </button>
-            <button
-              className="icon-btn danger"
-              onClick={handleInterruptAll}
-              disabled={!isRunning || !executionId}
-              title="Interrupt all running nodes"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="1.5" />
-              </svg>
-            </button>
-            <button
-              className="icon-btn clear-cache-btn"
-              onClick={handleClearBackendCache}
-              disabled={isRunning}
-              title="Clear Backend Cache"
-            >
-              <svg width="16" height="16" viewBox="0 0 48 48" fill="none">
-                <g transform="translate(4 4) scale(0.8333)">
-                  <path d="M44.7818 24.1702L31.918 7.09938L14.1348 20.5L27.5 37L30.8556 34.6644L44.7818 24.1702Z" fill="currentColor" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
-                  <path d="M27.4998 37L23.6613 40.0748L13.0978 40.074L10.4973 36.6231L4.06543 28.0876L14.4998 20.2248" stroke="currentColor" strokeWidth="4.30201" strokeLinejoin="round" />
-                  <path d="M13.2056 40.0721L44.5653 40.072" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
-                </g>
-              </svg>
-            </button>
-              {error && <span className="error-indicator" title={error}>!</span>}
-            </div>
-          )}
-        </header>
-
-        {headerTab === "graph-editor" && (
-          <>
-            <aside
-              className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
-              style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
-            >
-              {!leftPanelCollapsed && (
-                <>
-                  <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
-                  <div
-                    className="resize-handle right"
-                    onMouseDown={() => setIsResizingLeft(true)}
-                  />
-                </>
-              )}
-            </aside>
-
-            <button
-              className="panel-collapse-btn left"
-              style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
-              onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
-              title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
-            >
-              {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
-            </button>
-
-            <aside
-              className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
-              style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
-            >
-              {!rightPanelCollapsed && (
-                <>
-                  <div
-                    className="resize-handle left"
-                    onMouseDown={() => setIsResizingRight(true)}
-                  />
-                  <div className="right-panel-content">
-                    {/* Right panel tabs */}
-                    <div className="right-panel-tabs">
-                      <button
-                        type="button"
-                        className={`right-panel-tab ${rightPanelTab === "inspector" ? "active" : ""}`}
-                        onClick={() => setRightPanelTab("inspector")}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
-                        </svg>
-                        Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
-                      </button>
-                      <button
-                        type="button"
-                        className={`right-panel-tab ${rightPanelTab === "execution" ? "active" : ""}`}
-                        onClick={() => setRightPanelTab("execution")}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                        Execution {trace.length > 0 && `(${trace.length})`}
-                      </button>
-                    </div>
-
-                    {/* Multi-selection toolbar */}
-                    {(selectedNodeIds.length > 1 || selectedEdgeIds.length > 0) && (
-                      <div className="multi-select-toolbar">
-                        <span className="selection-count">
-                          {selectedNodeIds.length > 0 && `${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""}`}
-                          {selectedNodeIds.length > 0 && selectedEdgeIds.length > 0 && ", "}
-                          {selectedEdgeIds.length > 0 && `${selectedEdgeIds.length} edge${selectedEdgeIds.length !== 1 ? "s" : ""}`}
-                          {" "}selected
-                        </span>
-                        <div className="toolbar-actions">
-                          {/* Only show duplicate/copy for nodes */}
-                          {selectedNodeIds.length > 0 && (
-                            <>
-                              <button
-                                type="button"
-                                className="toolbar-btn"
-                                onClick={handleDuplicateSelected}
-                                title="Duplicate (Ctrl+D)"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                                </svg>
-                                Duplicate
-                              </button>
-                              <button
-                                type="button"
-                                className="toolbar-btn"
-                                onClick={handleCopy}
-                                title="Copy (Ctrl+C)"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                                </svg>
-                                Copy
-                              </button>
-                            </>
-                          )}
-                          <button
-                            type="button"
-                            className="toolbar-btn danger"
-                            onClick={handleDeleteSelected}
-                            title="Delete (Del)"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-                            </svg>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Tab content */}
-                    <div className="right-panel-tab-content">
-                      {rightPanelTab === "inspector" && (
-                        <NodeInspector
-                          nodes={selectedNodes}
-                          onParamChange={handleParamChange}
-                          onDelete={handleDeleteNode}
-                          onDuplicate={(nodeId) => {
-                            setSelectedNodeIds([nodeId]);
-                            setSelectedNodeId(nodeId);
-                            setTimeout(() => handleDuplicateSelected(), 0);
-                          }}
-                          hoveredPort={hoveredPort}
-                          onOutputHover={(info) => setHoveredPort(info)}
-                        />
-                      )}
-                      {rightPanelTab === "execution" && (
-                        <LogPanel
-                          trace={trace}
-                          outputs={outputs}
-                          error={error}
-                          stats={stats}
-                          levels={levels}
-                          isRunning={isRunning}
-                          currentNodeId={currentNodeId}
-                          nodeStatuses={nodeStatuses}
-                          progress={progress}
-                          onHighlightNodes={handleHighlightNodes}
-                        />
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </aside>
-
-            <button
-              className="panel-collapse-btn right"
-              style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
-              onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-              title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
-            >
-              {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
-            </button>
-          </>
-        )}
-
-        {/* Smart Connect Line */}
-        {smartConnectMenu.isOpen && smartConnectMenu.source && (
-          <svg
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              pointerEvents: "none",
-              zIndex: 999,
-              overflow: "visible",
-            }}
-          >
-            {(() => {
-              const startFlow = getHandlePosition(
-                smartConnectMenu.source.nodeId,
-                smartConnectMenu.source.handleId,
-                smartConnectMenu.source.type
-              );
-              if (!startFlow || !reactFlowInstance) return null;
-
-              // Convert start point to screen coordinates
-              const start = reactFlowInstance.flowToScreenPosition(startFlow);
-              const end = smartConnectMenu.position;
-
-              const isSource = smartConnectMenu.source.type === "source";
-              const startX = start.x;
-              const startY = start.y;
-              const endX = end.x;
-              const endY = end.y;
-
-              const dist = Math.abs(endX - startX) * 0.5;
-              const cp1x = isSource ? startX + dist : startX - dist;
-              const cp1y = startY;
-              const cp2x = isSource ? endX - dist : endX + dist;
-              const cp2y = endY;
-
-              const path = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
-
-              return (
-                <path
-                  d={path}
-                  stroke="#4a9eff"
-                  strokeWidth="2"
-                  fill="none"
-                  strokeDasharray="5,5"
-                  className="smart-connect-line"
+                <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
+                <Controls
+                  showZoom
+                  showFitView
+                  showInteractive={false}
+                  position="bottom-left"
+                  style={{ left: actualLeftWidth }}
                 />
-              );
-            })()}
-          </svg>
-        )}
+                <MiniMap
+                  nodeColor={(node) => {
+                    const status = nodeStatuses.get(node.id);
+                    if (status === "running") return "#58a6ff";
+                    if (status === "completed") return "#3fb950";
+                    if (status === "error") return "#f85149";
+                    return "#4a9eff";
+                  }}
+                  maskColor="rgba(0,0,0,0.8)"
+                  style={{
+                    backgroundColor: "rgba(20,25,35,0.9)",
+                    right: actualRightWidth,
+                  }}
+                />
+              </ReactFlow>
+              <ConnectionToast message={connectionMessage} />
+            </div>
+          ) : (
+            <div className="outputs-fullpage">
+              <OutputsView nodes={nodes} outputs={outputs} />
+            </div>
+          )}
 
-        {/* Smart Connect Modal */}
-        <SmartConnectModal
-          isOpen={smartConnectMenu.isOpen}
-          position={smartConnectMenu.position}
-          onClose={() => setSmartConnectMenu((prev) => ({ ...prev, isOpen: false }))}
-          onSelect={handleSmartConnectSelect}
-          nodeTypes={smartConnectNodeTypes}
-          sourceHandleType={smartConnectMenu.source?.type}
-          sourcePortKind={smartConnectMenu.sourcePortKind}
-        />
-      </div>
+          <AppHeader
+            headerTab={headerTab}
+            onTabChange={setHeaderTab}
+            graphSummary={graphSummary}
+            outputsSummary={outputsSummary}
+            isRunning={isRunning}
+            isConnected={isConnected}
+            progress={progress}
+            error={error}
+            executionId={executionId}
+            nodesCount={nodes.length}
+            onRunGraph={() => handleRunGraph("full")}
+            onInterruptAll={handleInterruptAll}
+            onClearCache={handleClearBackendCache}
+          />
+
+          {headerTab === "graph-editor" && (
+            <>
+              <aside
+                className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
+                style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
+              >
+                {!leftPanelCollapsed && (
+                  <>
+                    <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
+                    <div
+                      className="resize-handle right"
+                      onMouseDown={startResizingLeft}
+                    />
+                  </>
+                )}
+              </aside>
+
+              <button
+                className="panel-collapse-btn left"
+                style={{ left: leftPanelCollapsed ? 0 : leftPanelWidth }}
+                onClick={toggleLeftPanel}
+                title={leftPanelCollapsed ? "Expand Nodes" : "Collapse Nodes"}
+              >
+                {leftPanelCollapsed ? <ChevronRight /> : <ChevronLeft />}
+              </button>
+
+              <aside
+                className={`side-panel right-panel ${rightPanelCollapsed ? "collapsed" : ""}`}
+                style={{ width: rightPanelCollapsed ? 0 : rightPanelWidth }}
+              >
+                {!rightPanelCollapsed && (
+                  <>
+                    <div
+                      className="resize-handle left"
+                      onMouseDown={startResizingRight}
+                    />
+                    <div className="right-panel-content">
+                      <div className="right-panel-tabs">
+                        <button
+                          type="button"
+                          className={`right-panel-tab ${rightPanelTab === "inspector" ? "active" : ""}`}
+                          onClick={() => setRightPanelTab("inspector")}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+                          </svg>
+                          Inspector {selectedNodeIds.length > 0 && `(${selectedNodeIds.length})`}
+                        </button>
+                        <button
+                          type="button"
+                          className={`right-panel-tab ${rightPanelTab === "execution" ? "active" : ""}`}
+                          onClick={() => setRightPanelTab("execution")}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                          Execution {trace.length > 0 && `(${trace.length})`}
+                        </button>
+                      </div>
+
+                      {(selectedNodeIds.length > 1 || selectedEdgeIds.length > 0) && (
+                        <div className="multi-select-toolbar">
+                          <span className="selection-count">
+                            {selectedNodeIds.length > 0 && `${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""}`}
+                            {selectedNodeIds.length > 0 && selectedEdgeIds.length > 0 && ", "}
+                            {selectedEdgeIds.length > 0 && `${selectedEdgeIds.length} edge${selectedEdgeIds.length !== 1 ? "s" : ""}`}
+                            {" "}selected
+                          </span>
+                          <div className="toolbar-actions">
+                            {selectedNodeIds.length > 0 && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="toolbar-btn"
+                                  onClick={handleDuplicateSelected}
+                                  title="Duplicate (Ctrl+D)"
+                                >
+                                  <CopyIcon />
+                                  Duplicate
+                                </button>
+                                <button
+                                  type="button"
+                                  className="toolbar-btn"
+                                  onClick={handleCopy}
+                                  title="Copy (Ctrl+C)"
+                                >
+                                  <CopyIcon />
+                                  Copy
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              className="toolbar-btn danger"
+                              onClick={handleDeleteSelected}
+                              title="Delete (Del)"
+                            >
+                              <DeleteIcon />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="right-panel-tab-content">
+                        {rightPanelTab === "inspector" && (
+                          <NodeInspector
+                            nodes={selectedNodes}
+                            onParamChange={handleParamChange}
+                            onDelete={handleDeleteNode}
+                            onDuplicate={(nodeId) => {
+                              setSelectedNodeIds([nodeId]);
+                              setSelectedNodeId(nodeId);
+                              setTimeout(() => handleDuplicateSelected(), 0);
+                            }}
+                            hoveredPort={hoveredPort}
+                            onOutputHover={(info) => setHoveredPort(info)}
+                          />
+                        )}
+                        {rightPanelTab === "execution" && (
+                          <LogPanel
+                            trace={trace}
+                            outputs={outputs}
+                            error={error}
+                            stats={stats}
+                            levels={levels}
+                            isRunning={isRunning}
+                            currentNodeId={currentNodeId}
+                            nodeStatuses={nodeStatuses}
+                            progress={progress}
+                            onHighlightNodes={handleHighlightNodes}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </aside>
+
+              <button
+                className="panel-collapse-btn right"
+                style={{ right: rightPanelCollapsed ? 0 : rightPanelWidth }}
+                onClick={toggleRightPanel}
+                title={rightPanelCollapsed ? "Expand Logs" : "Collapse Logs"}
+              >
+                {rightPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
+              </button>
+            </>
+          )}
+
+          <SmartConnectLine
+            isOpen={smartConnectMenu.isOpen}
+            source={smartConnectMenu.source}
+            position={smartConnectMenu.position}
+            getHandlePosition={getHandlePosition}
+            reactFlowInstance={reactFlowInstance}
+          />
+
+          <SmartConnectModal
+            isOpen={smartConnectMenu.isOpen}
+            position={smartConnectMenu.position}
+            onClose={closeSmartConnect}
+            onSelect={handleSmartConnectSelect}
+            nodeTypes={smartConnectNodeTypes}
+            sourceHandleType={smartConnectMenu.source?.type}
+            sourcePortKind={smartConnectMenu.sourcePortKind}
+          />
+        </div>
       </ReactFlowProvider>
     </PopupProvider>
   );

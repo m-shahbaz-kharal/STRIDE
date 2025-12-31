@@ -151,3 +151,12 @@ export const bezierIntersectsRect = (
 
   return false;
 };
+
+/**
+ * Escape a string for use as a CSS selector ID.
+ * Handles special characters that would otherwise break querySelector.
+ */
+export const escapeId = (value: string): string =>
+  typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
