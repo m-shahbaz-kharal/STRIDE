@@ -28,9 +28,9 @@ const extractNodeId = (outputKey: string): string | null => {
   return null;
 };
 
-const LogPanel = ({ 
-  trace, 
-  outputs, 
+const LogPanel = ({
+  trace,
+  outputs,
   error,
   errorCode,
   stats = null,
@@ -78,8 +78,8 @@ const LogPanel = ({
           {isRunning && (
             <div className="execution-progress">
               <div className="progress-bar">
-                <div 
-                  className="progress-fill" 
+                <div
+                  className="progress-fill"
                   style={{ width: `${progress * 100}%` }}
                 />
               </div>
@@ -142,8 +142,8 @@ const LogPanel = ({
             {hasOutputs ? (
               <div className="output-grid">
                 {outputEntries.map(([key, value]) => (
-                  <div 
-                    key={key} 
+                  <div
+                    key={key}
                     className="output-item hoverable"
                     onMouseEnter={() => handleOutputHover(key)}
                     onMouseLeave={() => handleOutputHover(null)}
@@ -178,4 +178,5 @@ const LogPanel = ({
   );
 };
 
-export default LogPanel;
+// Memoize to prevent re-renders when unrelated state changes
+export default React.memo(LogPanel);

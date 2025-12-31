@@ -78,10 +78,10 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
     return { images: img, values: val, streams: Array.from(streamIds) };
   }, [nodes, outputs]);
 
-  // Heartbeat refresh for stream snapshots
+  // Heartbeat refresh for stream snapshots (1000ms for better performance)
   useEffect(() => {
     if (streams.length === 0) return;
-    const interval = window.setInterval(() => setRefreshToken((prev) => prev + 1), 500);
+    const interval = window.setInterval(() => setRefreshToken((prev) => prev + 1), 1000);
     return () => window.clearInterval(interval);
   }, [streams]);
 
@@ -247,4 +247,5 @@ const OutputsView: React.FC<OutputsViewProps> = ({ nodes, outputs }) => {
   );
 };
 
-export default OutputsView;
+// Memoize to prevent re-renders when graph editor state changes
+export default React.memo(OutputsView);

@@ -1,6 +1,16 @@
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { NodeTypeDefinition } from "../types";
 import NodePreview from "./NodePreview";
+
+// Debounce hook for search input
+const useDebouncedValue = <T,>(value: T, delay: number): T => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+};
 
 type NodePaletteProps = {
   nodeTypes: NodeTypeDefinition[];
@@ -47,8 +57,11 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
   const [hoveredNode, setHoveredNode] = useState<NodeTypeDefinition | null>(null);
   const dragPreviewRef = useRef<HTMLDivElement>(null);
 
+  // Debounce search query by 150ms to avoid filtering on every keystroke
+  const debouncedQuery = useDebouncedValue(query, 150);
+
   const filteredNodeTypes = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = debouncedQuery.trim().toLowerCase();
     if (!normalizedQuery) {
       return nodeTypes;
     }
@@ -56,7 +69,7 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
       const searchableValue = `${nodeType.display_name} ${nodeType.node_type} ${nodeType.description}`.toLowerCase();
       return searchableValue.includes(normalizedQuery);
     });
-  }, [nodeTypes, query]);
+  }, [nodeTypes, debouncedQuery]);
 
   // Group nodes by category
   const categorizedNodes = useMemo(() => {
@@ -179,4 +192,5 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
   );
 };
 
-export default NodePalette;
+// Memoize to prevent re-renders when graph state changes
+export default React.memo(NodePalette);

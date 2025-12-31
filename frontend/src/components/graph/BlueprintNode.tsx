@@ -596,4 +596,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   );
 };
 
-export default BlueprintNode;
+// Memoize to prevent re-renders when other nodes change
+// Only re-render when this node's data, edges, or selection state changes
+export default React.memo(BlueprintNode, (prevProps, nextProps) => {
+  // Check if node data changed
+  if (prevProps.data !== nextProps.data) return false;
+  if (prevProps.id !== nextProps.id) return false;
+  if (prevProps.selected !== nextProps.selected) return false;
+  if (prevProps.dragging !== nextProps.dragging) return false;
+
+  // Deep equality for critical data fields
+  if (prevProps.data.executionStatus !== nextProps.data.executionStatus) return false;
+  if (prevProps.data.isHighlighted !== nextProps.data.isHighlighted) return false;
+  if (prevProps.data.last_outputs !== nextProps.data.last_outputs) return false;
+  if (prevProps.data.highlightedPort !== nextProps.data.highlightedPort) return false;
+
+  return true;
+});

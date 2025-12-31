@@ -253,20 +253,20 @@ STREAM_MANAGER = FL511StreamManager()
 
 
 FL511_RESOLVE_SPEC = NodeSpec(
-    type="fl511.camera.resolve",
+    type="fl511.get_stream_url",
     version="1.0.0",
-    display_name="Resolve FL511 Stream",
-    category="FL511",
-    summary="Resolve the FL511 HLS stream URL.",
+    display_name="Get FL511 Stream URL",
+    category="FL511 Camera",
+    summary="Get the HLS stream URL for a FL511 camera.",
     description="Uses a headless browser to resolve the stream URL and probe its resolution.",
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="camera_id", type=t_int(), required=False, default=2130),
+        PortSpec(name="camera", type=t_int(), required=False, default=2130),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="camera_id", type=t_int()),
+        PortSpec(name="camera", type=t_int()),
         PortSpec(name="url", type=t_string()),
         PortSpec(name="width", type=t_int()),
         PortSpec(name="height", type=t_int()),
@@ -277,9 +277,9 @@ FL511_RESOLVE_SPEC = NodeSpec(
 @register_node(FL511_RESOLVE_SPEC)
 class Fl511ResolveNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        camera_id = inputs.get("camera_id")
+        camera_id = inputs.get("camera")
         if camera_id is None:
-            camera_id = self.params.get("camera_id", 2130)
+            camera_id = self.params.get("camera", 2130)
         camera_id = int(camera_id)
         ctx.log(f"Resolving FL511 stream for camera {camera_id}")
         hls_url = _resolve_fl511_hls_url(camera_id)
@@ -287,7 +287,7 @@ class Fl511ResolveNode(NodeBase):
         ctx.log(f"Resolved stream {camera_id} at {width}x{height}")
         return {
             "control_out": None,
-            "camera_id": camera_id,
+            "camera": camera_id,
             "url": hls_url,
             "width": width,
             "height": height,
@@ -295,18 +295,18 @@ class Fl511ResolveNode(NodeBase):
 
 
 FL511_START_SPEC = NodeSpec(
-    type="fl511.stream.start",
+    type="fl511.connect",
     version="1.0.0",
-    display_name="Start FL511 Stream",
-    category="FL511",
-    summary="Start a streaming session for a camera.",
-    description="Starts a background reader and returns a stream id.",
+    display_name="Connect FL511 Stream",
+    category="FL511 Camera",
+    summary="Connect to a FL511 camera stream.",
+    description="Starts a background reader and returns a stream id for fetching frames.",
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="camera_id", type=t_int(), required=False, default=2130),
+        PortSpec(name="camera", type=t_int(), required=False, default=2130),
         PortSpec(name="url", type=t_string(), required=False, default=None),
-        PortSpec(name="target_fps", type=t_int(), required=False, default=15),
+        PortSpec(name="fps", type=t_int(), required=False, default=15),
         PortSpec(name="buffer_seconds", type=t_int(), required=False, default=4),
     ],
     outputs=[
@@ -339,20 +339,20 @@ class Fl511StartNode(NodeBase):
 
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         hls_url = inputs.get("url")
-        camera_id = inputs.get("camera_id")
+        camera_id = inputs.get("camera")
         if not hls_url:
             if camera_id is None:
-                camera_id = self.params.get("camera_id", 2130)
+                camera_id = self.params.get("camera", 2130)
             camera_id = int(camera_id)
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
-        target_fps_value = inputs.get("target_fps")
+        fps_value = inputs.get("fps")
         buffer_seconds_value = inputs.get("buffer_seconds")
-        target_fps = int(target_fps_value if target_fps_value is not None else self.params.get("target_fps", 15))
+        target_fps = int(fps_value if fps_value is not None else self.params.get("fps", 15))
         buffer_seconds = int(buffer_seconds_value if buffer_seconds_value is not None else self.params.get("buffer_seconds", 4))
 
         stream_id, worker = self._ensure_stream(str(hls_url), target_fps, buffer_seconds)
-        ctx.log(f"Started stream {stream_id} at {worker.width}x{worker.height}")
+        ctx.log(f"Connected stream {stream_id} at {worker.width}x{worker.height}")
         return {
             "control_out": None,
             "stream_id": stream_id,
@@ -363,18 +363,18 @@ class Fl511StartNode(NodeBase):
 
 
 FL511_TICK_SPEC = NodeSpec(
-    type="fl511.stream.tick",
+    type="fl511.get_frame",
     version="1.0.0",
-    display_name="Tick FL511 Stream",
-    category="FL511",
-    summary="Fetch the next buffered frame.",
-    description="Reads the latest frame from a running stream and returns a JPEG data URL.",
+    display_name="Get FL511 Frame",
+    category="FL511 Camera",
+    summary="Get the next frame from a stream.",
+    description="Reads the latest frame from a running stream and returns it as a JPEG data URL.",
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="stream_id", type=t_string(), required=False, default=None),
         PortSpec(name="timeout", type=t_float(), required=False, default=1.0),
-        PortSpec(name="jpeg_quality", type=t_int(), required=False, default=85),
+        PortSpec(name="quality", type=t_int(), required=False, default=85),
         PortSpec(name="require_frame", type=t_boolean(), required=False, default=True),
         PortSpec(name="pace", type=t_boolean(), required=False, default=True),
     ],
@@ -399,11 +399,11 @@ class Fl511TickNode(NodeBase):
         worker = STREAM_MANAGER.get_stream(str(stream_id))
 
         timeout_value = inputs.get("timeout")
-        jpeg_quality_value = inputs.get("jpeg_quality")
+        quality_value = inputs.get("quality")
         require_frame_value = inputs.get("require_frame")
         pace_value = inputs.get("pace")
         timeout = float(timeout_value if timeout_value is not None else self.params.get("timeout", 1.0))
-        jpeg_quality = int(jpeg_quality_value if jpeg_quality_value is not None else self.params.get("jpeg_quality", 85))
+        jpeg_quality = int(quality_value if quality_value is not None else self.params.get("quality", 85))
         require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", True))
         pace = bool(pace_value) if pace_value is not None else bool(self.params.get("pace", True))
 
@@ -439,11 +439,11 @@ class Fl511TickNode(NodeBase):
 
 
 FL511_STOP_SPEC = NodeSpec(
-    type="fl511.stream.stop",
+    type="fl511.disconnect",
     version="1.0.0",
-    display_name="Stop FL511 Stream",
-    category="FL511",
-    summary="Stop a running FL511 stream.",
+    display_name="Disconnect FL511 Stream",
+    category="FL511 Camera",
+    summary="Disconnect from a FL511 stream.",
     description="Stops the background stream reader and releases resources.",
     icon="camera",
     inputs=[
@@ -466,5 +466,5 @@ class Fl511StopNode(NodeBase):
         if not stream_id:
             raise ValueError("Missing required input: stream_id")
         stopped = STREAM_MANAGER.stop_stream(str(stream_id))
-        ctx.log(f"Stopped stream {stream_id}: {stopped}")
+        ctx.log(f"Disconnected stream {stream_id}: {stopped}")
         return {"control_out": None, "stopped": stopped}
