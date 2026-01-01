@@ -203,6 +203,9 @@ const NodeCard = ({
   );
 };
 
+// PERF: Memoize NodeCard to prevent re-renders when other nodes change
+const MemoizedNodeCard = React.memo(NodeCard);
+
 const NodeInspector = ({
   nodes,
   onParamChange,
@@ -246,7 +249,7 @@ const NodeInspector = ({
     <div className="inspector-panel">
       <div className="inspector-node-list">
         {nodes.map((node) => (
-          <NodeCard
+          <MemoizedNodeCard
             key={node.id}
             node={node}
             onParamChange={onParamChange}

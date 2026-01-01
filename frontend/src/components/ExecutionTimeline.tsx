@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { ExecutionTraceEntry, ExecutionStats, NodeExecutionStatus } from "../types";
 
 interface ExecutionTimelineProps {
@@ -9,6 +9,26 @@ interface ExecutionTimelineProps {
   currentNodeId: string | null;
   nodeStatuses: Map<string, NodeExecutionStatus>;
   onHighlightNodes?: (nodeIds: string[]) => void;
+}
+
+// Aggregated node data - one entry per unique node
+interface NodeSummary {
+  nodeId: string;
+  type: string;
+  executionCount: number;
+  lastDurationMs: number | undefined;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastOutputs: Record<string, unknown>;
+  lastLogs: string[];
+  status: NodeExecutionStatus;
+  isActive: boolean;
+  fromCache: boolean;
+  hasErrors: boolean;
+  level: number | undefined;
+  normalizedWidth: number;
+  // All executions for the log dialog
+  executions: ExecutionTraceEntry[];
 }
 
 const getStatusColor = (status: NodeExecutionStatus | undefined): string => {
@@ -33,6 +53,226 @@ const formatDuration = (ms: number): string => {
   return `${(ms / 1000).toFixed(2)}s`;
 };
 
+// Memoized node entry component - shows all data like before
+const NodeEntry = React.memo(({
+  node,
+  onHover,
+  onViewLog
+}: {
+  node: NodeSummary;
+  onHover: (nodeId: string | null) => void;
+  onViewLog: (node: NodeSummary) => void;
+}) => (
+  <div
+    className={`timeline-entry ${node.status} ${node.isActive ? "active" : ""} hoverable`}
+    onMouseEnter={() => onHover(node.nodeId)}
+    onMouseLeave={() => onHover(null)}
+  >
+    <div className="entry-header">
+      <div className="entry-info">
+        <span className="entry-node-id">{node.nodeId}</span>
+        {node.level !== undefined && (
+          <span className="entry-level">L{node.level}</span>
+        )}
+        {node.executionCount > 1 && (
+          <span
+            style={{
+              backgroundColor: 'rgba(74, 158, 255, 0.2)',
+              color: 'var(--accent-blue, #4a9eff)',
+              padding: '1px 6px',
+              borderRadius: '10px',
+              fontSize: '10px',
+              marginLeft: '6px',
+            }}
+          >
+            ×{node.executionCount}
+          </span>
+        )}
+      </div>
+      <div className="entry-timing">
+        <div className="entry-badges">
+          {node.fromCache && <span className="entry-badge cached">Cached</span>}
+          {node.hasErrors && <span className="entry-badge error">Error</span>}
+        </div>
+        {node.lastDurationMs !== undefined && (
+          <span className="entry-duration">{formatDuration(node.lastDurationMs)}</span>
+        )}
+        {node.executionCount > 1 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewLog(node);
+            }}
+            style={{
+              marginLeft: '8px',
+              background: 'rgba(139, 148, 158, 0.2)',
+              border: '1px solid rgba(139, 148, 158, 0.3)',
+              borderRadius: '4px',
+              padding: '2px 6px',
+              color: 'var(--text-secondary, #c9d1d9)',
+              cursor: 'pointer',
+              fontSize: '10px',
+            }}
+          >
+            View Log
+          </button>
+        )}
+      </div>
+    </div>
+
+    <div className="entry-bar-container">
+      <div
+        className="entry-bar"
+        style={{
+          width: `${node.normalizedWidth * 100}%`,
+          backgroundColor: getStatusColor(node.status),
+        }}
+      />
+    </div>
+
+    {node.lastLogs.length > 0 && (
+      <div className="entry-logs">
+        {node.lastLogs.map((log, logIndex) => (
+          <div key={logIndex} className="entry-log">{log}</div>
+        ))}
+      </div>
+    )}
+
+    {Object.keys(node.lastOutputs).length > 0 && (
+      <div className="entry-outputs">
+        {Object.entries(node.lastOutputs).map(([key, value]) => (
+          <div key={key} className="entry-output">
+            <span className="output-key">{key}:</span>
+            <span className="output-value">{JSON.stringify(value)}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+));
+
+// Log dialog component - shows full execution history
+const LogDialog = React.memo(({
+  node,
+  onClose
+}: {
+  node: NodeSummary | null;
+  onClose: () => void;
+}) => {
+  if (!node) return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: 'var(--bg-primary, #1a1f2e)',
+          borderRadius: '8px',
+          padding: '16px',
+          width: '90%',
+          maxWidth: '700px',
+          maxHeight: '80vh',
+          overflow: 'auto',
+          border: '1px solid var(--border-color, #30363d)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>
+              {node.nodeId}
+            </h3>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted, #8b949e)', marginTop: '4px' }}>
+              {node.executionCount} executions • Total: {formatDuration(node.totalDurationMs)} • Avg: {formatDuration(node.avgDurationMs)}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, #8b949e)',
+              cursor: 'pointer',
+              fontSize: '24px',
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {node.executions.map((exec, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: '12px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--text-secondary, #c9d1d9)', fontWeight: 500 }}>
+                  Run #{idx + 1}
+                </span>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {exec.from_cache && (
+                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950' }}>
+                      Cached
+                    </span>
+                  )}
+                  <span style={{ color: 'var(--accent-blue, #4a9eff)', fontFamily: 'monospace' }}>
+                    {exec.duration_ms !== undefined ? formatDuration(exec.duration_ms) : '-'}
+                  </span>
+                </div>
+              </div>
+
+              {exec.logs.length > 0 && (
+                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Logs:</div>
+                  {exec.logs.map((log, logIdx) => (
+                    <div key={logIdx} style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)' }}>{log}</div>
+                  ))}
+                </div>
+              )}
+
+              {Object.keys(exec.outputs).length > 0 && (
+                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Outputs:</div>
+                  {Object.entries(exec.outputs).map(([key, value]) => (
+                    <div key={key} style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
+                      <span style={{ color: 'var(--accent-blue)' }}>{key}:</span>
+                      <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        {JSON.stringify(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
   trace,
   stats,
@@ -42,31 +282,58 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
   nodeStatuses,
   onHighlightNodes,
 }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [logDialogNode, setLogDialogNode] = useState<NodeSummary | null>(null);
 
-  useEffect(() => {
-    if (scrollRef.current && isRunning) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [trace, isRunning]);
+  // PERF: Aggregate trace entries by node - one entry per unique node
+  const nodeSummaries = useMemo(() => {
+    const nodeMap = new Map<string, NodeSummary>();
+    let maxDuration = 1;
 
-  const timelineData = useMemo(() => {
-    if (trace.length === 0) return [];
-
-    const maxTime = Math.max(...trace.map((t) => t.duration_ms ?? 1), 1);
-
-    return trace.map((entry) => {
+    // First pass: aggregate data
+    for (const entry of trace) {
       const duration = entry.duration_ms ?? 0;
-      const normalizedWidth = Math.max(0.1, duration / maxTime);
-      const status = nodeStatuses.get(entry.node_id) ?? "completed";
+      if (duration > maxDuration) maxDuration = duration;
 
-      return {
-        ...entry,
-        normalizedWidth,
-        status,
-        isActive: entry.node_id === currentNodeId,
-      };
-    });
+      const existing = nodeMap.get(entry.node_id);
+      if (existing) {
+        existing.executionCount++;
+        existing.lastDurationMs = entry.duration_ms;
+        existing.totalDurationMs += duration;
+        existing.lastOutputs = entry.outputs;
+        existing.lastLogs = entry.logs;
+        existing.fromCache = entry.from_cache ?? false;
+        existing.hasErrors = existing.hasErrors || entry.logs.some(l => l.toLowerCase().includes('error'));
+        existing.executions.push(entry);
+      } else {
+        nodeMap.set(entry.node_id, {
+          nodeId: entry.node_id,
+          type: entry.type,
+          executionCount: 1,
+          lastDurationMs: entry.duration_ms,
+          totalDurationMs: duration,
+          avgDurationMs: duration,
+          lastOutputs: entry.outputs,
+          lastLogs: entry.logs,
+          status: nodeStatuses.get(entry.node_id) ?? "completed",
+          isActive: entry.node_id === currentNodeId,
+          fromCache: entry.from_cache ?? false,
+          hasErrors: entry.logs.some(l => l.toLowerCase().includes('error')),
+          level: entry.level,
+          normalizedWidth: 0,
+          executions: [entry],
+        });
+      }
+    }
+
+    // Second pass: normalize widths and calculate averages
+    for (const summary of nodeMap.values()) {
+      summary.status = nodeStatuses.get(summary.nodeId) ?? "completed";
+      summary.isActive = summary.nodeId === currentNodeId;
+      summary.avgDurationMs = summary.totalDurationMs / summary.executionCount;
+      summary.normalizedWidth = Math.max(0.1, (summary.lastDurationMs ?? 0) / maxDuration);
+    }
+
+    return Array.from(nodeMap.values());
   }, [trace, currentNodeId, nodeStatuses]);
 
   const cacheRate = useMemo(() => {
@@ -84,17 +351,25 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
 
   const hasData = trace.length > 0 || stats !== null;
 
-  const handleNodeHover = (nodeId: string | null) => {
+  const handleNodeHover = useCallback((nodeId: string | null) => {
     if (onHighlightNodes) {
       onHighlightNodes(nodeId ? [nodeId] : []);
     }
-  };
+  }, [onHighlightNodes]);
 
-  const handleLevelHover = (nodes: string[] | null) => {
+  const handleLevelHover = useCallback((nodes: string[] | null) => {
     if (onHighlightNodes) {
       onHighlightNodes(nodes ?? []);
     }
-  };
+  }, [onHighlightNodes]);
+
+  const handleViewLog = useCallback((node: NodeSummary) => {
+    setLogDialogNode(node);
+  }, []);
+
+  const handleCloseLog = useCallback(() => {
+    setLogDialogNode(null);
+  }, []);
 
   return (
     <div className="execution-timeline">
@@ -105,6 +380,11 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
             <span className="pulse-dot" />
             Running
           </div>
+        )}
+        {trace.length > 0 && (
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+            {nodeSummaries.length} nodes • {trace.length} total runs
+          </span>
         )}
       </div>
 
@@ -155,12 +435,11 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
                 <div className="level-bar" style={{ "--node-count": nodeCount } as React.CSSProperties}>
                   {nodes.map((nodeId) => {
                     const status = nodeStatuses.get(nodeId);
-                    const traceEntry = trace.find((t) => t.node_id === nodeId);
                     return (
                       <div
                         key={nodeId}
                         className={`level-node ${status ?? "pending"} ${nodeId === currentNodeId ? "active" : ""}`}
-                        title={`${nodeId}${traceEntry?.duration_ms ? ` (${formatDuration(traceEntry.duration_ms)})` : ""}`}
+                        title={nodeId}
                         style={{ backgroundColor: getStatusColor(status) }}
                         onMouseEnter={(e) => {
                           e.stopPropagation();
@@ -181,7 +460,7 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
         </div>
       )}
 
-      <div className="timeline-trace" ref={scrollRef}>
+      <div className="timeline-trace">
         {!hasData && (
           <div className="timeline-empty">
             <div className="empty-icon">⚡</div>
@@ -189,61 +468,13 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           </div>
         )}
 
-        {timelineData.map((entry, index) => (
-          <div
-            key={`${entry.node_id}-${index}`}
-            className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
-            onMouseEnter={() => handleNodeHover(entry.node_id)}
-            onMouseLeave={() => handleNodeHover(null)}
-          >
-            <div className="entry-header">
-              <div className="entry-info">
-                <span className="entry-index">{index + 1}</span>
-                <span className="entry-node-id">{entry.node_id}</span>
-                {entry.level !== undefined && (
-                  <span className="entry-level">L{entry.level}</span>
-                )}
-              </div>
-              <div className="entry-timing">
-                <div className="entry-badges">
-                  {entry.from_cache && <span className="entry-badge cached">Cached</span>}
-                  {entry.status === "error" && <span className="entry-badge error">Error</span>}
-                </div>
-                {entry.duration_ms !== undefined && (
-                  <span className="entry-duration">{formatDuration(entry.duration_ms)}</span>
-                )}
-              </div>
-            </div>
-
-            <div className="entry-bar-container">
-              <div
-                className="entry-bar"
-                style={{
-                  width: `${entry.normalizedWidth * 100}%`,
-                  backgroundColor: getStatusColor(entry.status),
-                }}
-              />
-            </div>
-
-            {entry.logs.length > 0 && (
-              <div className="entry-logs">
-                {entry.logs.map((log, logIndex) => (
-                  <div key={logIndex} className="entry-log">{log}</div>
-                ))}
-              </div>
-            )}
-
-            {Object.keys(entry.outputs).length > 0 && (
-              <div className="entry-outputs">
-                {Object.entries(entry.outputs).map(([key, value]) => (
-                  <div key={key} className="entry-output">
-                    <span className="output-key">{key}:</span>
-                    <span className="output-value">{JSON.stringify(value)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {nodeSummaries.map((node) => (
+          <NodeEntry
+            key={node.nodeId}
+            node={node}
+            onHover={handleNodeHover}
+            onViewLog={handleViewLog}
+          />
         ))}
       </div>
 
@@ -252,6 +483,8 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           <span className="error-count">{stats.error_nodes} error(s)</span>
         </div>
       )}
+
+      <LogDialog node={logDialogNode} onClose={handleCloseLog} />
     </div>
   );
 };
