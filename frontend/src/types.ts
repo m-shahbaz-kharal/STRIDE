@@ -113,6 +113,7 @@ export interface ExecutionEvent {
   | "node_started"
   | "node_completed"
   | "node_cached"
+  | "node_skipped"
   | "node_error"
   | "complete"
   | "result"
