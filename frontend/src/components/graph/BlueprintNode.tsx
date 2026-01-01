@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Handle, NodeProps, Position, useReactFlow, useStore } from "reactflow";
+import { Handle, NodeProps, Position, useReactFlow, useStore, useUpdateNodeInternals } from "reactflow";
 
 import { usePopups } from "../../context/PopupContext";
 import {
@@ -65,6 +65,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const edges = useStore((state) => state.edges || []);
   const nodeInternals = useStore((state) => state.nodeInternals);
   const { showLogsPopup } = usePopups();
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Notify React Flow when handles change (ports added/removed/toggled)
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, data.input_ports, data.output_ports, data.showControlPorts, data.executionMode, updateNodeInternals]);
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
   const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
@@ -662,6 +668,12 @@ export default React.memo(BlueprintNode, (prevProps, nextProps) => {
   if (prevProps.data.isHighlighted !== nextProps.data.isHighlighted) return false;
   if (prevProps.data.last_outputs !== nextProps.data.last_outputs) return false;
   if (prevProps.data.highlightedPort !== nextProps.data.highlightedPort) return false;
+
+  // Check for structural changes that affect handles
+  if (prevProps.data.showControlPorts !== nextProps.data.showControlPorts) return false;
+  if (prevProps.data.executionMode !== nextProps.data.executionMode) return false;
+  if (prevProps.data.input_ports !== nextProps.data.input_ports) return false;
+  if (prevProps.data.output_ports !== nextProps.data.output_ports) return false;
 
   return true;
 });
