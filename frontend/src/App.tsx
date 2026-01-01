@@ -187,12 +187,14 @@ const App = () => {
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
   const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
 
-  // Create handlers object for node data
+  // Create handlers object for node data - keep stable to avoid re-renders
+  // Note: onClearCache uses nodeMap which is already memoized
   const nodeHandlers = useMemo(() => ({
     onDelete: handleDeleteNode,
     onRunSelection: (nodeId: string) => handleRunGraph("selection", [nodeId]),
     onClearCache: async (nodeId: string) => {
-      const node = nodes.find((n) => n.id === nodeId);
+      // Access node from nodeMap which stays current
+      const node = nodeMap.get(nodeId);
       if (node) {
         try {
           await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
@@ -223,7 +225,8 @@ const App = () => {
         )
       );
     },
-  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodes, setNodes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodeMap, setNodes]);
 
   // ========== Computed values ==========
 
@@ -394,32 +397,49 @@ const App = () => {
     });
   }, [nodeStatuses]);
 
-  // Update nodes with highlighted state
+  // Update nodes with highlighted state - only update nodes that changed
   useEffect(() => {
+    const highlightSet = new Set(highlightedNodeIds);
     setNodes((existing) =>
-      existing.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          isHighlighted: highlightedNodeIds.includes(node.id),
-        },
-      }))
+      existing.map((node) => {
+        const shouldHighlight = highlightSet.has(node.id);
+        // Only update if highlight status changed
+        if (node.data.isHighlighted === shouldHighlight) return node;
+        return {
+          ...node,
+          data: { ...node.data, isHighlighted: shouldHighlight },
+        };
+      })
     );
   }, [highlightedNodeIds, setNodes]);
 
-  // Highlight specific ports
+  // Highlight specific ports - only update the affected node(s)
+  const prevHoveredPortRef = useRef<typeof hoveredPort>(null);
   useEffect(() => {
+    const prev = prevHoveredPortRef.current;
+    prevHoveredPortRef.current = hoveredPort;
+
+    // Determine which nodes need updating
+    const nodesToUpdate = new Set<string>();
+    if (prev?.nodeId) nodesToUpdate.add(prev.nodeId);
+    if (hoveredPort?.nodeId) nodesToUpdate.add(hoveredPort.nodeId);
+
+    if (nodesToUpdate.size === 0) return;
+
     setNodes((existing) =>
-      existing.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          highlightedPort:
-            hoveredPort && hoveredPort.nodeId === node.id
-              ? { port: hoveredPort.port, direction: hoveredPort.direction }
-              : null,
-        },
-      }))
+      existing.map((node) => {
+        if (!nodesToUpdate.has(node.id)) return node;
+        const newHighlightedPort =
+          hoveredPort && hoveredPort.nodeId === node.id
+            ? { port: hoveredPort.port, direction: hoveredPort.direction }
+            : null;
+        // Only update if port highlight changed
+        if (node.data.highlightedPort === newHighlightedPort) return node;
+        return {
+          ...node,
+          data: { ...node.data, highlightedPort: newHighlightedPort },
+        };
+      })
     );
   }, [hoveredPort, setNodes]);
 
@@ -1200,78 +1220,80 @@ const App = () => {
     <PopupProvider>
       <ReactFlowProvider>
         <div className="app-shell">
-          {headerTab === "graph-editor" ? (
-            <div
-              className="reactflow-fullpage"
-              ref={reactFlowWrapper}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
+          {/* Keep both views mounted, use CSS to hide inactive view for instant switching */}
+          <div
+            className="reactflow-fullpage"
+            ref={reactFlowWrapper}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            style={{ display: headerTab === "graph-editor" ? "block" : "none" }}
+          >
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onInit={setReactFlowInstance}
+              onConnect={handleConnect}
+              onConnectStart={onConnectStart}
+              onConnectEnd={onConnectEnd}
+              onNodeDragStart={() => takeSnapshot()}
+              onSelectionDragStart={() => takeSnapshot()}
+              onSelectionChange={handleSelectionChange}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              fitView
+              isValidConnection={isValidConnection}
+              connectionLineStyle={{
+                stroke: connectionLineColor || "#4a9eff",
+                strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+                strokeDasharray: connectionLineDash,
+              }}
+              connectionLineComponent={TypeAwareConnectionLine}
+              attributionPosition="bottom-left"
+              selectionMode={SelectionMode.Partial}
+              selectionOnDrag
+              panOnDrag={[1, 2]}
+              selectNodesOnDrag
+              edgesFocusable
+              edgesUpdatable
+              elementsSelectable
             >
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onInit={setReactFlowInstance}
-                onConnect={handleConnect}
-                onConnectStart={onConnectStart}
-                onConnectEnd={onConnectEnd}
-                onNodeDragStart={() => takeSnapshot()}
-                onSelectionDragStart={() => takeSnapshot()}
-                onSelectionChange={handleSelectionChange}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                fitView
-                isValidConnection={isValidConnection}
-                connectionLineStyle={{
-                  stroke: connectionLineColor || "#4a9eff",
-                  strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
-                  strokeDasharray: connectionLineDash,
+              <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
+              <Controls
+                showZoom
+                showFitView
+                showInteractive={false}
+                position="bottom-left"
+                style={{ left: actualLeftWidth }}
+              />
+              <MiniMap
+                nodeColor={(node) => {
+                  const status = nodeStatuses.get(node.id);
+                  if (status === "running") return "#58a6ff";
+                  if (status === "completed") return "#3fb950";
+                  if (status === "error") return "#f85149";
+                  return "#4a9eff";
                 }}
-                connectionLineComponent={TypeAwareConnectionLine}
-                attributionPosition="bottom-left"
-                selectionMode={SelectionMode.Partial}
-                selectionOnDrag
-                panOnDrag={[1, 2]}
-                selectNodesOnDrag
-                edgesFocusable
-                edgesUpdatable
-                elementsSelectable
-              >
-                <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
-                <Controls
-                  showZoom
-                  showFitView
-                  showInteractive={false}
-                  position="bottom-left"
-                  style={{ left: actualLeftWidth }}
-                />
-                <MiniMap
-                  nodeColor={(node) => {
-                    const status = nodeStatuses.get(node.id);
-                    if (status === "running") return "#58a6ff";
-                    if (status === "completed") return "#3fb950";
-                    if (status === "error") return "#f85149";
-                    return "#4a9eff";
-                  }}
-                  maskColor="rgba(0,0,0,0.8)"
-                  style={{
-                    backgroundColor: "rgba(20,25,35,0.9)",
-                    right: actualRightWidth,
-                  }}
-                />
-              </ReactFlow>
-              <ConnectionToast message={connectionMessage} />
-            </div>
-          ) : (
-            <div className="outputs-fullpage">
-              <OutputsView nodes={nodes} outputs={outputs} />
-            </div>
-          )}
+                maskColor="rgba(0,0,0,0.8)"
+                style={{
+                  backgroundColor: "rgba(20,25,35,0.9)",
+                  right: actualRightWidth,
+                }}
+              />
+            </ReactFlow>
+            <ConnectionToast message={connectionMessage} />
+          </div>
+          <div
+            className="outputs-fullpage"
+            style={{ display: headerTab === "outputs" ? "block" : "none" }}
+          >
+            <OutputsView nodes={nodes} outputs={outputs} />
+          </div>
 
           <AppHeader
             headerTab={headerTab}
