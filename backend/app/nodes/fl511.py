@@ -233,6 +233,17 @@ class StreamResource:
             
     def __repr__(self) -> str:
         return f"<StreamResource id={self.stream_id} url={self.hls_url} size={self.width}x{self.height}>"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable representation of this stream."""
+        return {
+            "_type": "StreamResource",
+            "stream_id": self.stream_id,
+            "width": self.width,
+            "height": self.height,
+            "target_fps": self.target_fps,
+            "active": self._running.is_set(),
+        }
 
 
 FL511_RESOLVE_SPEC = NodeSpec(

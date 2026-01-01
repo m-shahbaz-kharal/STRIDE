@@ -18,6 +18,14 @@ BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
 INDEX_FILE = FRONTEND_DIR / "index.html"
 
+
+def _json_serializer(obj: Any) -> Any:
+    """Custom JSON serializer for objects that are not JSON serializable."""
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return str(obj)
+
+
 app = FastAPI(title="LiGuard Web Graph Runtime")
 
 if FRONTEND_DIR.exists():
@@ -166,7 +174,7 @@ def serialize_event(event) -> str:
                 value = value.value
             data[field] = value
     
-    return json.dumps(data, default=str)
+    return json.dumps(data, default=_json_serializer)
 
 
 @app.websocket("/ws/run-graph")
@@ -209,7 +217,7 @@ async def websocket_run_graph(websocket: WebSocket):
                     ).__dict__,
                     "levels": graph_executor._levels,
                 }
-                await websocket.send_text(json.dumps(final_result))
+                await websocket.send_text(json.dumps(final_result, default=_json_serializer))
                 
             except GraphExecutionError as exc:
                 error_response = {
