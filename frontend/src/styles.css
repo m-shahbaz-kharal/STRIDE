@@ -3012,8 +3012,7 @@ body {
 }
 
 .node-port-input .control-handle {
-  left: -8px !important;
-  justify-content: flex-start !important;
+  left: -12px !important;
 }
 
 .node-port-output .control-handle {
