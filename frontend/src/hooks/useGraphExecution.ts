@@ -72,6 +72,52 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const [progress, setProgress] = useState(0);
   const [executionId, setExecutionId] = useState<string | null>(null);
 
+  // PERF: Batch rapid updates during loops to prevent overwhelming React
+  const pendingStatusUpdatesRef = useRef<Map<string, NodeExecutionStatus>>(new Map());
+  const pendingTraceEntriesRef = useRef<ExecutionTraceEntry[]>([]);
+  const pendingProgressRef = useRef<number | null>(null);
+  const flushTimeoutRef = useRef<number | null>(null);
+  const lastFlushTimeRef = useRef<number>(0);
+
+  const THROTTLE_MS = 100; // Flush at most every 100ms during rapid events
+
+  const flushPendingUpdates = useCallback(() => {
+    const statusUpdates = pendingStatusUpdatesRef.current;
+    const traceEntries = pendingTraceEntriesRef.current;
+    const pendingProgress = pendingProgressRef.current;
+
+    if (statusUpdates.size > 0) {
+      setNodeStatuses((prev) => {
+        const newMap = new Map(prev);
+        statusUpdates.forEach((status, nodeId) => newMap.set(nodeId, status));
+        return newMap;
+      });
+      pendingStatusUpdatesRef.current = new Map();
+    }
+
+    if (traceEntries.length > 0) {
+      setTrace((prev) => [...prev, ...traceEntries]);
+      pendingTraceEntriesRef.current = [];
+    }
+
+    if (pendingProgress !== null) {
+      setProgress(pendingProgress);
+      pendingProgressRef.current = null;
+    }
+
+    lastFlushTimeRef.current = Date.now();
+    flushTimeoutRef.current = null;
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimeoutRef.current !== null) return; // Already scheduled
+
+    const timeSinceLastFlush = Date.now() - lastFlushTimeRef.current;
+    const delay = Math.max(0, THROTTLE_MS - timeSinceLastFlush);
+
+    flushTimeoutRef.current = window.setTimeout(flushPendingUpdates, delay);
+  }, [flushPendingUpdates]);
+
   // Handle incoming WebSocket messages
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
@@ -121,29 +167,24 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "node_cached":
         case "node_skipped":
           if (data.node_id) {
-            setNodeStatuses((prev) => {
-              const newMap = new Map(prev);
-              const newStatus: NodeExecutionStatus =
-                data.event_type === "node_skipped" ? "skipped" : "completed";
-              newMap.set(data.node_id!, newStatus);
-              return newMap;
+            // PERF: Batch these updates during rapid loop execution
+            const newStatus: NodeExecutionStatus =
+              data.event_type === "node_skipped" ? "skipped" : "completed";
+            pendingStatusUpdatesRef.current.set(data.node_id, newStatus);
+            pendingTraceEntriesRef.current.push({
+              node_id: data.node_id!,
+              type: data.node_type ?? "",
+              outputs: data.outputs ?? {},
+              logs: data.logs ?? [],
+              duration_ms: data.duration_ms,
+              level: data.level,
+              from_cache: data.from_cache,
             });
-            setTrace((prev) => [
-              ...prev,
-              {
-                node_id: data.node_id!,
-                type: data.node_type ?? "",
-                outputs: data.outputs ?? {},
-                logs: data.logs ?? [],
-                duration_ms: data.duration_ms,
-                level: data.level,
-                from_cache: data.from_cache,
-              },
-            ]);
           }
           if (data.progress !== undefined) {
-            setProgress(data.progress);
+            pendingProgressRef.current = data.progress;
           }
+          scheduleFlush();
           break;
 
         case "node_error":
@@ -172,6 +213,8 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           break;
 
         case "complete":
+          // Flush any pending updates before marking as complete
+          flushPendingUpdates();
           setCurrentNodeId(null);
           setProgress(1);
           setExecutionId(null);
@@ -180,6 +223,8 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           break;
 
         case "result":
+          // Flush any pending updates before setting final results
+          flushPendingUpdates();
           if (data.trace) setTrace(data.trace);
           if (data.outputs) setOutputs(data.outputs as Record<string, unknown>);
           if (data.stats) setStats(data.stats);
@@ -203,7 +248,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     } catch (e) {
       console.error("Failed to parse WebSocket message:", e);
     }
-  }, []);
+  }, [scheduleFlush, flushPendingUpdates]);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
@@ -218,7 +263,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         setIsConnected(true);
         setError(null);
         activeRunRef.current = false;
-        
+
         if (pendingPayloadRef.current) {
           ws.send(JSON.stringify(pendingPayloadRef.current));
           pendingPayloadRef.current = null;
@@ -233,7 +278,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setActiveRuns(0);
           setError((prev) => prev ?? "Connection closed during execution");
         }
-        
+
         reconnectTimeoutRef.current = window.setTimeout(() => {
           connect();
         }, 2000);
@@ -323,7 +368,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       }
 
       const data: ExecutionResult = await response.json();
-      
+
       setTrace(data.trace ?? []);
       setOutputs(data.outputs ?? {});
       setStats(data.stats ?? null);

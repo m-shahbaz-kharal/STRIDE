@@ -52,14 +52,14 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
 
   const timelineData = useMemo(() => {
     if (trace.length === 0) return [];
-    
+
     const maxTime = Math.max(...trace.map((t) => t.duration_ms ?? 1), 1);
-    
+
     return trace.map((entry) => {
       const duration = entry.duration_ms ?? 0;
       const normalizedWidth = Math.max(0.1, duration / maxTime);
       const status = nodeStatuses.get(entry.node_id) ?? "completed";
-      
+
       return {
         ...entry,
         normalizedWidth,
@@ -145,8 +145,8 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           </div>
           <div className="levels-visualization">
             {levelStats.map(({ level, nodeCount, nodes }) => (
-              <div 
-                key={level} 
+              <div
+                key={level}
                 className="level-bar-container hoverable"
                 onMouseEnter={() => handleLevelHover(nodes)}
                 onMouseLeave={() => handleLevelHover(null)}
@@ -188,33 +188,33 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
             <div>Run graph to see execution timeline</div>
           </div>
         )}
-        
+
         {timelineData.map((entry, index) => (
-            <div
-              key={`${entry.node_id}-${index}`}
-              className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
-              onMouseEnter={() => handleNodeHover(entry.node_id)}
-              onMouseLeave={() => handleNodeHover(null)}
-            >
-              <div className="entry-header">
-                <div className="entry-info">
-                  <span className="entry-index">{index + 1}</span>
-                  <span className="entry-node-id">{entry.node_id}</span>
-                  {entry.level !== undefined && (
-                    <span className="entry-level">L{entry.level}</span>
-                  )}
-                </div>
-                <div className="entry-timing">
-                  <div className="entry-badges">
-                    {entry.from_cache && <span className="entry-badge cached">Cached</span>}
-                    {entry.status === "error" && <span className="entry-badge error">Error</span>}
-                  </div>
-                  {entry.duration_ms !== undefined && (
-                    <span className="entry-duration">{formatDuration(entry.duration_ms)}</span>
-                  )}
-                </div>
+          <div
+            key={`${entry.node_id}-${index}`}
+            className={`timeline-entry ${entry.status} ${entry.isActive ? "active" : ""} hoverable`}
+            onMouseEnter={() => handleNodeHover(entry.node_id)}
+            onMouseLeave={() => handleNodeHover(null)}
+          >
+            <div className="entry-header">
+              <div className="entry-info">
+                <span className="entry-index">{index + 1}</span>
+                <span className="entry-node-id">{entry.node_id}</span>
+                {entry.level !== undefined && (
+                  <span className="entry-level">L{entry.level}</span>
+                )}
               </div>
-            
+              <div className="entry-timing">
+                <div className="entry-badges">
+                  {entry.from_cache && <span className="entry-badge cached">Cached</span>}
+                  {entry.status === "error" && <span className="entry-badge error">Error</span>}
+                </div>
+                {entry.duration_ms !== undefined && (
+                  <span className="entry-duration">{formatDuration(entry.duration_ms)}</span>
+                )}
+              </div>
+            </div>
+
             <div className="entry-bar-container">
               <div
                 className="entry-bar"
@@ -256,4 +256,5 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
   );
 };
 
-export default ExecutionTimeline;
+// Memoize to prevent re-renders when parent state changes
+export default React.memo(ExecutionTimeline);

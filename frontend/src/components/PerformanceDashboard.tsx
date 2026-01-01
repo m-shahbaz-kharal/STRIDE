@@ -33,7 +33,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
   // Calculate level timing with node IDs
   const levelTiming = useMemo(() => {
     const levelData: Record<number, { count: number; totalTime: number; maxTime: number; nodes: string[] }> = {};
-    
+
     for (const entry of trace) {
       const level = entry.level ?? 0;
       if (!levelData[level]) {
@@ -45,7 +45,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
       levelData[level].maxTime = Math.max(levelData[level].maxTime, duration);
       levelData[level].nodes.push(entry.node_id);
     }
-    
+
     // Also include nodes from levels that may not have trace entries yet
     levels.forEach((levelNodes, idx) => {
       if (!levelData[idx]) {
@@ -60,7 +60,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
         });
       }
     });
-    
+
     return Object.entries(levelData)
       .map(([level, data]) => ({
         level: parseInt(level),
@@ -152,9 +152,9 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
                     <span className="bar-label">Sequential: {formatDuration(sequentialTime)}</span>
                   </div>
                   <div className="comparison-bar actual">
-                    <div 
-                      className="bar-fill" 
-                      style={{ width: `${actualTime / Math.max(sequentialTime, 1) * 100}%` }} 
+                    <div
+                      className="bar-fill"
+                      style={{ width: `${actualTime / Math.max(sequentialTime, 1) * 100}%` }}
                     />
                     <span className="bar-label">Parallel: {formatDuration(actualTime)}</span>
                   </div>
@@ -185,8 +185,8 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
               <h4>Level Breakdown</h4>
               <div className="level-breakdown">
                 {levelTiming.map(({ level, count, maxTime, nodes }) => (
-                  <div 
-                    key={level} 
+                  <div
+                    key={level}
                     className="level-item hoverable"
                     onMouseEnter={() => handleLevelHover(nodes)}
                     onMouseLeave={() => handleLevelHover(null)}
@@ -208,8 +208,8 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
               <h4>Slowest Nodes</h4>
               <div className="slowest-nodes">
                 {slowestNodes.map((entry, index) => (
-                  <div 
-                    key={entry.node_id} 
+                  <div
+                    key={entry.node_id}
                     className={`slowest-item hoverable${entry.from_cache ? " from-cache" : ""}`}
                     onMouseEnter={() => handleNodeHover(entry.node_id)}
                     onMouseLeave={() => handleNodeHover(null)}
@@ -234,4 +234,5 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
   );
 };
 
-export default PerformanceDashboard;
+// Memoize to prevent re-renders when parent state changes
+export default React.memo(PerformanceDashboard);

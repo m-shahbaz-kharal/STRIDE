@@ -62,8 +62,37 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const resizeCornerRef = useRef<Corner>(null);
   const zoomRef = useRef(1);
   const { getZoom } = useReactFlow();
-  const edges = useStore((state) => state.edges || []);
-  const nodeInternals = useStore((state) => state.nodeInternals);
+
+  // PERF: Only subscribe to edges that connect to THIS node, not all edges
+  // This prevents re-renders when other nodes' edges change
+  const relevantEdges = useStore(
+    useCallback((state) => {
+      const allEdges = state.edges || [];
+      return allEdges.filter((edge) => edge.source === id || edge.target === id);
+    }, [id])
+  );
+
+  // PERF: Only get source nodes for our incoming edges, not entire nodeInternals
+  const connectedSources = useStore(
+    useCallback((state) => {
+      const allEdges = state.edges || [];
+      const nodeInt = state.nodeInternals;
+      if (!nodeInt) return new Map();
+
+      const sourceIds = new Set<string>();
+      for (const edge of allEdges) {
+        if (edge.target === id) sourceIds.add(edge.source);
+      }
+
+      const result = new Map();
+      for (const sourceId of sourceIds) {
+        const node = nodeInt.get(sourceId);
+        if (node) result.set(sourceId, node);
+      }
+      return result;
+    }, [id])
+  );
+
   const { showLogsPopup } = usePopups();
   const updateNodeInternals = useUpdateNodeInternals();
 
@@ -120,14 +149,14 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
   const isInputConnected = useCallback(
     (port: string) =>
-      edges.some((edge) => edge.target === id && edge.targetHandle === port),
-    [edges, id]
+      relevantEdges.some((edge) => edge.target === id && edge.targetHandle === port),
+    [relevantEdges, id]
   );
 
   const isOutputConnected = useCallback(
     (port: string) =>
-      edges.some((edge) => edge.source === id && edge.sourceHandle === port),
-    [edges, id]
+      relevantEdges.some((edge) => edge.source === id && edge.sourceHandle === port),
+    [relevantEdges, id]
   );
 
   // Control ports are hidden by default in dataflow mode unless connected
@@ -150,18 +179,18 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
   const getConnectedOutput = useCallback(
     (port: string) => {
-      const edge = edges.find((item) => item.target === id && item.targetHandle === port);
+      const edge = relevantEdges.find((item) => item.target === id && item.targetHandle === port);
       if (!edge || !edge.sourceHandle) {
         return { hasValue: false, value: undefined };
       }
-      const sourceNode = nodeInternals?.get(edge.source);
+      const sourceNode = connectedSources?.get(edge.source);
       const outputs = sourceNode?.data?.last_outputs;
       if (outputs && Object.prototype.hasOwnProperty.call(outputs, edge.sourceHandle)) {
         return { hasValue: true, value: outputs[edge.sourceHandle] };
       }
       return { hasValue: false, value: undefined };
     },
-    [edges, id, nodeInternals]
+    [relevantEdges, id, connectedSources]
   );
 
   const getInputDefault = useCallback(
