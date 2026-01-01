@@ -203,6 +203,7 @@ async def websocket_run_graph(websocket: WebSocket):
                         {
                             "node_id": r.node_id,
                             "type": r.node_type,
+                            "display_name": graph_executor.nodes.get(r.node_id).spec.display_name if graph_executor.nodes.get(r.node_id) else r.node_type,
                             "outputs": r.outputs,
                             "logs": r.logs,
                             "duration_ms": r.duration_ms,

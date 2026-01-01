@@ -42,6 +42,7 @@ class NodeExecutionResult:
     node_id: str
     node_type: str
     status: NodeStatus
+    display_name: Optional[str] = None  # Human-readable node name for UI
     outputs: Dict[str, Any] = field(default_factory=dict)
     logs: List[str] = field(default_factory=list)
     start_time: float = 0.0
@@ -64,6 +65,7 @@ class ExecutionEvent:
     timestamp: float
     node_id: Optional[str] = None
     node_type: Optional[str] = None
+    display_name: Optional[str] = None  # Human-readable node name for UI
     status: Optional[NodeStatus] = None
     outputs: Optional[Dict[str, Any]] = None
     logs: Optional[List[str]] = None

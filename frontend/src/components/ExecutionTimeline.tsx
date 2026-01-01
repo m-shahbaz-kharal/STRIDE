@@ -15,6 +15,7 @@ interface ExecutionTimelineProps {
 interface NodeSummary {
   nodeId: string;
   type: string;
+  displayName: string;  // Exact display name from node definition
   executionCount: number;
   lastDurationMs: number | undefined;
   totalDurationMs: number;
@@ -62,96 +63,100 @@ const NodeEntry = React.memo(({
   node: NodeSummary;
   onHover: (nodeId: string | null) => void;
   onViewLog: (node: NodeSummary) => void;
-}) => (
-  <div
-    className={`timeline-entry ${node.status} ${node.isActive ? "active" : ""} hoverable`}
-    onMouseEnter={() => onHover(node.nodeId)}
-    onMouseLeave={() => onHover(null)}
-  >
-    <div className="entry-header">
-      <div className="entry-info">
-        <span className="entry-node-id">{node.nodeId}</span>
-        {node.level !== undefined && (
-          <span className="entry-level">L{node.level}</span>
-        )}
-        {node.executionCount > 1 && (
-          <span
-            style={{
-              backgroundColor: 'rgba(74, 158, 255, 0.2)',
-              color: 'var(--accent-blue, #4a9eff)',
-              padding: '1px 6px',
-              borderRadius: '10px',
-              fontSize: '10px',
-              marginLeft: '6px',
-            }}
-          >
-            ×{node.executionCount}
+}) => {
+  return (
+    <div
+      className={`timeline-entry ${node.status} ${node.isActive ? "active" : ""} hoverable`}
+      onMouseEnter={() => onHover(node.nodeId)}
+      onMouseLeave={() => onHover(null)}
+    >
+      <div className="entry-header">
+        <div className="entry-info">
+          <span className="entry-node-name" style={{ fontWeight: 500 }}>{node.displayName}</span>
+          <span className="entry-node-id" style={{ color: 'var(--text-muted)', fontSize: '10px', marginLeft: '6px' }}>
+            {node.nodeId}
           </span>
-        )}
-      </div>
-      <div className="entry-timing">
-        <div className="entry-badges">
-          {node.fromCache && <span className="entry-badge cached">Cached</span>}
-          {node.hasErrors && <span className="entry-badge error">Error</span>}
+          {node.level !== undefined && (
+            <span className="entry-level">L{node.level}</span>
+          )}
+          {node.executionCount > 1 && (
+            <span
+              style={{
+                backgroundColor: 'rgba(74, 158, 255, 0.2)',
+                color: 'var(--accent-blue, #4a9eff)',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                fontSize: '10px',
+                marginLeft: '6px',
+              }}
+            >
+              ×{node.executionCount}
+            </span>
+          )}
         </div>
-        {node.lastDurationMs !== undefined && (
-          <span className="entry-duration">{formatDuration(node.lastDurationMs)}</span>
-        )}
-        {node.executionCount > 1 && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewLog(node);
-            }}
-            style={{
-              marginLeft: '8px',
-              background: 'rgba(139, 148, 158, 0.2)',
-              border: '1px solid rgba(139, 148, 158, 0.3)',
-              borderRadius: '4px',
-              padding: '2px 6px',
-              color: 'var(--text-secondary, #c9d1d9)',
-              cursor: 'pointer',
-              fontSize: '10px',
-            }}
-          >
-            View Log
-          </button>
-        )}
-      </div>
-    </div>
-
-    <div className="entry-bar-container">
-      <div
-        className="entry-bar"
-        style={{
-          width: `${node.normalizedWidth * 100}%`,
-          backgroundColor: getStatusColor(node.status),
-        }}
-      />
-    </div>
-
-    {node.lastLogs.length > 0 && (
-      <div className="entry-logs">
-        {node.lastLogs.map((log, logIndex) => (
-          <div key={logIndex} className="entry-log">{log}</div>
-        ))}
-      </div>
-    )}
-
-    {Object.keys(node.lastOutputs).length > 0 && (
-      <div className="entry-outputs">
-        {Object.entries(node.lastOutputs).map(([key, value]) => (
-          <div key={key} className="entry-output">
-            <span className="output-key">{key}:</span>
-            <span className="output-value">{JSON.stringify(value)}</span>
+        <div className="entry-timing">
+          <div className="entry-badges">
+            {node.fromCache && <span className="entry-badge cached">Cached</span>}
+            {node.hasErrors && <span className="entry-badge error">Error</span>}
           </div>
-        ))}
+          {node.lastDurationMs !== undefined && (
+            <span className="entry-duration">{formatDuration(node.lastDurationMs)}</span>
+          )}
+          {node.executionCount > 1 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewLog(node);
+              }}
+              style={{
+                marginLeft: '8px',
+                background: 'rgba(139, 148, 158, 0.2)',
+                border: '1px solid rgba(139, 148, 158, 0.3)',
+                borderRadius: '4px',
+                padding: '2px 6px',
+                color: 'var(--text-secondary, #c9d1d9)',
+                cursor: 'pointer',
+                fontSize: '10px',
+              }}
+            >
+              View Log
+            </button>
+          )}
+        </div>
       </div>
-    )}
-  </div>
-));
 
+      <div className="entry-bar-container">
+        <div
+          className="entry-bar"
+          style={{
+            width: `${node.normalizedWidth * 100}%`,
+            backgroundColor: getStatusColor(node.status),
+          }}
+        />
+      </div>
+
+      {node.lastLogs.length > 0 && (
+        <div className="entry-logs">
+          {node.lastLogs.map((log, logIndex) => (
+            <div key={logIndex} className="entry-log">{log}</div>
+          ))}
+        </div>
+      )}
+
+      {Object.keys(node.lastOutputs).length > 0 && (
+        <div className="entry-outputs">
+          {Object.entries(node.lastOutputs).map(([key, value]) => (
+            <div key={key} className="entry-output">
+              <span className="output-key">{key}:</span>
+              <span className="output-value">{JSON.stringify(value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
 // Log dialog component - shows full execution history
 const LogDialog = React.memo(({
   node,
@@ -305,9 +310,16 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
         existing.hasErrors = existing.hasErrors || entry.logs.some(l => l.toLowerCase().includes('error'));
         existing.executions.push(entry);
       } else {
+        // Calculate fallback display name if backend doesn't provide one
+        const rawName = entry.type.split('.').pop()?.replace(/_/g, ' ') ?? entry.type;
+        const fallbackName = rawName.split(' ').map(word =>
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ');
+
         nodeMap.set(entry.node_id, {
           nodeId: entry.node_id,
           type: entry.type,
+          displayName: entry.display_name ?? fallbackName,
           executionCount: 1,
           lastDurationMs: entry.duration_ms,
           totalDurationMs: duration,

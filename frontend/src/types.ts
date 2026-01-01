@@ -78,6 +78,7 @@ export type NodeExecutionStatus =
 export interface ExecutionTraceEntry {
   node_id: string;
   type: string;
+  display_name?: string;  // Exact display name from node definition
   outputs: Record<string, unknown>;
   logs: string[];
   duration_ms?: number;
