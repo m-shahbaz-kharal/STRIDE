@@ -1112,6 +1112,485 @@ class GraphExecutor:
             self._cleanup_resources()
             self._unregister_execution(self.execution_id)
 
+    async def _execute_branch_streaming(
+        self,
+        branch_id: str,
+        branch_nodes: Set[str],
+        event_queue: asyncio.Queue,
+        progress_state: Dict[str, Any],
+    ) -> None:
+        """Execute a single branch sequentially, pushing events to the shared queue.
+        
+        This handles loops within the branch while allowing other branches to run in parallel.
+        """
+        # Get execution order for just this branch's nodes
+        branch_order = [nid for nid in self._topo_order if nid in branch_nodes]
+        
+        for node_id in branch_order:
+            if self._cancel_all or node_id in self._cancelled_nodes:
+                skipped = NodeExecutionResult(
+                    node_id=node_id,
+                    node_type=self.nodes[node_id].type,
+                    status=NodeStatus.SKIPPED,
+                    logs=[f"Node {node_id} interrupted"],
+                    duration_ms=0.0,
+                    level=self._node_levels.get(node_id, 0),
+                    from_cache=False,
+                )
+                self._finalize_node_result(node_id, {}, skipped, cached=False)
+                with progress_state["lock"]:
+                    progress_state["completed"] += 1
+                    completed = progress_state["completed"]
+                    total = progress_state["total"]
+                await event_queue.put(ExecutionEvent(
+                    event_type="node_skipped",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=node_id,
+                    node_type=skipped.node_type,
+                    status=NodeStatus.SKIPPED,
+                    level=skipped.level,
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                ))
+                continue
+
+            if self._is_loop_node(self.nodes[node_id].type):
+                # Execute loop inline (sequentially within this branch)
+                async for event in self._execute_loop_streaming(node_id, event_queue, progress_state):
+                    await event_queue.put(event)
+                continue
+
+            # Regular node execution
+            node = self.nodes[node_id]
+            with progress_state["lock"]:
+                total = progress_state["total"]
+                completed = progress_state["completed"]
+            
+            await event_queue.put(ExecutionEvent(
+                event_type="node_started",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                node_id=node_id,
+                node_type=node.type,
+                status=NodeStatus.RUNNING,
+                level=self._node_levels.get(node_id, 0),
+                progress=completed / total if total > 0 else 0,
+                total_nodes=total,
+                completed_nodes=completed,
+            ))
+
+            inputs = self._prepare_inputs(node_id)
+            
+            # Execute in thread pool to avoid blocking
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                self._thread_pool,
+                self._execute_node_work,
+                node_id,
+                inputs
+            )
+            self._finalize_node_result(node_id, inputs, result, cached=False)
+            
+            with progress_state["lock"]:
+                progress_state["completed"] += 1
+                completed = progress_state["completed"]
+                total = progress_state["total"]
+
+            if result.status == NodeStatus.ERROR:
+                await event_queue.put(ExecutionEvent(
+                    event_type="node_error",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=result.node_id,
+                    node_type=result.node_type,
+                    status=NodeStatus.ERROR,
+                    error=result.error,
+                    error_code=result.error_code,
+                    duration_ms=result.duration_ms,
+                    level=result.level,
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                    from_cache=result.from_cache,
+                ))
+                if self._fail_fast:
+                    break
+            else:
+                await event_queue.put(ExecutionEvent(
+                    event_type="node_completed",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=result.node_id,
+                    node_type=result.node_type,
+                    status=result.status,
+                    outputs=result.outputs,
+                    logs=result.logs,
+                    duration_ms=result.duration_ms,
+                    level=result.level,
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                    from_cache=result.from_cache,
+                ))
+
+    async def _execute_loop_streaming(
+        self,
+        node_id: str,
+        event_queue: asyncio.Queue,
+        progress_state: Dict[str, Any],
+    ) -> AsyncIterator[ExecutionEvent]:
+        """Execute a loop node, yielding events for each iteration."""
+        loop_node = self.nodes[node_id]
+        body_nodes = self._loop_body_nodes.get(node_id, set())
+        body_order = [nid for nid in self._topo_order if nid in body_nodes]
+
+        with progress_state["lock"]:
+            total = progress_state["total"]
+            completed = progress_state["completed"]
+
+        yield ExecutionEvent(
+            event_type="node_started",
+            execution_id=self.execution_id,
+            timestamp=time.time(),
+            node_id=node_id,
+            node_type=loop_node.type,
+            status=NodeStatus.RUNNING,
+            level=self._node_levels.get(node_id, 0),
+            progress=completed / total if total > 0 else 0,
+            total_nodes=total,
+            completed_nodes=completed,
+        )
+
+        iterations = 0
+        last_index = 0
+
+        if loop_node.type == "core.control.for":
+            inputs = self._prepare_inputs(node_id)
+            first_index = int(inputs.get("first_index") or 0)
+            last_index_input = int(inputs.get("last_index") or 0)
+            step = 1 if last_index_input >= first_index else -1
+            indices = range(first_index, last_index_input + step, step)
+        elif loop_node.type == "core.control.repeat":
+            inputs = self._prepare_inputs(node_id)
+            count = int(inputs.get("count") or 0)
+            indices = range(max(0, count))
+        else:
+            inputs = self._prepare_inputs(node_id)
+            max_iterations_value = inputs.get("max_iterations")
+            if max_iterations_value is None:
+                max_iterations_value = loop_node.params.get("max_iterations", 100)
+            max_iterations = int(max_iterations_value)
+            indices = range(max_iterations)
+
+        loop = asyncio.get_running_loop()
+
+        for idx in indices:
+            if self._cancel_all:
+                break
+            if loop_node.type == "core.control.while":
+                inputs = self._prepare_inputs(node_id)
+                if not bool(inputs.get("condition")):
+                    break
+            self._computed_values[node_id] = {"loop_body": None, "index": idx, "completed": None}
+            last_index = idx
+            iterations += 1
+
+            for body_id in body_order:
+                if self._cancel_all:
+                    break
+                if body_id in self._cancelled_nodes:
+                    skipped = NodeExecutionResult(
+                        node_id=body_id,
+                        node_type=self.nodes[body_id].type,
+                        status=NodeStatus.SKIPPED,
+                        logs=[f"Node {body_id} interrupted"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(body_id, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(body_id, {}, skipped, cached=False)
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
+                    yield ExecutionEvent(
+                        event_type="node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=body_id,
+                        node_type=skipped.node_type,
+                        status=NodeStatus.SKIPPED,
+                        level=skipped.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                    )
+                    continue
+
+                if self._is_loop_node(self.nodes[body_id].type):
+                    self._execute_loop_sync(body_id, 0, None, set())
+                    continue
+
+                with progress_state["lock"]:
+                    total = progress_state["total"]
+                    completed = progress_state["completed"]
+
+                yield ExecutionEvent(
+                    event_type="node_started",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=body_id,
+                    node_type=self.nodes[body_id].type,
+                    status=NodeStatus.RUNNING,
+                    level=self._node_levels.get(body_id, 0),
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                )
+
+                inputs = self._prepare_inputs(body_id)
+                result = await loop.run_in_executor(
+                    self._thread_pool,
+                    self._execute_node_work,
+                    body_id,
+                    inputs
+                )
+                result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]
+                self._finalize_node_result(body_id, inputs, result, cached=False)
+
+                with progress_state["lock"]:
+                    progress_state["completed"] += 1
+                    completed = progress_state["completed"]
+                    total = progress_state["total"]
+
+                if result.status == NodeStatus.ERROR:
+                    yield ExecutionEvent(
+                        event_type="node_error",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=result.node_id,
+                        node_type=result.node_type,
+                        status=NodeStatus.ERROR,
+                        error=result.error,
+                        error_code=result.error_code,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=result.from_cache,
+                    )
+                    if self._fail_fast:
+                        break
+                else:
+                    yield ExecutionEvent(
+                        event_type="node_completed",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=result.node_id,
+                        node_type=result.node_type,
+                        status=result.status,
+                        outputs=result.outputs,
+                        logs=result.logs,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=result.from_cache,
+                    )
+
+        loop_outputs = {"loop_body": None, "index": last_index, "completed": None}
+        loop_result = NodeExecutionResult(
+            node_id=node_id,
+            node_type=loop_node.type,
+            status=NodeStatus.COMPLETED,
+            outputs=loop_outputs,
+            logs=[f"Looped {iterations} iterations"],
+            duration_ms=0.0,
+            level=self._node_levels.get(node_id, 0),
+            from_cache=False,
+        )
+        self._finalize_node_result(node_id, {}, loop_result, cached=False)
+        
+        with progress_state["lock"]:
+            progress_state["completed"] += 1
+            completed = progress_state["completed"]
+            total = progress_state["total"]
+
+        yield ExecutionEvent(
+            event_type="node_completed",
+            execution_id=self.execution_id,
+            timestamp=time.time(),
+            node_id=node_id,
+            node_type=loop_node.type,
+            status=NodeStatus.COMPLETED,
+            outputs=loop_outputs,
+            logs=loop_result.logs,
+            duration_ms=loop_result.duration_ms,
+            level=loop_result.level,
+            progress=completed / total if total > 0 else 0,
+            total_nodes=total,
+            completed_nodes=completed,
+            from_cache=False,
+        )
+
+    async def _run_parallel_branches(self) -> AsyncIterator[ExecutionEvent]:
+        """Execute independent branches in parallel, each running sequentially internally."""
+        self._execution_order = self._resolve_execution_order()
+        self._reset_execution_state()
+        self._register_execution(self)
+        self._thread_pool = ThreadPoolExecutor(max_workers=self._max_workers)
+        
+        total_nodes = len(self._execution_order)
+        
+        # Build execution plan info
+        execution_plan = [
+            {
+                "node_id": node_id,
+                "node_type": self.nodes[node_id].type,
+                "level": self._node_levels.get(node_id, 0),
+                "branch_id": self._branch_roots.get(node_id),
+                "is_merge_point": node_id in self._merge_points,
+            }
+            for node_id in self._execution_order
+        ]
+        
+        branches_dict = {
+            branch_id: list(node_ids) 
+            for branch_id, node_ids in self._branches.items()
+        } if self._branches else None
+        
+        yield ExecutionEvent(
+            event_type="start",
+            execution_id=self.execution_id,
+            timestamp=time.time(),
+            total_nodes=total_nodes,
+            execution_plan=execution_plan,
+            levels=self._levels,
+            branches=branches_dict,
+            merge_points=list(self._merge_points) if self._merge_points else None,
+        )
+        
+        # Shared progress state with lock for thread safety
+        progress_state = {
+            "total": total_nodes,
+            "completed": 0,
+            "lock": threading.Lock(),
+        }
+        
+        # Event queue to collect events from all branches
+        event_queue: asyncio.Queue = asyncio.Queue()
+        
+        # Identify independent branches (those from the same Start node)
+        parallel_branch_groups: Dict[str, List[str]] = defaultdict(list)
+        for branch_id in self._branches:
+            # Group by start node
+            if "_branch_" in branch_id:
+                start_id = branch_id.rsplit("_branch_", 1)[0]
+                parallel_branch_groups[start_id].append(branch_id)
+            else:
+                parallel_branch_groups[branch_id].append(branch_id)
+        
+        start_time = time.perf_counter()
+        
+        try:
+            # Start all branches as parallel tasks
+            branch_tasks = []
+            for start_id, branch_ids in parallel_branch_groups.items():
+                for branch_id in branch_ids:
+                    branch_nodes = self._branches.get(branch_id, set())
+                    if branch_nodes:
+                        task = asyncio.create_task(
+                            self._execute_branch_streaming(
+                                branch_id,
+                                branch_nodes,
+                                event_queue,
+                                progress_state,
+                            )
+                        )
+                        branch_tasks.append(task)
+            
+            # Also handle any dataflow-only nodes (not in any branch)
+            all_branch_nodes = set()
+            for nodes in self._branches.values():
+                all_branch_nodes.update(nodes)
+            dataflow_nodes = set(self._execution_order) - all_branch_nodes - self._start_nodes
+            
+            if dataflow_nodes:
+                task = asyncio.create_task(
+                    self._execute_branch_streaming(
+                        "__dataflow__",
+                        dataflow_nodes,
+                        event_queue,
+                        progress_state,
+                    )
+                )
+                branch_tasks.append(task)
+            
+            # Sentinel to signal completion
+            async def wait_for_branches():
+                await asyncio.gather(*branch_tasks, return_exceptions=True)
+                await event_queue.put(None)  # Sentinel
+            
+            asyncio.create_task(wait_for_branches())
+            
+            # Yield events as they arrive from all branches
+            while True:
+                event = await event_queue.get()
+                if event is None:
+                    break
+                yield event
+            
+            # Execute Start nodes (they typically have no inputs)
+            for start_id in self._start_nodes:
+                if start_id in self._execution_order:
+                    with progress_state["lock"]:
+                        total = progress_state["total"]
+                        completed = progress_state["completed"]
+                    
+                    inputs = self._prepare_inputs(start_id)
+                    start_node = self.nodes[start_id]
+                    result = NodeExecutionResult(
+                        node_id=start_id,
+                        node_type=start_node.type,
+                        status=NodeStatus.COMPLETED,
+                        outputs={"control_out": None},
+                        logs=["Start node triggered"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(start_id, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(start_id, inputs, result, cached=False)
+            
+            self.outputs = self._collect_outputs()
+            
+            total_time = (time.perf_counter() - start_time) * 1000
+            self._total_execution_time_ms = total_time
+            self._max_parallelism = len(branch_tasks)
+            
+            with progress_state["lock"]:
+                completed = progress_state["completed"]
+            
+            yield ExecutionEvent(
+                event_type="complete",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                progress=1.0,
+                total_nodes=total_nodes,
+                completed_nodes=completed,
+            )
+            
+        finally:
+            if self._thread_pool:
+                self._thread_pool.shutdown(wait=False)
+                self._thread_pool = None
+            self._cleanup_resources()
+            self._unregister_execution(self.execution_id)
+
+
     async def run_async(self) -> Dict[str, Any]:
         """Execute the graph with dynamic readiness (no level barrier)."""
         if self._loop_nodes:
@@ -1299,6 +1778,18 @@ class GraphExecutor:
 
     async def run_streaming(self) -> AsyncIterator[ExecutionEvent]:
         """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
+        # Check if we have multiple independent branches that can run in parallel
+        # even if they contain loops
+        has_parallel_branches = len(self._branches) > 1
+        
+        if has_parallel_branches:
+            # Use parallel branch execution - each branch runs sequentially internally
+            # but multiple branches execute concurrently
+            async for event in self._run_parallel_branches():
+                yield event
+            return
+        
+        # Fall back to sequential execution for single-branch graphs with loops
         if self._loop_nodes:
             async for event in self._run_streaming_sequential():
                 yield event
