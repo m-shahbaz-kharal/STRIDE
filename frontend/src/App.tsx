@@ -22,7 +22,7 @@ import TypeAwareConnectionLine from "./components/graph/TypeAwareConnectionLine"
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
-import OutputsView from "./components/OutputsView";
+import DisplayView from "./components/DisplayView";
 import SmartConnectModal from "./components/SmartConnectModal";
 import AppHeader from "./components/layout/AppHeader";
 import ConnectionToast from "./components/ConnectionToast";
@@ -80,7 +80,7 @@ const App = () => {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
 
   // Header tab state
-  const [headerTab, setHeaderTab] = useState<"graph-editor" | "outputs">("graph-editor");
+  const [headerTab, setHeaderTab] = useState<"graph-editor" | "display">("graph-editor");
 
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
@@ -230,39 +230,40 @@ const App = () => {
 
   // ========== Computed values ==========
 
-  const outputsSummary = useMemo(() => {
-    let images = 0;
-    const streamIds = new Set<string>();
-    let values = 0;
+  const displaySummary = useMemo(() => {
+    let sections = new Set<string>();
+    let totalItems = 0;
 
     for (const node of nodes) {
-      const nodeOutputs = node.data.last_outputs;
-      const display = nodeOutputs?.display;
-      if (typeof display === "string" && display.startsWith("data:image")) {
-        images += 1;
-      }
-      const image = nodeOutputs?.image;
-      if (typeof image === "string" && image.startsWith("data:image")) {
-        images += 1;
-      }
-      const streamId = nodeOutputs?.stream_id;
-      if (typeof streamId === "string") {
-        streamIds.add(streamId);
+      if (node.data.nodeType !== "general.to_display") continue;
+
+      const nodeOutputs = (outputs[node.id] || node.data.last_outputs) as any;
+      if (!nodeOutputs) continue;
+
+      // Check if this node actually produced display output (has a value)
+      if (nodeOutputs.value !== undefined) {
+        sections.add(nodeOutputs.section || "Main");
+        totalItems++;
       }
     }
 
-    for (const [key, value] of Object.entries(outputs)) {
-      if (typeof value === "string" && value.startsWith("data:image")) {
-        images += 1;
-      } else if (typeof value === "string" && key.toLowerCase().includes("stream_id")) {
-        streamIds.add(value);
-      } else {
-        values += 1;
-      }
-    }
-
-    return { images, streams: streamIds.size, values };
+    return { sections: sections.size, totalItems };
   }, [nodes, outputs]);
+
+  const handleJumpToNode = useCallback((nodeId: string) => {
+    setHeaderTab("graph-editor");
+
+    // Select the node
+    setSelectedNodeIds([nodeId]);
+    setSelectedNodeId(nodeId);
+
+    // Center view on node
+    const node = nodes.find(n => n.id === nodeId);
+    if (node && reactFlowInstance) {
+      const { x, y } = node.position;
+      reactFlowInstance.setCenter(x + 100, y + 50, { zoom: 1, duration: 800 });
+    }
+  }, [nodes, reactFlowInstance]);
 
   const graphSummary = useMemo(() => ({
     nodeCount: nodes.length,
@@ -1290,16 +1291,20 @@ const App = () => {
           </div>
           <div
             className="outputs-fullpage"
-            style={{ display: headerTab === "outputs" ? "block" : "none" }}
+            style={{ display: headerTab === "display" ? "block" : "none" }}
           >
-            <OutputsView nodes={nodes} outputs={outputs} />
+            <DisplayView
+              nodes={nodes}
+              outputs={outputs}
+              onJumpToNode={handleJumpToNode}
+            />
           </div>
 
           <AppHeader
             headerTab={headerTab}
             onTabChange={setHeaderTab}
             graphSummary={graphSummary}
-            outputsSummary={outputsSummary}
+            displaySummary={displaySummary}
             isRunning={isRunning}
             isConnected={isConnected}
             progress={progress}

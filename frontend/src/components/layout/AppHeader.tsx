@@ -2,8 +2,8 @@ import React from "react";
 import { PlayIcon, StopIcon, ClearCacheIcon, ConnectionIcon } from "../Icons";
 
 interface HeaderTabsProps {
-    activeTab: "graph-editor" | "outputs";
-    onTabChange: (tab: "graph-editor" | "outputs") => void;
+    activeTab: "graph-editor" | "display";
+    onTabChange: (tab: "graph-editor" | "display") => void;
 }
 
 interface GraphSummary {
@@ -12,17 +12,16 @@ interface GraphSummary {
     selectedCount: number;
 }
 
-interface OutputsSummary {
-    images: number;
-    streams: number;
-    values: number;
+interface DisplaySummary {
+    sections: number;
+    totalItems: number;
 }
 
 interface AppHeaderProps {
-    headerTab: "graph-editor" | "outputs";
-    onTabChange: (tab: "graph-editor" | "outputs") => void;
+    headerTab: "graph-editor" | "display";
+    onTabChange: (tab: "graph-editor" | "display") => void;
     graphSummary: GraphSummary;
-    outputsSummary: OutputsSummary;
+    displaySummary: DisplaySummary;
     isRunning: boolean;
     isConnected: boolean;
     progress: number;
@@ -38,7 +37,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     headerTab,
     onTabChange,
     graphSummary,
-    outputsSummary,
+    displaySummary,
     isRunning,
     isConnected,
     progress,
@@ -62,10 +61,10 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                     </button>
                     <button
                         type="button"
-                        className={`header-tab ${headerTab === "outputs" ? "active" : ""}`}
-                        onClick={() => onTabChange("outputs")}
+                        className={`header-tab ${headerTab === "display" ? "active" : ""}`}
+                        onClick={() => onTabChange("display")}
                     >
-                        Outputs
+                        Display
                     </button>
                 </div>
 
@@ -81,16 +80,13 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                     </div>
                 )}
 
-                {headerTab === "outputs" && (
+                {headerTab === "display" && (
                     <div className="outputs-pills header-pills">
                         <span className="pill">
-                            {outputsSummary.images} image{outputsSummary.images === 1 ? "" : "s"}
+                            {displaySummary.sections} section{displaySummary.sections === 1 ? "" : "s"}
                         </span>
                         <span className="pill">
-                            {outputsSummary.streams} stream{outputsSummary.streams === 1 ? "" : "s"}
-                        </span>
-                        <span className="pill">
-                            {outputsSummary.values} value{outputsSummary.values === 1 ? "" : "s"}
+                            {displaySummary.totalItems} item{displaySummary.totalItems === 1 ? "" : "s"}
                         </span>
                     </div>
                 )}
@@ -145,3 +141,6 @@ const AppHeader: React.FC<AppHeaderProps> = ({
 };
 
 export default AppHeader;
+
+
+
