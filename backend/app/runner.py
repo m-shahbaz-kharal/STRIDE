@@ -78,6 +78,7 @@ class GraphExecutor:
         self._cancel_all: bool = False
         self._variables: Dict[str, Any] = {}
         self._shared_metadata: Dict[str, Any] = {}
+        self._resources: List[Any] = []
         
         # Caching options
         self._cache = ExecutionCache(enabled=self.options.get("use_cache", True))
@@ -149,9 +150,20 @@ class GraphExecutor:
         self._computed_values = {}
         self._variables = {}
         self._shared_metadata = {}
+        self._resources = []
         self._cancel_all = False
         self._cancelled_nodes.clear()
         self._running_tasks = {}
+
+    def _cleanup_resources(self) -> None:
+        """Close and cleanup any registered resources."""
+        for resource in self._resources:
+            if hasattr(resource, "close") and callable(resource.close):
+                try:
+                    resource.close()
+                except Exception:
+                    pass
+        self._resources.clear()
 
     def _can_cache(self, node_id: str) -> bool:
         node = self.nodes[node_id]
@@ -566,6 +578,13 @@ class GraphExecutor:
             ctx = ExecutionContext()
             ctx.variables = self._variables
             ctx.metadata = self._shared_metadata
+            
+            # Hook up resource registration
+            def _register_resource(r: Any) -> None:
+                with self._state_lock:
+                    self._resources.append(r)
+            ctx.register_resource = _register_resource
+
             outputs = node.forward(inputs, ctx)
 
             if set(outputs.keys()) != set(node.output_ports):
@@ -727,7 +746,7 @@ class GraphExecutor:
         executed_count += 1
         return executed_count
 
-    def run(self) -> Dict[str, Any]:
+    def _run_internal(self) -> Dict[str, Any]:
         """Execute the graph synchronously (legacy interface)."""
         self._execution_order = self._resolve_execution_order()
         self._reset_execution_state()
@@ -793,6 +812,13 @@ class GraphExecutor:
             "levels": self._levels,
             "execution_id": self.execution_id,
         }
+
+    def run(self) -> Dict[str, Any]:
+        """Execute the graph synchronously (legacy interface)."""
+        try:
+            return self._run_internal()
+        finally:
+            self._cleanup_resources()
 
     async def _run_streaming_sequential(self) -> AsyncIterator[ExecutionEvent]:
         self._execution_order = self._resolve_execution_order()
@@ -1083,6 +1109,7 @@ class GraphExecutor:
                 completed_nodes=completed_nodes,
             )
         finally:
+            self._cleanup_resources()
             self._unregister_execution(self.execution_id)
 
     async def run_async(self) -> Dict[str, Any]:

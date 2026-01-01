@@ -14,6 +14,7 @@ class ExecutionContext:
     logger: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     variables: Dict[str, Any] = field(default_factory=dict)
+    resources: List[Any] = field(default_factory=list)
 
     def log(self, message: str) -> None:
         self.logger.append(message)
@@ -23,6 +24,10 @@ class ExecutionContext:
 
     def get_var(self, name: str, default: Any = None) -> Any:
         return self.variables.get(name, default)
+
+    def register_resource(self, resource: Any) -> None:
+        """Register a resource that needs to be cleaned up when execution finishes."""
+        self.resources.append(resource)
 
 
 class NodeBase(abc.ABC):

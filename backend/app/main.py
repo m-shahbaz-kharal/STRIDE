@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
-from .nodes.fl511 import STREAM_MANAGER
+from .nodes.fl511 import get_active_stream
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
@@ -101,9 +101,8 @@ async def get_cache_stats() -> Dict[str, Any]:
 @app.get("/api/streams/{stream_id}/frame")
 async def get_stream_frame(stream_id: str) -> Response:
     """Fetch the latest JPEG frame for a running stream."""
-    try:
-        worker = STREAM_MANAGER.get_stream(stream_id)
-    except KeyError:
+    worker = get_active_stream(stream_id)
+    if not worker:
         raise HTTPException(status_code=404, detail="Stream not found")
 
     frame = worker.latest_frame(timeout=0.1)
@@ -167,7 +166,7 @@ def serialize_event(event) -> str:
                 value = value.value
             data[field] = value
     
-    return json.dumps(data)
+    return json.dumps(data, default=str)
 
 
 @app.websocket("/ws/run-graph")

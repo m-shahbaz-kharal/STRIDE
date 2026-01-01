@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
 CONTAINERS = {"list", "map", "record", "tuple", "option"}
-FLEXIBLE = {"any", "unknown", "tensor", "control"}
+FLEXIBLE = {"any", "unknown", "tensor", "control", "stream"}
 
 
 @dataclass(frozen=True)
@@ -194,3 +194,7 @@ def t_record(fields: Dict[str, TypeDescriptor]) -> TypeDescriptor:
 
 def t_tensor(dtype: str = "float32", shape: Optional[list[int]] = None) -> TypeDescriptor:
     return TypeDescriptor(kind="tensor", metadata={"dtype": dtype, "shape": shape or []})
+
+
+def t_stream() -> TypeDescriptor:
+    return TypeDescriptor(kind="stream")

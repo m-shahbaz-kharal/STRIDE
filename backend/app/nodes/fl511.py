@@ -36,7 +36,7 @@ except ImportError:
 from . import register_node
 from .base import ExecutionContext, NodeBase
 from ..node_spec import NodeSpec, PortSpec
-from ..typesystem import t_boolean, t_control, t_float, t_int, t_string
+from ..typesystem import t_boolean, t_control, t_float, t_int, t_string, t_stream
 
 
 def _require_numpy() -> None:
@@ -124,7 +124,16 @@ def _probe_stream_resolution(hls_url: str) -> Tuple[int, int]:
     return 704, 480
 
 
-class _StreamWorker:
+ACTIVE_STREAMS: Dict[str, "StreamResource"] = {}
+
+
+def get_active_stream(stream_id: str) -> Optional["StreamResource"]:
+    return ACTIVE_STREAMS.get(stream_id)
+
+
+class StreamResource:
+    """A self-contained stream resource that manages its own ffmpeg process."""
+    
     def __init__(self, stream_id: str, hls_url: str, target_fps: int, buffer_seconds: int) -> None:
         _require_numpy()
         if not shutil.which("ffmpeg"):
@@ -143,6 +152,9 @@ class _StreamWorker:
         self._proc: Optional[subprocess.Popen] = None
         self._last_frame_time = 0.0
         self._lock = threading.Lock()
+        
+        ACTIVE_STREAMS[self.stream_id] = self
+        self._start()
 
     def _ffmpeg_cmd(self) -> list[str]:
         return [
@@ -160,7 +172,7 @@ class _StreamWorker:
             "-",
         ]
 
-    def start(self) -> None:
+    def _start(self) -> None:
         self._proc = subprocess.Popen(
             self._ffmpeg_cmd(),
             stdout=subprocess.PIPE,
@@ -206,50 +218,21 @@ class _StreamWorker:
         except queue.Empty:
             return None
 
-    def stop(self) -> None:
+    def close(self) -> None:
+        """Stop the stream and release resources."""
+        ACTIVE_STREAMS.pop(self.stream_id, None)
         self._running.clear()
         if self._proc:
             self._proc.terminate()
+            try:
+                self._proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
         if self._thread.is_alive():
             self._thread.join(timeout=1.0)
-
-
-class FL511StreamManager:
-    def __init__(self) -> None:
-        self._streams: Dict[str, _StreamWorker] = {}
-        self._lock = threading.Lock()
-
-    def start_stream(self, hls_url: str, target_fps: int, buffer_seconds: int) -> Tuple[str, _StreamWorker]:
-        stream_id = str(uuid.uuid4())[:8]
-        worker = _StreamWorker(stream_id, hls_url, target_fps=target_fps, buffer_seconds=buffer_seconds)
-        worker.start()
-        with self._lock:
-            self._streams[stream_id] = worker
-        return stream_id, worker
-
-    def get_stream(self, stream_id: str) -> _StreamWorker:
-        with self._lock:
-            if stream_id not in self._streams:
-                raise KeyError(f"Unknown stream '{stream_id}'")
-            return self._streams[stream_id]
-
-    def stop_stream(self, stream_id: str) -> bool:
-        with self._lock:
-            worker = self._streams.pop(stream_id, None)
-        if worker:
-            worker.stop()
-            return True
-        return False
-
-    def stop_all(self) -> None:
-        with self._lock:
-            streams = list(self._streams.values())
-            self._streams.clear()
-        for worker in streams:
-            worker.stop()
-
-
-STREAM_MANAGER = FL511StreamManager()
+            
+    def __repr__(self) -> str:
+        return f"<StreamResource id={self.stream_id} url={self.hls_url} size={self.width}x{self.height}>"
 
 
 FL511_RESOLVE_SPEC = NodeSpec(
@@ -300,7 +283,7 @@ FL511_START_SPEC = NodeSpec(
     display_name="Connect FL511 Stream",
     category="FL511 Camera",
     summary="Connect to a FL511 camera stream.",
-    description="Starts a background reader and returns a stream id for fetching frames.",
+    description="Starts a background reader and returns a stream object for fetching frames.",
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
@@ -311,6 +294,7 @@ FL511_START_SPEC = NodeSpec(
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="stream", type=t_stream()),
         PortSpec(name="stream_id", type=t_string()),
         PortSpec(name="url", type=t_string()),
         PortSpec(name="width", type=t_int()),
@@ -322,21 +306,6 @@ FL511_START_SPEC = NodeSpec(
 
 @register_node(FL511_START_SPEC)
 class Fl511StartNode(NodeBase):
-    def __init__(self, config: Dict[str, Any], spec: NodeSpec = FL511_START_SPEC) -> None:
-        super().__init__(config, spec=spec)
-        self._stream_id: Optional[str] = None
-
-    def _ensure_stream(self, hls_url: str, target_fps: int, buffer_seconds: int) -> Tuple[str, _StreamWorker]:
-        if self._stream_id:
-            try:
-                worker = STREAM_MANAGER.get_stream(self._stream_id)
-                return self._stream_id, worker
-            except KeyError:
-                self._stream_id = None
-        stream_id, worker = STREAM_MANAGER.start_stream(hls_url, target_fps=target_fps, buffer_seconds=buffer_seconds)
-        self._stream_id = stream_id
-        return stream_id, worker
-
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         hls_url = inputs.get("url")
         camera_id = inputs.get("camera")
@@ -351,14 +320,21 @@ class Fl511StartNode(NodeBase):
         target_fps = int(fps_value if fps_value is not None else self.params.get("fps", 15))
         buffer_seconds = int(buffer_seconds_value if buffer_seconds_value is not None else self.params.get("buffer_seconds", 4))
 
-        stream_id, worker = self._ensure_stream(str(hls_url), target_fps, buffer_seconds)
-        ctx.log(f"Connected stream {stream_id} at {worker.width}x{worker.height}")
+        stream_id = str(uuid.uuid4())[:8]
+        stream = StreamResource(stream_id, str(hls_url), target_fps, buffer_seconds)
+        
+        # Register the stream resource so it gets cleaned up automatically
+        if hasattr(ctx, "register_resource"):
+            ctx.register_resource(stream)
+            
+        ctx.log(f"Connected stream {stream_id} at {stream.width}x{stream.height}")
         return {
             "control_out": None,
+            "stream": stream,
             "stream_id": stream_id,
             "url": str(hls_url),
-            "width": worker.width,
-            "height": worker.height,
+            "width": stream.width,
+            "height": stream.height,
         }
 
 
@@ -372,7 +348,7 @@ FL511_TICK_SPEC = NodeSpec(
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="stream_id", type=t_string(), required=False, default=None),
+        PortSpec(name="stream", type=t_stream(), required=True, default=None),
         PortSpec(name="timeout", type=t_float(), required=False, default=1.0),
         PortSpec(name="quality", type=t_int(), required=False, default=85),
         PortSpec(name="require_frame", type=t_boolean(), required=False, default=True),
@@ -393,11 +369,10 @@ FL511_TICK_SPEC = NodeSpec(
 @register_node(FL511_TICK_SPEC)
 class Fl511TickNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        stream_id = inputs.get("stream_id")
-        if not stream_id:
-            raise ValueError("Missing required input: stream_id")
-        worker = STREAM_MANAGER.get_stream(str(stream_id))
-
+        stream = inputs.get("stream")
+        if not stream or not isinstance(stream, StreamResource):
+            raise ValueError("Invalid or missing input: stream")
+        
         timeout_value = inputs.get("timeout")
         quality_value = inputs.get("quality")
         require_frame_value = inputs.get("require_frame")
@@ -407,7 +382,7 @@ class Fl511TickNode(NodeBase):
         require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", True))
         pace = bool(pace_value) if pace_value is not None else bool(self.params.get("pace", True))
 
-        frame = worker.latest_frame(timeout=timeout, pace=pace)
+        frame = stream.latest_frame(timeout=timeout, pace=pace)
         if frame is None:
             if require_frame:
                 raise TimeoutError(f"No frame available within {timeout}s")
@@ -416,8 +391,8 @@ class Fl511TickNode(NodeBase):
                 "image": None,
                 "has_frame": False,
                 "timestamp": time.time(),
-                "width": worker.width,
-                "height": worker.height,
+                "width": stream.width,
+                "height": stream.height,
             }
 
         _require_cv2()
@@ -427,14 +402,14 @@ class Fl511TickNode(NodeBase):
             raise RuntimeError("Failed to encode frame")
         image_data = base64.b64encode(buffer).decode("utf-8")
         image_url = f"data:image/jpeg;base64,{image_data}"
-        ctx.log(f"Fetched frame from stream {stream_id}")
+        # ctx.log(f"Fetched frame from stream {stream.stream_id}")
         return {
             "control_out": None,
             "image": image_url,
             "has_frame": True,
             "timestamp": time.time(),
-            "width": worker.width,
-            "height": worker.height,
+            "width": stream.width,
+            "height": stream.height,
         }
 
 
@@ -448,7 +423,7 @@ FL511_STOP_SPEC = NodeSpec(
     icon="camera",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="stream_id", type=t_string(), required=False, default=None),
+        PortSpec(name="stream", type=t_stream(), required=True, default=None),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -462,9 +437,10 @@ FL511_STOP_SPEC = NodeSpec(
 @register_node(FL511_STOP_SPEC)
 class Fl511StopNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        stream_id = inputs.get("stream_id")
-        if not stream_id:
-            raise ValueError("Missing required input: stream_id")
-        stopped = STREAM_MANAGER.stop_stream(str(stream_id))
-        ctx.log(f"Disconnected stream {stream_id}: {stopped}")
-        return {"control_out": None, "stopped": stopped}
+        stream = inputs.get("stream")
+        if not stream or not isinstance(stream, StreamResource):
+            raise ValueError("Invalid or missing input: stream")
+            
+        stream.close()
+        ctx.log(f"Disconnected stream {stream.stream_id}")
+        return {"control_out": None, "stopped": True}
