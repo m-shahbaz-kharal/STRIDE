@@ -67,7 +67,7 @@ export interface NodeTypeDefinition {
   params_defaults?: Record<string, string | number | boolean>;
 }
 
-export type NodeExecutionStatus = 
+export type NodeExecutionStatus =
   | "pending"
   | "queued"
   | "running"
@@ -102,19 +102,21 @@ export interface ExecutionPlanNode {
   node_id: string;
   node_type: string;
   level: number;
+  branch_id?: string;  // Branch this node belongs to
+  is_merge_point?: boolean;  // Whether node receives multi-branch inputs
 }
 
 export interface ExecutionEvent {
-  event_type: 
-    | "start"
-    | "node_queued"
-    | "node_started"
-    | "node_completed"
-    | "node_cached"
-    | "node_error"
-    | "complete"
-    | "result"
-    | "error";
+  event_type:
+  | "start"
+  | "node_queued"
+  | "node_started"
+  | "node_completed"
+  | "node_cached"
+  | "node_error"
+  | "complete"
+  | "result"
+  | "error";
   execution_id: string;
   timestamp: number;
   node_id?: string;
@@ -132,6 +134,9 @@ export interface ExecutionEvent {
   from_cache?: boolean;
   execution_plan?: ExecutionPlanNode[];
   levels?: string[][];
+  // Branch info for hybrid execution
+  branches?: Record<string, string[]>;  // branch_id -> node_ids
+  merge_points?: string[];  // List of merge point node_ids
   // For result event
   trace?: ExecutionTraceEntry[];
   stats?: ExecutionStats;
@@ -178,6 +183,12 @@ export interface BlueprintNodeData {
   executionLogs?: string[];
   // Highlight state (for hover interactions from timeline/performance panels)
   isHighlighted?: boolean;
+  // Hybrid execution model
+  executionMode?: "dataflow" | "controlflow";  // default: "dataflow"
+  showControlPorts?: boolean;  // Whether to show control ports (default: false for dataflow)
+  branchId?: string;  // Branch this node belongs to during execution
+  isMergePoint?: boolean;  // Whether this node receives inputs from multiple branches
+  onToggleControlPorts?: (nodeId: string) => void;  // Toggle control port visibility
 }
 
 export interface ExecutionResult {

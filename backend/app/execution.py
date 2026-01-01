@@ -51,6 +51,8 @@ class NodeExecutionResult:
     error_code: Optional[str] = None
     level: int = 0  # Topological level for parallel execution
     from_cache: bool = False  # Whether result came from cache
+    branch_id: Optional[str] = None  # Branch this node belongs to (hybrid execution)
+    is_merge_point: bool = False  # Whether this node receives inputs from multiple branches
 
 
 @dataclass
@@ -76,6 +78,11 @@ class ExecutionEvent:
     # Execution plan info (sent at start)
     execution_plan: Optional[List[Dict[str, Any]]] = None
     levels: Optional[List[List[str]]] = None
+    # Branch info for hybrid execution model
+    branch_id: Optional[str] = None
+    is_merge_point: Optional[bool] = None
+    branches: Optional[Dict[str, List[str]]] = None  # branch_id -> node_ids (sent at start)
+    merge_points: Optional[List[str]] = None  # List of merge point node_ids (sent at start)
 
 
 @dataclass

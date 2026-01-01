@@ -214,7 +214,16 @@ const App = () => {
     onPortHover: setHoveredPort,
     onInputValueChange: handleInputValueChange,
     onAddInputPort: handleAddInputPort,
-  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodes]);
+    onToggleControlPorts: (nodeId: string) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, data: { ...n.data, showControlPorts: !n.data.showControlPorts } }
+            : n
+        )
+      );
+    },
+  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodes, setNodes]);
 
   // ========== Computed values ==========
 

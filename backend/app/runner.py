@@ -86,6 +86,13 @@ class GraphExecutor:
         self._loop_nodes: Set[str] = set()
         self._loop_body_nodes: Dict[str, Set[str]] = {}
         self._nodes_in_loop_body: Set[str] = set()
+        
+        # Branch detection for hybrid execution model
+        self._start_nodes: Set[str] = set()  # Nodes with type core.control.start
+        self._branch_roots: Dict[str, str] = {}  # node_id -> branch_id (root start node)
+        self._branches: Dict[str, Set[str]] = {}  # branch_id -> set of nodes in that branch
+        self._merge_points: Set[str] = set()  # Nodes receiving inputs from multiple branches
+        self._branch_completed: Dict[str, asyncio.Event] = {}  # Events for branch completion
 
         self._build_nodes()
         self._build_links()
@@ -93,6 +100,7 @@ class GraphExecutor:
         self._topo_order = self._topological_sort()
         self._compute_levels()
         self._build_loop_sets()
+        self._build_branch_info()
 
     @classmethod
     def _register_execution(cls, executor: "GraphExecutor") -> None:
@@ -365,6 +373,85 @@ class GraphExecutor:
                 if child not in body_nodes:
                     queue.append(child)
         return body_nodes
+
+    def _build_branch_info(self) -> None:
+        """Detect parallel branches from Start nodes and identify merge points.
+        
+        This implements the hybrid execution model:
+        - Identify Start nodes (core.control.start)
+        - Trace branches from each Start node's control outputs
+        - Nodes reachable only via data dependencies are "dataflow" nodes
+        - Nodes with control connections are "controlflow" nodes
+        - Merge points are nodes that receive inputs from multiple distinct branches
+        """
+        # Find all Start nodes
+        self._start_nodes = {
+            node_id for node_id, node in self.nodes.items()
+            if node.type == "core.control.start"
+        }
+        
+        if not self._start_nodes:
+            # No Start nodes - pure dataflow execution
+            return
+        
+        # Trace branches from each Start node
+        for start_id in self._start_nodes:
+            control_targets = self.control_outputs.get(start_id, [])
+            
+            if len(control_targets) <= 1:
+                # Single or no control output - linear execution
+                branch_id = start_id
+                self._branches[branch_id] = set()
+                self._trace_branch(start_id, branch_id)
+            else:
+                # Multiple control outputs - parallel branches
+                for i, (target_node, _, _) in enumerate(control_targets):
+                    branch_id = f"{start_id}_branch_{i}"
+                    self._branches[branch_id] = set()
+                    self._trace_branch_from(target_node, branch_id)
+        
+        # Identify merge points: nodes receiving data from multiple branches
+        for node_id in self.nodes:
+            if node_id in self._start_nodes:
+                continue
+            input_branches = set()
+            for link in self.input_map.get(node_id, {}).values():
+                from_branch = self._branch_roots.get(link.from_node)
+                if from_branch:
+                    input_branches.add(from_branch)
+            
+            if len(input_branches) > 1:
+                self._merge_points.add(node_id)
+    
+    def _trace_branch(self, start_id: str, branch_id: str) -> None:
+        """Trace all nodes reachable from a Start node via control flow."""
+        queue = deque([start_id])
+        while queue:
+            node_id = queue.popleft()
+            if node_id in self._branch_roots:
+                continue  # Already assigned to a branch
+            self._branch_roots[node_id] = branch_id
+            self._branches[branch_id].add(node_id)
+            
+            # Follow control outputs
+            for target, _, _ in self.control_outputs.get(node_id, []):
+                if target not in self._branch_roots:
+                    queue.append(target)
+    
+    def _trace_branch_from(self, node_id: str, branch_id: str) -> None:
+        """Trace a branch starting from a specific node (not the Start)."""
+        queue = deque([node_id])
+        while queue:
+            current = queue.popleft()
+            if current in self._branch_roots:
+                continue  # Already assigned to a branch
+            self._branch_roots[current] = branch_id
+            self._branches[branch_id].add(current)
+            
+            # Follow control outputs
+            for target, _, _ in self.control_outputs.get(current, []):
+                if target not in self._branch_roots:
+                    queue.append(target)
 
     def _expand_dependencies(self, node_ids: List[str]) -> Set[str]:
         """Expand a set of target nodes to include all their dependencies."""
@@ -1209,9 +1296,17 @@ class GraphExecutor:
                 "node_id": node_id,
                 "node_type": self.nodes[node_id].type,
                 "level": self._node_levels.get(node_id, 0),
+                "branch_id": self._branch_roots.get(node_id),
+                "is_merge_point": node_id in self._merge_points,
             }
             for node_id in self._execution_order
         ]
+        
+        # Convert branch sets to lists for JSON serialization
+        branches_dict = {
+            branch_id: list(node_ids) 
+            for branch_id, node_ids in self._branches.items()
+        } if self._branches else None
         
         yield ExecutionEvent(
             event_type="start",
@@ -1220,6 +1315,8 @@ class GraphExecutor:
             total_nodes=total_nodes,
             execution_plan=execution_plan,
             levels=self._levels,
+            branches=branches_dict,
+            merge_points=list(self._merge_points) if self._merge_points else None,
         )
         
         remaining_inputs: Dict[str, int] = {

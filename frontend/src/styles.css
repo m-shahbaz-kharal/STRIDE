@@ -1090,7 +1090,7 @@ body {
   margin-bottom: 8px;
 }
 
-.inspector-meta > div {
+.inspector-meta>div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -2654,6 +2654,31 @@ body {
   color: #ffb86c;
 }
 
+/* Control flow toggle button */
+.node-action-btn.control-toggle-btn {
+  color: var(--text-muted);
+  opacity: 0.5;
+  transition: all 0.2s ease;
+}
+
+.node-action-btn.control-toggle-btn:hover {
+  opacity: 1;
+  color: var(--accent-orange);
+  background: rgba(210, 153, 34, 0.15);
+}
+
+.node-action-btn.control-toggle-btn.control-toggle-on {
+  opacity: 1;
+  color: var(--accent-orange);
+  background: rgba(210, 153, 34, 0.2);
+  box-shadow: 0 0 6px rgba(210, 153, 34, 0.4);
+}
+
+.node-action-btn.control-toggle-btn.control-toggle-on:hover {
+  background: rgba(210, 153, 34, 0.3);
+  box-shadow: 0 0 10px rgba(210, 153, 34, 0.6);
+}
+
 .node-delete-btn {
   display: flex;
   align-items: center;
@@ -3013,8 +3038,7 @@ body {
 .control-handle:hover .control-handle-icon {
   transform: scale(1.2);
   filter:
-    drop-shadow(0 0 6px var(--handle-color, rgba(210, 153, 34, 0.7)))
-    drop-shadow(0 0 12px var(--handle-color, rgba(210, 153, 34, 0.6)));
+    drop-shadow(0 0 6px var(--handle-color, rgba(210, 153, 34, 0.7))) drop-shadow(0 0 12px var(--handle-color, rgba(210, 153, 34, 0.6)));
 }
 
 .control-handle::before {
@@ -3029,8 +3053,7 @@ body {
 .control-handle.handle-highlighted .control-handle-icon {
   transform: scale(1.2);
   filter:
-    drop-shadow(0 0 6px var(--handle-color, rgba(210, 153, 34, 0.7)))
-    drop-shadow(0 0 12px var(--handle-color, rgba(210, 153, 34, 0.6)));
+    drop-shadow(0 0 6px var(--handle-color, rgba(210, 153, 34, 0.7))) drop-shadow(0 0 12px var(--handle-color, rgba(210, 153, 34, 0.6)));
 }
 
 .handle-highlighted {
@@ -3592,6 +3615,7 @@ body {
 .outputs-chevron {
   flex-shrink: 0;
 }
+
 .outputs-header-title {
   display: flex;
   flex-direction: column;

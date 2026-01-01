@@ -118,6 +118,30 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     [edges, id]
   );
 
+  const isOutputConnected = useCallback(
+    (port: string) =>
+      edges.some((edge) => edge.source === id && edge.sourceHandle === port),
+    [edges, id]
+  );
+
+  // Control ports are hidden by default in dataflow mode unless connected
+  const isControlPortVisible = useCallback(
+    (port: string, direction: "input" | "output", portKind: string) => {
+      // Always show non-control ports
+      if (portKind !== "control") return true;
+
+      // In controlflow mode or when showControlPorts is true, always show
+      if (data.executionMode === "controlflow" || data.showControlPorts) return true;
+
+      // In dataflow mode, only show if connected
+      if (direction === "input") {
+        return isInputConnected(port);
+      }
+      return isOutputConnected(port);
+    },
+    [data.executionMode, data.showControlPorts, isInputConnected, isOutputConnected]
+  );
+
   const getConnectedOutput = useCallback(
     (port: string) => {
       const edge = edges.find((item) => item.target === id && item.targetHandle === port);
@@ -331,6 +355,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               </button>
             );
           })()}
+          {/* Toggle control ports visibility button */}
+          <button
+            className={`node-action-btn control-toggle-btn nodrag${data.showControlPorts ? " control-toggle-on" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onToggleControlPorts?.(id);
+            }}
+            title={data.showControlPorts ? "Hide control flow connectors" : "Show control flow connectors"}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              {/* Branch/flow icon */}
+              <path d="M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4h-6zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3L10 4z" />
+            </svg>
+          </button>
           <button
             className="node-delete-btn nodrag"
             onClick={(e) => {
@@ -417,9 +455,16 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const portType = resolvePortType(port, "input");
             const portKind = getTypeKind(portType);
             const isControl = portKind === "control";
-            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
+
+            // Hide control ports when toggle is off and not connected
+            if (isControl && !data.showControlPorts && !isInputConnected(port)) {
+              return null;
+            }
+
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
+
+            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "input";
             const isConnected = isInputConnected(port);
             const inputValue = data.inputValues?.[port];
@@ -450,7 +495,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 >
                   {isControl && (
                     <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M8 5v14l11-7z" />
+                      <path d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18c.62-.39.62-1.29 0-1.69L9.54 5.98C8.87 5.55 8 6.03 8 6.82z" />
                     </svg>
                   )}
                 </Handle>
@@ -547,9 +592,16 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const portType = resolvePortType(port, "output");
             const portKind = getTypeKind(portType);
             const isControl = portKind === "control";
-            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
+
+            // Hide control ports when toggle is off and not connected
+            if (isControl && !data.showControlPorts && !isOutputConnected(port)) {
+              return null;
+            }
+
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
+
+            const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "output";
             const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
@@ -583,7 +635,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 >
                   {isControl && (
                     <svg className="control-handle-icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M8 5v14l11-7z" />
+                      <path d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18c.62-.39.62-1.29 0-1.69L9.54 5.98C8.87 5.55 8 6.03 8 6.82z" />
                     </svg>
                   )}
                 </Handle>
