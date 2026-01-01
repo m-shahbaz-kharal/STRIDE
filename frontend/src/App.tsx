@@ -1427,7 +1427,7 @@ const App = () => {
                               setTimeout(() => handleDuplicateSelected(), 0);
                             }}
                             hoveredPort={hoveredPort}
-                            onOutputHover={(info) => setHoveredPort(info)}
+                            onPortHover={(info) => setHoveredPort(info)}
                           />
                         )}
                         {rightPanelTab === "execution" && (

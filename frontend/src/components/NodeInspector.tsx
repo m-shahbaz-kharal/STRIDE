@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { Node } from "reactflow";
 import { BlueprintNodeData } from "../types";
 import { formatPortTypeLabel } from "../graph/utils";
@@ -9,8 +9,118 @@ type InspectorProps = {
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
-  onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
+  onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
 };
+
+// Value display component with expand button
+const PortValue = React.memo(({ value }: { value: unknown }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  // Check for undefined/null first
+  if (value === undefined || value === null) {
+    return <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>;
+  }
+
+  // Safe stringify
+  let stringValue: string;
+  try {
+    stringValue = JSON.stringify(value);
+  } catch {
+    stringValue = String(value);
+  }
+  const isLong = stringValue.length > 50;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '4px', flex: 1, minWidth: 0 }}>
+      <span
+        style={{
+          fontFamily: 'monospace',
+          fontSize: '11px',
+          color: 'var(--text-secondary)',
+          wordBreak: expanded ? 'break-all' : 'normal',
+          overflow: expanded ? 'visible' : 'hidden',
+          textOverflow: expanded ? 'clip' : 'ellipsis',
+          whiteSpace: expanded ? 'pre-wrap' : 'nowrap',
+          flex: 1,
+          minWidth: 0,
+        }}
+        title={stringValue}
+      >
+        {stringValue}
+      </span>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            background: 'rgba(139, 148, 158, 0.2)',
+            border: 'none',
+            borderRadius: '3px',
+            padding: '1px 4px',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            fontSize: '9px',
+            flexShrink: 0,
+          }}
+        >
+          {expanded ? '−' : '+'}
+        </button>
+      )}
+    </div>
+  );
+});
+
+// Single port row component
+const PortRow = React.memo(({
+  nodeId,
+  portName,
+  portType,
+  direction,
+  value,
+  isHighlighted,
+  onHover,
+}: {
+  nodeId: string;
+  portName: string;
+  portType: string;
+  direction: "input" | "output";
+  value: unknown;
+  isHighlighted: boolean;
+  onHover: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+}) => (
+  <div
+    className={`inspector-port-row ${isHighlighted ? "highlighted" : ""}`}
+    style={{
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '8px',
+      padding: '6px 8px',
+      borderRadius: '4px',
+      backgroundColor: isHighlighted ? 'rgba(74, 158, 255, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+      marginBottom: '4px',
+      transition: 'background-color 0.15s',
+    }}
+    onMouseEnter={() => onHover({ nodeId, port: portName, direction })}
+    onMouseLeave={() => onHover(null)}
+  >
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: '80px', flexShrink: 0 }}>
+      <span style={{
+        color: isHighlighted ? 'var(--accent-blue)' : 'var(--text-primary)',
+        fontSize: '12px',
+        fontWeight: 500,
+      }}>
+        {portName}
+      </span>
+      <span style={{
+        color: 'var(--text-muted)',
+        fontSize: '10px',
+      }}>
+        {portType}
+      </span>
+    </div>
+    <PortValue value={value} />
+  </div>
+));
 
 // Single node inspector card
 const NodeCard = ({
@@ -22,7 +132,7 @@ const NodeCard = ({
   onToggle,
   isSingleNode,
   hoveredPort,
-  onOutputHover,
+  onPortHover,
 }: {
   node: Node<BlueprintNodeData>;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
@@ -32,26 +142,35 @@ const NodeCard = ({
   onToggle: () => void;
   isSingleNode: boolean;
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
-  onOutputHover?: (info: { nodeId: string; port: string; direction: "output" } | null) => void;
+  onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
 }) => {
   const hasOutputs = node.data.last_outputs && Object.keys(node.data.last_outputs).length > 0;
+
+  // Build input ports with values
   const inputPorts = useMemo(() => {
     const inputs = node.data.metadata?.inputs ?? [];
-    if (!inputs.length) return [];
+    const inputValues = node.data.inputValues ?? {};
     return inputs.map((input) => ({
       name: input.name,
       type: formatPortTypeLabel(input.type),
+      value: inputValues[input.name],
     }));
-  }, [node.data.metadata?.inputs]);
+  }, [node.data.metadata?.inputs, node.data.inputValues]);
 
+  // Build output ports with last values
   const outputPorts = useMemo(() => {
     const outputs = node.data.metadata?.outputs ?? [];
-    if (!outputs.length) return [];
+    const lastOutputs = node.data.last_outputs ?? {};
     return outputs.map((output) => ({
       name: output.name,
       type: formatPortTypeLabel(output.type),
+      value: lastOutputs[output.name],
     }));
-  }, [node.data.metadata?.outputs]);
+  }, [node.data.metadata?.outputs, node.data.last_outputs]);
+
+  const handlePortHover = useCallback((info: { nodeId: string; port: string; direction: "input" | "output" } | null) => {
+    onPortHover?.(info);
+  }, [onPortHover]);
 
   return (
     <div className={`inspector-node-card ${isSingleNode ? "single" : ""}`}>
@@ -135,67 +254,60 @@ const NodeCard = ({
             )}
           </div>
 
-          {(inputPorts.length > 0 || outputPorts.length > 0) && (
+          {inputPorts.length > 0 && (
             <div className="inspector-section">
-              <h4>Ports</h4>
-              {inputPorts.length > 0 && (
-                <div className="inspector-port-group">
-                  <span className="inspector-port-title">Inputs</span>
-                  <div className="inspector-port-list">
-                    {inputPorts.map((port) => (
-                      <div key={`input-${port.name}`} className="inspector-port-item">
-                        <span className="inspector-port-name">{port.name}</span>
-                        <span className="inspector-port-type">{port.type}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {outputPorts.length > 0 && (
-                <div className="inspector-port-group">
-                  <span className="inspector-port-title">Outputs</span>
-                  <div className="inspector-port-list">
-                    {outputPorts.map((port) => (
-                      <div key={`output-${port.name}`} className="inspector-port-item">
-                        <span className="inspector-port-name">{port.name}</span>
-                        <span className="inspector-port-type">{port.type}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {node.data.last_outputs && (
-            <div className="inspector-section">
-              <h4>Last Outputs</h4>
-              <div className="inspector-outputs">
-                {Object.entries(node.data.last_outputs).map(([key, value]) => {
+              <h4>Inputs</h4>
+              <div className="inspector-ports">
+                {inputPorts.map((port) => {
                   const isHighlighted =
                     hoveredPort?.nodeId === node.id &&
-                    hoveredPort?.port === key &&
-                    hoveredPort?.direction === "output";
+                    hoveredPort?.port === port.name &&
+                    hoveredPort?.direction === "input";
                   return (
-                    <div
-                      key={key}
-                      className={`inspector-output-item ${isHighlighted ? "highlighted" : ""}`}
-                      onMouseEnter={() => onOutputHover?.({ nodeId: node.id, port: key, direction: "output" })}
-                      onMouseLeave={() => onOutputHover?.(null)}
-                    >
-                      <span className="inspector-output-key">{key}</span>
-                      <span className="inspector-output-value" title={JSON.stringify(value)}>
-                        {JSON.stringify(value)}
-                      </span>
-                    </div>
+                    <PortRow
+                      key={port.name}
+                      nodeId={node.id}
+                      portName={port.name}
+                      portType={port.type}
+                      direction="input"
+                      value={port.value}
+                      isHighlighted={isHighlighted}
+                      onHover={handlePortHover}
+                    />
                   );
                 })}
               </div>
             </div>
           )}
 
-          {!node.data.last_outputs && !node.data.description && inputPorts.length === 0 && outputPorts.length === 0 && (
-            <div className="inspector-empty">No outputs yet</div>
+          {outputPorts.length > 0 && (
+            <div className="inspector-section">
+              <h4>Outputs</h4>
+              <div className="inspector-ports">
+                {outputPorts.map((port) => {
+                  const isHighlighted =
+                    hoveredPort?.nodeId === node.id &&
+                    hoveredPort?.port === port.name &&
+                    hoveredPort?.direction === "output";
+                  return (
+                    <PortRow
+                      key={port.name}
+                      nodeId={node.id}
+                      portName={port.name}
+                      portType={port.type}
+                      direction="output"
+                      value={port.value}
+                      isHighlighted={isHighlighted}
+                      onHover={handlePortHover}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {inputPorts.length === 0 && outputPorts.length === 0 && !node.data.description && (
+            <div className="inspector-empty">No ports defined</div>
           )}
         </div>
       )}
@@ -212,7 +324,7 @@ const NodeInspector = ({
   onDelete,
   onDuplicate,
   hoveredPort,
-  onOutputHover,
+  onPortHover,
 }: InspectorProps) => {
   // Track expanded nodes in multi-select mode
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -259,7 +371,7 @@ const NodeInspector = ({
             onToggle={() => toggleNode(node.id)}
             isSingleNode={isSingleNode}
             hoveredPort={hoveredPort}
-            onOutputHover={onOutputHover}
+            onPortHover={onPortHover}
           />
         ))}
       </div>
