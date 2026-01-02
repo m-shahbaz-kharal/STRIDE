@@ -114,6 +114,7 @@ const App = () => {
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [previewEdgeIds, setPreviewEdgeIds] = useState<string[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const panFrameRef = useRef<number | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -1566,6 +1567,33 @@ const App = () => {
       }
       return;
     }
+
+    if (connectStartParams && reactFlowInstance && reactFlowWrapper.current) {
+      if (panFrameRef.current !== null) {
+        cancelAnimationFrame(panFrameRef.current);
+      }
+      panFrameRef.current = requestAnimationFrame(() => {
+        panFrameRef.current = null;
+        const rect = reactFlowWrapper.current?.getBoundingClientRect();
+        if (!rect) return;
+        const edge = 48;
+        const speed = 10;
+        let dx = 0;
+        let dy = 0;
+        if (e.clientX < rect.left + edge) dx = speed;
+        if (e.clientX > rect.right - edge) dx = -speed;
+        if (e.clientY < rect.top + edge) dy = speed;
+        if (e.clientY > rect.bottom - edge) dy = -speed;
+        if (dx === 0 && dy === 0) return;
+        const viewport = reactFlowInstance.getViewport();
+        reactFlowInstance.setViewport({
+          x: viewport.x + dx,
+          y: viewport.y + dy,
+          zoom: viewport.zoom,
+        }, { duration: 0 });
+      });
+    }
+
     if (connectStartParams && isControlConnectionRef.current) {
       const hoveredElement = document.elementFromPoint(e.clientX, e.clientY);
       const nodeEl = hoveredElement instanceof HTMLElement
@@ -1576,7 +1604,7 @@ const App = () => {
     } else if (hoveredControlNodeIdRef.current) {
       clearHoveredControlPorts();
     }
-  }, [clearHoveredControlPorts, connectStartParams, isSelecting, selectionBox, updateHoveredControlNode, updatePreviewEdges]);
+  }, [clearHoveredControlPorts, connectStartParams, isSelecting, reactFlowInstance, selectionBox, updateHoveredControlNode, updatePreviewEdges]);
 
   const handleMouseUp = useCallback(() => {
     if (isSelecting) {
