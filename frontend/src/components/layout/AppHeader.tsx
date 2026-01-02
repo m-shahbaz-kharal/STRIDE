@@ -107,7 +107,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                     <button
                         className="icon-btn primary"
                         onClick={onRunGraph}
-                        disabled={nodesCount === 0}
+                        disabled={nodesCount === 0 || isRunning}
                         title="Run Graph"
                     >
                         <PlayIcon />

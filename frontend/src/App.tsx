@@ -574,17 +574,15 @@ const App = () => {
 
       const runIds = Array.from(runNodes);
 
-      if (useStreaming && isConnected && !isRunning) {
+      if (useStreaming && !isRunning) {
         runGraph(payload, runIds);
       } else {
-        try {
-          await runGraphSync(payload, runIds);
-        } catch {
+        runGraphSync(payload, runIds).catch(() => {
           // Error handled by hook
-        }
+        });
       }
     },
-    [buildGraphPayload, getDependentNodes, isConnected, isRunning, nodes, runGraph, runGraphSync, selectedNodeIds, setNodes, useStreaming]
+    [buildGraphPayload, getDependentNodes, isRunning, nodes, runGraph, runGraphSync, selectedNodeIds, setNodes, useStreaming]
   );
 
   const handleInterruptAll = useCallback(async () => {
