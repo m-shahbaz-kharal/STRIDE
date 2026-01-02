@@ -191,6 +191,7 @@ export interface BlueprintNodeData {
   branchId?: string;  // Branch this node belongs to during execution
   isMergePoint?: boolean;  // Whether this node receives inputs from multiple branches
   onToggleControlPorts?: (nodeId: string) => void;  // Toggle control port visibility
+  hoverControlPorts?: boolean;  // Temporary control port reveal during connection hover
 }
 
 export interface ExecutionResult {

@@ -99,7 +99,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   // Notify React Flow when handles change (ports added/removed/toggled)
   useEffect(() => {
     updateNodeInternals(id);
-  }, [id, data.input_ports, data.output_ports, data.showControlPorts, data.executionMode, updateNodeInternals]);
+  }, [id, data.input_ports, data.output_ports, data.showControlPorts, data.hoverControlPorts, data.executionMode, updateNodeInternals]);
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
   const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
@@ -173,7 +173,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       if (portKind !== "control") return true;
 
       // In controlflow mode or when showControlPorts is true, always show
-      if (data.executionMode === "controlflow" || data.showControlPorts || isCoreControlNode) return true;
+      if (data.executionMode === "controlflow" || data.showControlPorts || data.hoverControlPorts || isCoreControlNode) return true;
 
       // In dataflow mode, only show if connected
       if (direction === "input") {
@@ -181,7 +181,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       }
       return isOutputConnected(port);
     },
-    [data.executionMode, data.showControlPorts, isCoreControlNode, isInputConnected, isOutputConnected]
+    [data.executionMode, data.showControlPorts, data.hoverControlPorts, isCoreControlNode, isInputConnected, isOutputConnected]
   );
 
   const getConnectedOutput = useCallback(

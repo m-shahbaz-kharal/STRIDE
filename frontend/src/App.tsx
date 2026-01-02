@@ -75,6 +75,8 @@ const App = () => {
   const [connectionLineIsInvalid, setConnectionLineIsInvalid] = useState(false);
   const [connectionLineDash, setConnectionLineDash] = useState<string | undefined>(undefined);
   const connectSucceededRef = useRef(false);
+  const isControlConnectionRef = useRef(false);
+  const hoveredControlNodeIdRef = useRef<string | null>(null);
 
   // Right panel tab state
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
@@ -866,9 +868,11 @@ const App = () => {
         const type = handleType === "source"
           ? getPortTypeForHandle(nodeId, handleId, "source")
           : getPortTypeForHandle(nodeId, handleId, "target");
+        isControlConnectionRef.current = type.kind === "control";
         setConnectionLineColor(getPortTypeColor(type));
         setConnectionLineIsInvalid(false);
       } else {
+        isControlConnectionRef.current = false;
         setConnectionLineColor(undefined);
         setConnectionLineIsInvalid(false);
       }
@@ -876,10 +880,42 @@ const App = () => {
     [getPortTypeForHandle]
   );
 
+  const clearHoveredControlPorts = useCallback(() => {
+    const prev = hoveredControlNodeIdRef.current;
+    if (!prev) return;
+    hoveredControlNodeIdRef.current = null;
+    setNodes((existing) =>
+      existing.map((node) =>
+        node.id === prev
+          ? { ...node, data: { ...node.data, hoverControlPorts: undefined } }
+          : node
+      )
+    );
+  }, [setNodes]);
+
+  const updateHoveredControlNode = useCallback((nodeId: string | null) => {
+    const prev = hoveredControlNodeIdRef.current;
+    if (prev === nodeId) return;
+    hoveredControlNodeIdRef.current = nodeId;
+    setNodes((existing) =>
+      existing.map((node) => {
+        if (node.id === prev) {
+          return { ...node, data: { ...node.data, hoverControlPorts: undefined } };
+        }
+        if (nodeId && node.id === nodeId) {
+          if (node.data.nodeType.startsWith("core.control")) return node;
+          return { ...node, data: { ...node.data, hoverControlPorts: true } };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
   const onConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent) => {
       if (connectSucceededRef.current) {
         connectSucceededRef.current = false;
+        clearHoveredControlPorts();
         return;
       }
       const target = event.target;
@@ -914,10 +950,12 @@ const App = () => {
       }
 
       setConnectStartParams(null);
+      isControlConnectionRef.current = false;
+      clearHoveredControlPorts();
       setConnectionLineColor(undefined);
       setConnectionLineIsInvalid(false);
     },
-    [connectStartParams, reactFlowInstance, getPortTypeForHandle, openSmartConnect]
+    [clearHoveredControlPorts, connectStartParams, reactFlowInstance, getPortTypeForHandle, openSmartConnect]
   );
 
   // ========== Smart connect select ==========
@@ -1185,8 +1223,19 @@ const App = () => {
         setSelectionBox(newBox);
         updatePreviewEdges(newBox);
       }
+      return;
     }
-  }, [isSelecting, selectionBox, updatePreviewEdges]);
+    if (connectStartParams && isControlConnectionRef.current) {
+      const hoveredElement = document.elementFromPoint(e.clientX, e.clientY);
+      const nodeEl = hoveredElement instanceof HTMLElement
+        ? hoveredElement.closest(".react-flow__node")
+        : null;
+      const nodeId = nodeEl instanceof HTMLElement ? nodeEl.dataset.id ?? null : null;
+      updateHoveredControlNode(nodeId);
+    } else if (hoveredControlNodeIdRef.current) {
+      clearHoveredControlPorts();
+    }
+  }, [clearHoveredControlPorts, connectStartParams, isSelecting, selectionBox, updateHoveredControlNode, updatePreviewEdges]);
 
   const handleMouseUp = useCallback(() => {
     if (isSelecting) {
