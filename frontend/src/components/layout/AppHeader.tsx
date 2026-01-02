@@ -22,6 +22,8 @@ interface AppHeaderProps {
     onTabChange: (tab: "graph-editor" | "display") => void;
     graphSummary: GraphSummary;
     displaySummary: DisplaySummary;
+    graphName: string | null;
+    isGraphDirty: boolean;
     isRunning: boolean;
     isConnected: boolean;
     progress: number;
@@ -31,6 +33,9 @@ interface AppHeaderProps {
     onRunGraph: () => void;
     onInterruptAll: () => void;
     onClearCache: () => void;
+    onSaveGraph: () => void;
+    onRenameGraph: () => void;
+    onSignOut: () => void;
 }
 
 const AppHeader: React.FC<AppHeaderProps> = ({
@@ -38,6 +43,8 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     onTabChange,
     graphSummary,
     displaySummary,
+    graphName,
+    isGraphDirty,
     isRunning,
     isConnected,
     progress,
@@ -47,6 +54,9 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     onRunGraph,
     onInterruptAll,
     onClearCache,
+    onSaveGraph,
+    onRenameGraph,
+    onSignOut,
 }) => {
     return (
         <header className="overlay-header">
@@ -101,41 +111,66 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                 )}
             </div>
 
-            {headerTab === "graph-editor" && (
-                <div className="header-controls">
-                    <ConnectionIcon connected={isConnected} />
-                    <button
-                        className="icon-btn primary"
-                        onClick={onRunGraph}
-                        disabled={nodesCount === 0 || isRunning}
-                        title="Run Graph"
-                    >
-                        <PlayIcon />
-                        {isRunning && <span className="btn-spinner" />}
-                    </button>
-                    <button
-                        className="icon-btn danger"
-                        onClick={onInterruptAll}
-                        disabled={!isRunning || !executionId}
-                        title="Interrupt all running nodes"
-                    >
-                        <StopIcon />
-                    </button>
-                    <button
-                        className="icon-btn clear-cache-btn"
-                        onClick={onClearCache}
-                        disabled={isRunning}
-                        title="Clear Backend Cache"
-                    >
-                        <ClearCacheIcon />
-                    </button>
-                    {error && (
-                        <span className="error-indicator" title={error}>
-                            !
-                        </span>
-                    )}
-                </div>
-            )}
+            <div className="header-controls">
+                {headerTab === "graph-editor" && (
+                    <>
+                        <div className="header-graph-status">
+                            <button type="button" className="graph-title-btn" onClick={onRenameGraph}>
+                                {graphName ?? "Untitled graph"}
+                            </button>
+                            <span className={`graph-save-indicator ${isGraphDirty ? "dirty" : "clean"}`}>
+                                {isGraphDirty ? "Unsaved" : "Saved"}
+                            </span>
+                        </div>
+                        <ConnectionIcon connected={isConnected} />
+                        <button
+                            className="icon-btn primary"
+                            onClick={onRunGraph}
+                            disabled={nodesCount === 0 || isRunning}
+                            title="Run Graph"
+                        >
+                            <PlayIcon />
+                            {isRunning && <span className="btn-spinner" />}
+                        </button>
+                        <button
+                            className="icon-btn danger"
+                            onClick={onInterruptAll}
+                            disabled={!isRunning || !executionId}
+                            title="Interrupt all running nodes"
+                        >
+                            <StopIcon />
+                        </button>
+                        <button
+                            className="icon-btn clear-cache-btn"
+                            onClick={onClearCache}
+                            disabled={isRunning}
+                            title="Clear Backend Cache"
+                        >
+                            <ClearCacheIcon />
+                        </button>
+                        <button
+                            className="icon-btn"
+                            onClick={onSaveGraph}
+                            disabled={!graphName || !isGraphDirty}
+                            title="Save graph"
+                        >
+                            Save
+                        </button>
+                        {error && (
+                            <span className="error-indicator" title={error}>
+                                !
+                            </span>
+                        )}
+                    </>
+                )}
+                <button
+                    className="icon-btn"
+                    onClick={onSignOut}
+                    title="Sign out"
+                >
+                    Sign out
+                </button>
+            </div>
         </header>
     );
 };

@@ -95,5 +95,7 @@ export const usePanelResize = (options: UsePanelResizeOptions = {}) => {
         startResizingRight,
         setLeftPanelCollapsed,
         setRightPanelCollapsed,
+        setLeftPanelWidth,
+        setRightPanelWidth,
     };
 };

@@ -13,6 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
 from .nodes.fl511 import get_active_stream
+from .db import init_db
+from .routers import auth as auth_router
+from .routers import graphs as graphs_router
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
@@ -30,6 +33,14 @@ app = FastAPI(title="LiGuard Web Graph Runtime")
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+app.include_router(auth_router.router)
+app.include_router(graphs_router.router)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
 
 
 @app.get("/", response_class=FileResponse)

@@ -329,6 +329,54 @@ body {
   gap: 4px;
 }
 
+.header-graph-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(22, 27, 34, 0.7);
+}
+
+.graph-title-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.graph-title-btn:hover {
+  background: var(--bg-hover);
+}
+
+.graph-save-indicator {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.graph-save-indicator.clean {
+  color: var(--accent-green);
+  border-color: rgba(63, 185, 80, 0.3);
+  background: rgba(63, 185, 80, 0.1);
+}
+
+.graph-save-indicator.dirty {
+  color: var(--accent-orange);
+  border-color: rgba(210, 153, 34, 0.3);
+  background: rgba(210, 153, 34, 0.1);
+}
+
 .connection-indicator {
   display: flex;
   align-items: center;
@@ -680,6 +728,270 @@ body {
   flex-direction: column;
   overflow: hidden;
   padding: 12px;
+}
+
+/* ========== Graph Library Panel ========== */
+
+.graph-library {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px 12px;
+}
+
+.graph-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.graph-library-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.graph-library-toggle.collapsed .graph-library-count {
+  opacity: 0.7;
+}
+
+.graph-library-count {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.graph-library-refresh {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.graph-library-new {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.graph-library-new input {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.graph-library-new button {
+  border: 1px solid rgba(74, 158, 255, 0.3);
+  background: rgba(74, 158, 255, 0.15);
+  color: var(--accent-blue);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.graph-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+.graph-library-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.graph-library-list::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+
+.graph-library-item {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.graph-library-item.active {
+  border-color: rgba(74, 158, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.2);
+}
+
+.graph-library-name {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.graph-library-item input {
+  width: 100%;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.graph-library-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.graph-library-actions button {
+  flex: 1;
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.graph-library-actions button.danger {
+  color: var(--accent-red);
+  border-color: rgba(248, 81, 73, 0.3);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.graph-library-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px 4px;
+}
+
+/* ========== Auth Screen ========== */
+
+.auth-screen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top left, rgba(74, 158, 255, 0.1), transparent 40%),
+    radial-gradient(circle at 20% 80%, rgba(63, 185, 80, 0.1), transparent 45%),
+    var(--bg-deep);
+}
+
+.auth-panel {
+  width: min(420px, 90vw);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.auth-header h1 {
+  margin: 6px 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.auth-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.auth-subtitle {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-field {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.auth-field input {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.auth-submit {
+  border: 1px solid rgba(74, 158, 255, 0.4);
+  background: rgba(74, 158, 255, 0.2);
+  color: var(--text-primary);
+  padding: 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-error {
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  color: var(--accent-red);
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.auth-footer {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.auth-toggle {
+  border: none;
+  background: transparent;
+  color: var(--accent-blue);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .palette-header {

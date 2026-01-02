@@ -29,6 +29,8 @@ import ConnectionToast from "./components/ConnectionToast";
 import SmartConnectLine from "./components/SmartConnectLine";
 import { ChevronLeft, ChevronRight, CopyIcon, DeleteIcon } from "./components/Icons";
 import { PopupProvider } from "./context/PopupContext";
+import AuthScreen from "./components/AuthScreen";
+import GraphLibrary from "./components/GraphLibrary";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useNodeLibrary } from "./hooks/useNodeLibrary";
@@ -50,6 +52,17 @@ import {
   HEADER_HEIGHT,
   PORT_ROW_HEIGHT,
 } from "./graph/utils";
+import {
+  AuthSession,
+  GraphData,
+  GraphRecord,
+  createGraph,
+  deleteGraph,
+  listGraphs,
+  readSession,
+  updateGraph,
+  writeSession,
+} from "./api";
 
 type RightPanelTab = "inspector" | "execution";
 
@@ -61,6 +74,12 @@ const App = () => {
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
   const [hoveredPort, setHoveredPort] = useState<{ nodeId: string; port: string; direction: "input" | "output" } | null>(null);
   const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
+  const [session, setSession] = useState<AuthSession | null>(() => readSession());
+  const [graphs, setGraphs] = useState<GraphRecord[]>([]);
+  const [graphsLoading, setGraphsLoading] = useState(false);
+  const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
+  const [isGraphDirty, setIsGraphDirty] = useState(false);
+  const lastSavedSnapshotRef = useRef<string | null>(null);
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
@@ -113,6 +132,10 @@ const App = () => {
     toggleRightPanel,
     startResizingLeft,
     startResizingRight,
+    setLeftPanelCollapsed,
+    setRightPanelCollapsed,
+    setLeftPanelWidth,
+    setRightPanelWidth,
   } = usePanelResize();
 
   // Undo/Redo hook
@@ -125,6 +148,7 @@ const App = () => {
 
   // Node operations hook
   const {
+    nodeIdRef,
     createNodeFromType,
     updateNodeData,
     handleParamChange,
@@ -134,6 +158,8 @@ const App = () => {
     clearNodeCache,
     clearAllCache,
     getPortYOffset,
+    buildDefaultInputValues,
+    getInitialPorts,
   } = useNodeOperations({
     setNodes,
     setEdges,
@@ -273,6 +299,11 @@ const App = () => {
     selectedCount: selectedNodeIds.length + selectedEdgeIds.length,
   }), [nodes.length, edges.length, selectedNodeIds.length, selectedEdgeIds.length]);
 
+  const currentGraph = useMemo(
+    () => graphs.find((graph) => graph.id === currentGraphId) ?? null,
+    [graphs, currentGraphId]
+  );
+
   const selectedNodes = useMemo(
     () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
     [nodes, selectedNodeIds]
@@ -283,7 +314,183 @@ const App = () => {
     [getCompatibleNodeTypes, nodeLibrary]
   );
 
+  const serializeGraph = useCallback((): GraphData => {
+    const safeNodes = nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      width: node.width,
+      height: node.height,
+      data: {
+        displayName: node.data.displayName,
+        nodeType: node.data.nodeType,
+        description: node.data.description,
+        input_ports: node.data.input_ports,
+        output_ports: node.data.output_ports,
+        input_port_types: node.data.input_port_types,
+        output_port_types: node.data.output_port_types,
+        params: node.data.params,
+        inputValues: node.data.inputValues,
+        breakpoint: node.data.breakpoint,
+        showControlPorts: node.data.showControlPorts,
+      },
+    }));
+
+    const safeEdges = edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      type: edge.type,
+      data: edge.data,
+    }));
+
+    return {
+      nodes: safeNodes,
+      edges: safeEdges,
+      ui: {
+        leftPanelCollapsed,
+        rightPanelCollapsed,
+        leftPanelWidth,
+        rightPanelWidth,
+      },
+    };
+  }, [edges, leftPanelCollapsed, leftPanelWidth, nodes, rightPanelCollapsed, rightPanelWidth]);
+
+  const hydrateGraph = useCallback((data: GraphData) => {
+    const typeMap = new Map(nodeLibrary.map((nodeType) => [nodeType.node_type, nodeType]));
+    const hydratedNodes = data.nodes.map((node: any) => {
+      const nodeType = typeMap.get(node.data?.nodeType);
+      const defaultPorts = nodeType ? getInitialPorts(nodeType) : { input_ports: [], input_port_types: {} };
+      const defaultInputValues = nodeType ? buildDefaultInputValues(nodeType) : {};
+      const resolvedInputPorts = node.data?.input_ports ?? nodeType?.input_ports ?? defaultPorts.input_ports ?? [];
+      const resolvedOutputPorts = node.data?.output_ports ?? nodeType?.output_ports ?? [];
+      const resolvedParams = node.data?.params ?? {};
+      const resolvedInputValues = node.data?.inputValues ?? defaultInputValues;
+      const resolvedInputPortTypes = node.data?.input_port_types ?? nodeType?.input_port_types ?? defaultPorts.input_port_types ?? {};
+      const resolvedOutputPortTypes = node.data?.output_port_types ?? nodeType?.output_port_types ?? {};
+
+      const paramCount = Object.keys(nodeType?.params_schema ?? {}).length;
+      const maxPorts = Math.max(resolvedInputPorts.length, resolvedOutputPorts.length);
+      const fallbackSize = computeNodeDimensions(maxPorts, { paramCount });
+
+      return {
+        id: node.id,
+        type: "blueprint",
+        position: node.position ?? { x: 100, y: 100 },
+        width: node.width ?? fallbackSize.width,
+        height: node.height ?? fallbackSize.height,
+        data: {
+          displayName: nodeType?.display_name ?? node.data?.displayName ?? "Node",
+          nodeType: nodeType?.node_type ?? node.data?.nodeType ?? "unknown",
+          description: nodeType?.description ?? node.data?.description ?? "",
+          input_ports: resolvedInputPorts,
+          output_ports: resolvedOutputPorts,
+          input_port_types: resolvedInputPortTypes,
+          output_port_types: resolvedOutputPortTypes,
+          params: resolvedParams,
+          inputValues: resolvedInputValues,
+          breakpoint: node.data?.breakpoint ?? false,
+          metadata: nodeType,
+          width: node.width ?? fallbackSize.width,
+          height: node.height ?? fallbackSize.height,
+          showControlPorts: node.data?.showControlPorts ?? false,
+          executionLogs: [],
+        },
+      };
+    });
+
+    const hydratedEdges = data.edges.map((edge: any) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      type: edge.type ?? "default",
+      data: edge.data ?? {},
+    }));
+
+    const maxId = hydratedNodes.reduce((acc, node) => {
+      const match = typeof node.id === "string" ? node.id.match(/node-(\d+)/) : null;
+      if (!match) return acc;
+      const value = Number(match[1]);
+      return Number.isFinite(value) ? Math.max(acc, value) : acc;
+    }, 0);
+    if (nodeIdRef?.current != null) {
+      nodeIdRef.current = Math.max(nodeIdRef.current, maxId + 1);
+    }
+
+    setNodes(hydratedNodes);
+    setEdges(hydratedEdges);
+    setSelectedNodeIds([]);
+    setSelectedEdgeIds([]);
+    setSelectedNodeId(null);
+    setHighlightedNodeIds([]);
+
+    if (data.ui) {
+      if (typeof data.ui.leftPanelCollapsed === "boolean") {
+        setLeftPanelCollapsed(data.ui.leftPanelCollapsed);
+      }
+      if (typeof data.ui.rightPanelCollapsed === "boolean") {
+        setRightPanelCollapsed(data.ui.rightPanelCollapsed);
+      }
+      if (typeof data.ui.leftPanelWidth === "number") {
+        setLeftPanelWidth(data.ui.leftPanelWidth);
+      }
+      if (typeof data.ui.rightPanelWidth === "number") {
+        setRightPanelWidth(data.ui.rightPanelWidth);
+      }
+    }
+  }, [buildDefaultInputValues, getInitialPorts, nodeIdRef, nodeLibrary, setEdges, setLeftPanelCollapsed, setLeftPanelWidth, setNodes, setRightPanelCollapsed, setRightPanelWidth]);
+
   // ========== Effects ==========
+
+  const handleAuthSuccess = useCallback((nextSession: AuthSession) => {
+    setSession(nextSession);
+    writeSession(nextSession);
+  }, []);
+
+  const handleSignOut = useCallback(() => {
+    setSession(null);
+    writeSession(null);
+    setGraphs([]);
+    setCurrentGraphId(null);
+    setNodes([]);
+    setEdges([]);
+    setIsGraphDirty(false);
+    lastSavedSnapshotRef.current = null;
+  }, [setEdges, setNodes]);
+
+  const refreshGraphs = useCallback(async () => {
+    if (!session) return;
+    setGraphsLoading(true);
+    try {
+      const data = await listGraphs(session);
+      setGraphs(data);
+      if (currentGraphId && !data.find((graph) => graph.id === currentGraphId)) {
+        setCurrentGraphId(null);
+        setNodes([]);
+        setEdges([]);
+      }
+      if (!currentGraphId && data.length > 0) {
+        setCurrentGraphId(data[0].id);
+        hydrateGraph(data[0].data);
+        lastSavedSnapshotRef.current = JSON.stringify(data[0].data);
+        setIsGraphDirty(false);
+      }
+    } catch (err) {
+      handleSignOut();
+    } finally {
+      setGraphsLoading(false);
+    }
+  }, [currentGraphId, handleSignOut, hydrateGraph, session, setEdges, setNodes]);
+
+  useEffect(() => {
+    if (session) {
+      refreshGraphs();
+    }
+  }, [refreshGraphs, session]);
 
   // Update node execution states when nodeStatuses change
   useEffect(() => {
@@ -498,7 +705,88 @@ const App = () => {
     }
   }, [nodes, selectedNodeId]);
 
+  const currentSnapshot = useMemo(() => {
+    if (!currentGraphId) return null;
+    return JSON.stringify(serializeGraph());
+  }, [currentGraphId, serializeGraph]);
+
+  useEffect(() => {
+    if (!currentGraphId || !currentSnapshot) {
+      setIsGraphDirty(false);
+      return;
+    }
+    if (!lastSavedSnapshotRef.current) {
+      setIsGraphDirty(true);
+      return;
+    }
+    setIsGraphDirty(currentSnapshot !== lastSavedSnapshotRef.current);
+  }, [currentGraphId, currentSnapshot]);
+
   // ========== Graph operations ==========
+
+  const handleCreateGraph = useCallback(async (name: string) => {
+    if (!session) return;
+    const payload: GraphData = { nodes: [], edges: [], ui: { leftPanelCollapsed, rightPanelCollapsed, leftPanelWidth, rightPanelWidth } };
+    const created = await createGraph(session, { name, data: payload });
+    setGraphs((prev) => [created, ...prev]);
+    setCurrentGraphId(created.id);
+    hydrateGraph(created.data);
+    lastSavedSnapshotRef.current = JSON.stringify(created.data);
+    setIsGraphDirty(false);
+  }, [hydrateGraph, leftPanelCollapsed, leftPanelWidth, rightPanelCollapsed, rightPanelWidth, session]);
+
+  const handleSelectGraph = useCallback((graphId: string) => {
+    if (isGraphDirty) {
+      const confirmed = window.confirm("You have unsaved changes. Switch graphs anyway?");
+      if (!confirmed) return;
+    }
+    const graph = graphs.find((item) => item.id === graphId);
+    if (!graph) return;
+    setCurrentGraphId(graph.id);
+    hydrateGraph(graph.data);
+    lastSavedSnapshotRef.current = JSON.stringify(graph.data);
+    setIsGraphDirty(false);
+  }, [graphs, hydrateGraph, isGraphDirty]);
+
+  const handleSaveGraph = useCallback(async () => {
+    if (!session || !currentGraphId) return;
+    const payload = serializeGraph();
+    const updated = await updateGraph(session, currentGraphId, { data: payload });
+    setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
+    lastSavedSnapshotRef.current = JSON.stringify(updated.data);
+    setIsGraphDirty(false);
+  }, [currentGraphId, serializeGraph, session]);
+
+  const handleRenameGraph = useCallback(async () => {
+    if (!session || !currentGraphId) return;
+    const nextName = window.prompt("Rename graph", currentGraph?.name ?? "Untitled graph");
+    if (!nextName || !nextName.trim()) return;
+    const updated = await updateGraph(session, currentGraphId, { name: nextName.trim() });
+    setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
+  }, [currentGraph?.name, currentGraphId, session]);
+
+  const handleRenameGraphFromList = useCallback(async (graphId: string, name: string) => {
+    if (!session) return;
+    const updated = await updateGraph(session, graphId, { name });
+    setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
+  }, [session]);
+
+  const handleDeleteGraph = useCallback(async (graphId: string) => {
+    if (!session) return;
+    const graph = graphs.find((item) => item.id === graphId);
+    if (!graph) return;
+    const confirmed = window.confirm(`Delete "${graph.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+    await deleteGraph(session, graphId);
+    setGraphs((prev) => prev.filter((item) => item.id !== graphId));
+    if (currentGraphId === graphId) {
+      setCurrentGraphId(null);
+      setNodes([]);
+      setEdges([]);
+      setIsGraphDirty(false);
+      lastSavedSnapshotRef.current = null;
+    }
+  }, [currentGraphId, graphs, session, setEdges, setNodes]);
 
   const buildGraphPayload = useCallback(
     (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
@@ -1281,6 +1569,10 @@ const App = () => {
 
   // ========== Render ==========
 
+  if (!session) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <PopupProvider>
       <ReactFlowProvider>
@@ -1369,6 +1661,8 @@ const App = () => {
             onTabChange={setHeaderTab}
             graphSummary={graphSummary}
             displaySummary={displaySummary}
+            graphName={currentGraph?.name ?? null}
+            isGraphDirty={isGraphDirty}
             isRunning={isRunning}
             isConnected={isConnected}
             progress={progress}
@@ -1378,6 +1672,9 @@ const App = () => {
             onRunGraph={() => handleRunGraph("full")}
             onInterruptAll={handleInterruptAll}
             onClearCache={handleClearBackendCache}
+            onSaveGraph={handleSaveGraph}
+            onRenameGraph={handleRenameGraph}
+            onSignOut={handleSignOut}
           />
 
           {headerTab === "graph-editor" && (
@@ -1386,8 +1683,18 @@ const App = () => {
                 className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
                 style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
               >
-                {!leftPanelCollapsed && (
+              {!leftPanelCollapsed && (
                   <>
+                    <GraphLibrary
+                      graphs={graphs}
+                      currentGraphId={currentGraphId}
+                      isLoading={graphsLoading}
+                      onCreate={handleCreateGraph}
+                      onSelect={handleSelectGraph}
+                      onRename={handleRenameGraphFromList}
+                      onDelete={handleDeleteGraph}
+                      onRefresh={refreshGraphs}
+                    />
                     <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
                     <div
                       className="resize-handle right"
