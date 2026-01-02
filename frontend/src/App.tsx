@@ -318,6 +318,33 @@ const App = () => {
     [getCompatibleNodeTypes, nodeLibrary]
   );
 
+  const minimapNodeColor = useCallback((node: Node<BlueprintNodeData>) => {
+    const status = nodeStatuses.get(node.id);
+    if (status === "running") return "#58a6ff";
+    if (status === "completed") return "#3fb950";
+    if (status === "error") return "#f85149";
+    const category = node.data?.nodeType?.split(".")[1] ?? "";
+    switch (category) {
+      case "math":
+        return "#d29922";
+      case "control":
+        return "#a371f7";
+      case "display":
+        return "#39d3e8";
+      case "container":
+        return "#4a9eff";
+      default:
+        return "#8b949e";
+    }
+  }, [nodeStatuses]);
+
+  const minimapNodeStroke = useCallback((node: Node<BlueprintNodeData>) => {
+    if (node.selected) return "#f0c000";
+    return "rgba(255,255,255,0.15)";
+  }, []);
+
+  const minimapStrokeWidth = useCallback((node: Node<BlueprintNodeData>) => (node.selected ? 2 : 1), []);
+
   const serializeGraph = useCallback((): GraphData => {
     const safeNodes = nodes.map((node) => ({
       id: node.id,
@@ -1727,18 +1754,16 @@ const App = () => {
                 style={{ left: actualLeftWidth }}
               />
               <MiniMap
-                nodeColor={(node) => {
-                  const status = nodeStatuses.get(node.id);
-                  if (status === "running") return "#58a6ff";
-                  if (status === "completed") return "#3fb950";
-                  if (status === "error") return "#f85149";
-                  return "#4a9eff";
-                }}
-                maskColor="rgba(0,0,0,0.8)"
+                nodeColor={minimapNodeColor}
+                nodeStrokeColor={minimapNodeStroke}
+                nodeStrokeWidth={minimapStrokeWidth}
+                maskColor="rgba(0,0,0,0.65)"
                 style={{
                   backgroundColor: "rgba(20,25,35,0.9)",
                   right: actualRightWidth,
                 }}
+                pannable
+                zoomable
               />
             </ReactFlow>
             <ConnectionToast message={connectionMessage} />
