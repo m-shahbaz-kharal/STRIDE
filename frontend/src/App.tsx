@@ -1673,6 +1673,7 @@ const App = () => {
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               fitView
+              minZoom={0.02}
               isValidConnection={isValidConnection}
               connectionLineStyle={{
                 stroke: connectionLineColor || "#4a9eff",
