@@ -7,6 +7,7 @@ type InspectorProps = {
   nodes: Node<BlueprintNodeData>[];
   allNodes: Node<BlueprintNodeData>[];
   edges: Edge[];
+  hoveredNodeId?: string | null;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
   onInputValueChange: (nodeId: string, port: string, value: string | number | boolean | null) => void;
   onJumpToNode: (nodeId: string) => void;
@@ -140,6 +141,7 @@ const NodeCard = ({
   node,
   edges,
   nodeNameById,
+  readOnly = false,
   onParamChange,
   onInputValueChange,
   onJumpToNode,
@@ -154,6 +156,7 @@ const NodeCard = ({
   node: Node<BlueprintNodeData>;
   edges: Edge[];
   nodeNameById: Map<string, string>;
+  readOnly?: boolean;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
   onInputValueChange: (nodeId: string, port: string, value: string | number | boolean | null) => void;
   onJumpToNode: (nodeId: string) => void;
@@ -235,7 +238,7 @@ const NodeCard = ({
   }, [onPortHover]);
 
   return (
-    <div className={`inspector-node-card ${isSingleNode ? "single" : ""}`}>
+    <div className={`inspector-node-card ${isSingleNode ? "single" : ""} ${readOnly ? "preview" : ""}`}>
       <div className="inspector-node-header" onClick={onToggle}>
         <div className="inspector-node-title">
           {!isSingleNode && (
@@ -262,7 +265,7 @@ const NodeCard = ({
               </svg>
             </span>
           )}
-          {onDuplicate && (
+          {!readOnly && onDuplicate && (
             <button
               type="button"
               className="inspector-action-btn"
@@ -277,7 +280,7 @@ const NodeCard = ({
               </svg>
             </button>
           )}
-          {onDelete && (
+          {!readOnly && onDelete && (
             <button
               type="button"
               className="inspector-action-btn delete"
@@ -348,6 +351,7 @@ const NodeCard = ({
                             value={inputValue}
                             onChange={(event) => onInputValueChange(node.id, port.name, coerceInputValue(event.target.value, port.rawType))}
                             placeholder="Set value"
+                            disabled={readOnly}
                           />
                         )
                       }
@@ -430,6 +434,7 @@ const NodeInspector = ({
   nodes,
   allNodes,
   edges,
+  hoveredNodeId,
   onParamChange,
   onInputValueChange,
   onJumpToNode,
@@ -440,7 +445,12 @@ const NodeInspector = ({
 }: InspectorProps) => {
   // Track expanded nodes in multi-select mode
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const isSingleNode = nodes.length === 1;
+  const hoveredNode = useMemo(
+    () => (hoveredNodeId ? allNodes.find((node) => node.id === hoveredNodeId) ?? null : null),
+    [allNodes, hoveredNodeId]
+  );
+  const isPreviewMode = nodes.length === 0 && Boolean(hoveredNode);
+  const isSingleNode = nodes.length === 1 || isPreviewMode;
   const nodeNameById = useMemo(() => new Map(allNodes.map((node) => [node.id, node.data.displayName])), [allNodes]);
 
   const toggleNode = (nodeId: string) => {
@@ -455,7 +465,7 @@ const NodeInspector = ({
     });
   };
 
-  if (nodes.length === 0) {
+  if (nodes.length === 0 && !hoveredNode) {
     return (
       <div className="inspector-panel">
         <div className="inspector-empty-state">
@@ -472,7 +482,7 @@ const NodeInspector = ({
   return (
     <div className="inspector-panel">
       <div className="inspector-node-list">
-        {nodes.map((node) => (
+        {(isPreviewMode ? [hoveredNode!] : nodes).map((node) => (
           <MemoizedNodeCard
             key={node.id}
             node={node}
@@ -486,6 +496,7 @@ const NodeInspector = ({
             isExpanded={expandedNodes.has(node.id)}
             onToggle={() => toggleNode(node.id)}
             isSingleNode={isSingleNode}
+            readOnly={isPreviewMode}
             hoveredPort={hoveredPort}
             onPortHover={onPortHover}
           />

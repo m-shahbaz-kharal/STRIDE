@@ -81,6 +81,7 @@ const App = () => {
   const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
   const [isGraphDirty, setIsGraphDirty] = useState(false);
   const [unsavedDialog, setUnsavedDialog] = useState<null | { mode: "home" | "switch"; targetGraphId?: string }>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const lastSavedSnapshotRef = useRef<string | null>(null);
   const skipDirtyRef = useRef(false);
 
@@ -1717,6 +1718,8 @@ const App = () => {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onInit={setReactFlowInstance}
+              onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
+              onNodeMouseLeave={() => setHoveredNodeId(null)}
               onConnect={handleConnect}
               onConnectStart={onConnectStart}
               onConnectEnd={onConnectEnd}
@@ -1936,6 +1939,7 @@ const App = () => {
                             nodes={selectedNodes}
                             allNodes={nodes}
                             edges={edges}
+                            hoveredNodeId={hoveredNodeId}
                             onParamChange={handleParamChange}
                             onInputValueChange={handleInputValueChange}
                             onJumpToNode={handleJumpToNode}
