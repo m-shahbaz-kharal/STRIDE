@@ -628,6 +628,18 @@ class GraphExecutor:
             from_cache=False,
         )
 
+    def _make_input_error_result(self, node_id: str, exc: Exception) -> NodeExecutionResult:
+        return NodeExecutionResult(
+            node_id=node_id,
+            node_type=self.nodes[node_id].type,
+            status=NodeStatus.ERROR,
+            error=str(exc),
+            error_code=getattr(exc, "code", None),
+            duration_ms=0.0,
+            level=self._node_levels.get(node_id, 0),
+            from_cache=False,
+        )
+
     def _record_interrupted(
         self,
         node_id: str,
@@ -1037,7 +1049,33 @@ class GraphExecutor:
                                 total_nodes=total_nodes,
                                 completed_nodes=completed_nodes,
                             )
-                            inputs = self._prepare_inputs(body_id)
+                            try:
+                                inputs = self._prepare_inputs(body_id)
+                            except GraphExecutionError as exc:
+                                result = self._make_input_error_result(body_id, exc)
+                                self._finalize_node_result(body_id, {}, result, cached=False)
+                                completed_nodes += 1
+                                yield ExecutionEvent(
+                                    event_type="node_error",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=body_id,
+                                    node_type=result.node_type,
+                                    status=NodeStatus.ERROR,
+                                    error=result.error,
+                                    error_code=result.error_code,
+                                    duration_ms=result.duration_ms,
+                                    level=result.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                    from_cache=result.from_cache,
+                                )
+                                if self._fail_fast:
+                                    loop_interrupted = True
+                                    break
+                                continue
+
                             future = loop.run_in_executor(self._thread_pool, self._execute_node_work, body_id, inputs)
                             task = asyncio.wrap_future(future)
                             self._cancellation.register_running(body_id, task)
@@ -1149,7 +1187,32 @@ class GraphExecutor:
                     total_nodes=total_nodes,
                     completed_nodes=completed_nodes,
                 )
-                inputs = self._prepare_inputs(node_id)
+                try:
+                    inputs = self._prepare_inputs(node_id)
+                except GraphExecutionError as exc:
+                    result = self._make_input_error_result(node_id, exc)
+                    self._finalize_node_result(node_id, {}, result, cached=False)
+                    completed_nodes += 1
+                    yield ExecutionEvent(
+                        event_type="node_error",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=result.node_type,
+                        status=NodeStatus.ERROR,
+                        error=result.error,
+                        error_code=result.error_code,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                        from_cache=result.from_cache,
+                    )
+                    if self._fail_fast:
+                        break
+                    continue
+
                 cached_outputs = self._try_get_cached(node_id, inputs)
 
                 if cached_outputs is not None:
@@ -1310,7 +1373,34 @@ class GraphExecutor:
                 completed_nodes=completed,
             ))
 
-            inputs = self._prepare_inputs(node_id)
+            try:
+                inputs = self._prepare_inputs(node_id)
+            except GraphExecutionError as exc:
+                result = self._make_input_error_result(node_id, exc)
+                self._finalize_node_result(node_id, {}, result, cached=False)
+                with progress_state["lock"]:
+                    progress_state["completed"] += 1
+                    completed = progress_state["completed"]
+                    total = progress_state["total"]
+                await event_queue.put(ExecutionEvent(
+                    event_type="node_error",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=node_id,
+                    node_type=result.node_type,
+                    status=NodeStatus.ERROR,
+                    error=result.error,
+                    error_code=result.error_code,
+                    duration_ms=result.duration_ms,
+                    level=result.level,
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                    from_cache=result.from_cache,
+                ))
+                if self._fail_fast:
+                    break
+                continue
             
             # Execute in thread pool to avoid blocking
             loop = asyncio.get_running_loop()
@@ -1484,7 +1574,35 @@ class GraphExecutor:
                     completed_nodes=completed,
                 )
 
-                inputs = self._prepare_inputs(body_id)
+                try:
+                    inputs = self._prepare_inputs(body_id)
+                except GraphExecutionError as exc:
+                    result = self._make_input_error_result(body_id, exc)
+                    self._finalize_node_result(body_id, {}, result, cached=False)
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
+                    yield ExecutionEvent(
+                        event_type="node_error",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=body_id,
+                        node_type=result.node_type,
+                        status=NodeStatus.ERROR,
+                        error=result.error,
+                        error_code=result.error_code,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=result.from_cache,
+                    )
+                    if self._fail_fast:
+                        loop_interrupted = True
+                        break
+                    continue
                 future = loop.run_in_executor(
                     self._thread_pool,
                     self._execute_node_work,
@@ -1834,7 +1952,18 @@ class GraphExecutor:
                             tasks.clear()
                             break
 
-                        inputs = self._prepare_inputs(node_id)
+                        try:
+                            inputs = self._prepare_inputs(node_id)
+                        except GraphExecutionError as exc:
+                            result = self._make_input_error_result(node_id, exc)
+                            self._finalize_node_result(node_id, {}, result, cached=False)
+                            completed_nodes += 1
+                            _propagate_failure(node_id, f"Dependency '{node_id}' failed or was interrupted")
+                            if self._fail_fast:
+                                ready.clear()
+                                tasks.clear()
+                                break
+                            continue
                         cached_outputs = self._try_get_cached(node_id, inputs)
 
                         if cached_outputs is not None:
