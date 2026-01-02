@@ -218,11 +218,11 @@ const App = () => {
     onAddInputPort: handleAddInputPort,
     onToggleControlPorts: (nodeId: string) => {
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId
-            ? { ...n, data: { ...n.data, showControlPorts: !n.data.showControlPorts } }
-            : n
-        )
+        nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          if (n.data.nodeType.startsWith("core.control")) return n;
+          return { ...n, data: { ...n.data, showControlPorts: !n.data.showControlPorts } };
+        })
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -802,6 +802,8 @@ const App = () => {
       }
 
       const sourceType = getPortTypeForHandle(normalized.source!, normalized.sourceHandle!, "source");
+      const targetType = getPortTypeForHandle(normalized.target!, normalized.targetHandle!, "target");
+      const isControlConnection = sourceType.kind === "control" || targetType.kind === "control";
       const edgeColor = getPortTypeColor(sourceType);
 
       const isDuplicate = edges.some(
@@ -836,9 +838,20 @@ const App = () => {
           filtered
         );
       });
+      if (isControlConnection) {
+        setNodes((existing) =>
+          existing.map((node) => {
+            if (node.id !== normalized.source && node.id !== normalized.target) return node;
+            if (node.data.nodeType.startsWith("core.control")) {
+              return node.data.showControlPorts ? node : { ...node, data: { ...node.data, showControlPorts: true } };
+            }
+            return node.data.showControlPorts ? node : { ...node, data: { ...node.data, showControlPorts: true } };
+          })
+        );
+      }
       setConnectionLineIsInvalid(false);
     },
-    [edges, getPortTypeForHandle, normalizeConnection, setEdges, showConnectionMessage, takeSnapshot, validateConnection]
+    [edges, getPortTypeForHandle, normalizeConnection, setEdges, setNodes, showConnectionMessage, takeSnapshot, validateConnection]
   );
 
   const isValidConnection = useCallback(
@@ -951,8 +964,12 @@ const App = () => {
         { x: flowPosition.x - xOffset, y: flowPosition.y - portYOffset },
         nodeHandlers
       );
+      const isControlConnection = compatiblePort.sourceType?.kind === "control" || compatiblePort.targetType?.kind === "control";
+      const hydratedNewNode = isControlConnection
+        ? { ...newNode, data: { ...newNode.data, showControlPorts: true } }
+        : newNode;
 
-      setNodes((nds) => nds.concat(newNode));
+      setNodes((nds) => nds.concat(hydratedNewNode));
 
       // Create connection
       let sourceId, sourceHandle, targetId, targetHandle;

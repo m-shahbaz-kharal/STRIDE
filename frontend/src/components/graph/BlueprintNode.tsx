@@ -121,6 +121,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
 
   const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
   const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
+  const isCoreControlNode = data.nodeType.startsWith("core.control");
   const paramEntries = useMemo(() => Object.entries(data.metadata?.params_schema ?? {}), [data.metadata?.params_schema]);
   const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
   const maxPorts = Math.max(data.input_ports.length + extraInputRows, data.output_ports.length);
@@ -159,6 +160,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     [relevantEdges, id]
   );
 
+  const hasControlPorts = useMemo(() => {
+    const inputHasControl = data.input_ports.some((port) => getTypeKind(resolvePortType(port, "input")) === "control");
+    const outputHasControl = data.output_ports.some((port) => getTypeKind(resolvePortType(port, "output")) === "control");
+    return inputHasControl || outputHasControl;
+  }, [data.input_ports, data.output_ports, getTypeKind, resolvePortType]);
+
   // Control ports are hidden by default in dataflow mode unless connected
   const isControlPortVisible = useCallback(
     (port: string, direction: "input" | "output", portKind: string) => {
@@ -166,7 +173,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       if (portKind !== "control") return true;
 
       // In controlflow mode or when showControlPorts is true, always show
-      if (data.executionMode === "controlflow" || data.showControlPorts) return true;
+      if (data.executionMode === "controlflow" || data.showControlPorts || isCoreControlNode) return true;
 
       // In dataflow mode, only show if connected
       if (direction === "input") {
@@ -174,7 +181,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       }
       return isOutputConnected(port);
     },
-    [data.executionMode, data.showControlPorts, isInputConnected, isOutputConnected]
+    [data.executionMode, data.showControlPorts, isCoreControlNode, isInputConnected, isOutputConnected]
   );
 
   const getConnectedOutput = useCallback(
@@ -391,19 +398,21 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             );
           })()}
           {/* Toggle control ports visibility button */}
-          <button
-            className={`node-action-btn control-toggle-btn nodrag${data.showControlPorts ? " control-toggle-on" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              data.onToggleControlPorts?.(id);
-            }}
-            title={data.showControlPorts ? "Hide control flow connectors" : "Show control flow connectors"}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              {/* Branch/flow icon */}
-              <path d="M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4h-6zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3L10 4z" />
-            </svg>
-          </button>
+          {hasControlPorts && !isCoreControlNode && (
+            <button
+              className={`node-action-btn control-toggle-btn nodrag${data.showControlPorts ? " control-toggle-on" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onToggleControlPorts?.(id);
+              }}
+              title={data.showControlPorts ? "Hide control flow connectors" : "Show control flow connectors"}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                {/* Branch/flow icon */}
+                <path d="M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4h-6zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3L10 4z" />
+              </svg>
+            </button>
+          )}
           <button
             className="node-delete-btn nodrag"
             onClick={(e) => {
@@ -492,7 +501,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const isControl = portKind === "control";
 
             // Hide control ports when toggle is off and not connected
-            if (isControl && !data.showControlPorts && !isInputConnected(port)) {
+            if (!isControlPortVisible(port, "input", portKind)) {
               return null;
             }
 
@@ -629,7 +638,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const isControl = portKind === "control";
 
             // Hide control ports when toggle is off and not connected
-            if (isControl && !data.showControlPorts && !isOutputConnected(port)) {
+            if (!isControlPortVisible(port, "output", portKind)) {
               return null;
             }
 
