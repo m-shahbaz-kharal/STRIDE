@@ -28,10 +28,16 @@ const GraphLibrary: React.FC<GraphLibraryProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [search, setSearch] = useState("");
 
-  const sortedGraphs = useMemo(() => {
-    return [...graphs].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [graphs]);
+  const filteredGraphs = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const list = [...graphs].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    if (!query) return list;
+    return list.filter((graph) =>
+      `${graph.name} ${graph.description ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [graphs, search]);
 
   const openCreate = () => {
     setEditorMode("create");
@@ -84,12 +90,21 @@ const GraphLibrary: React.FC<GraphLibraryProps> = ({
         </div>
       </div>
 
+      <div className="graph-home-search">
+        <input
+          type="text"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search graphs"
+        />
+      </div>
+
       <div className="graph-home-list">
         {isLoading && <div className="graph-home-empty">Loading graphs...</div>}
-        {!isLoading && sortedGraphs.length === 0 && (
-          <div className="graph-home-empty">No graphs yet. Create your first one.</div>
+        {!isLoading && filteredGraphs.length === 0 && (
+          <div className="graph-home-empty">No graphs found. Try a different search.</div>
         )}
-        {sortedGraphs.map((graph) => (
+        {filteredGraphs.map((graph) => (
           <div
             key={graph.id}
             className={`graph-home-item ${currentGraphId === graph.id ? "active" : ""}`}

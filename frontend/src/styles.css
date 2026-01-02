@@ -860,11 +860,11 @@ body {
   background: var(--bg-canvas);
   overflow-y: auto;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .graph-home {
-  width: min(980px, 96vw);
+  width: min(360px, 92vw);
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -887,7 +887,7 @@ body {
 
 .graph-home-header h2 {
   margin: 6px 0 4px;
-  font-size: 22px;
+  font-size: 18px;
 }
 
 .graph-home-subtitle {
@@ -899,6 +899,16 @@ body {
 .graph-home-actions {
   display: flex;
   gap: 10px;
+}
+
+.graph-home-search input {
+  width: 100%;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .primary-btn,
@@ -961,16 +971,16 @@ body {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
-  padding: 14px;
-  border-radius: 12px;
-  background: rgba(16, 20, 28, 0.9);
-  border: 1px solid var(--border-default);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(13, 17, 23, 0.65);
+  border: 1px solid var(--border-subtle);
+  box-shadow: none;
 }
 
 .graph-home-item.active {
   border-color: rgba(74, 158, 255, 0.5);
-  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.25), 0 12px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.25);
 }
 
 .graph-home-main {
@@ -983,7 +993,7 @@ body {
 
 .graph-home-main h3 {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .graph-home-main p {
