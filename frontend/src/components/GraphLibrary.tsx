@@ -162,7 +162,9 @@ const GraphLibrary: React.FC<GraphLibraryProps> = ({
               </button>
             </div>
             <div className="modal-body">
-              <p>Type the graph name to confirm deletion.</p>
+              <p>
+                To confirm deletion, type the graph name <strong>{graphs.find((graph) => graph.id === deleteId)?.name ?? ""}</strong>.
+              </p>
               <input
                 type="text"
                 value={deleteConfirm}
