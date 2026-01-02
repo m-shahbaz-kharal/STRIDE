@@ -1,11 +1,15 @@
 import React, { useMemo, useState, useCallback } from "react";
-import { Node } from "reactflow";
+import { Edge, Node } from "reactflow";
 import { BlueprintNodeData } from "../types";
 import { formatPortTypeLabel } from "../graph/utils";
 
 type InspectorProps = {
   nodes: Node<BlueprintNodeData>[];
+  allNodes: Node<BlueprintNodeData>[];
+  edges: Edge[];
   onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
+  onInputValueChange: (nodeId: string, port: string, value: string | number | boolean | null) => void;
+  onJumpToNode: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
@@ -79,6 +83,8 @@ const PortRow = React.memo(({
   value,
   isHighlighted,
   onHover,
+  valueElement,
+  actionElement,
 }: {
   nodeId: string;
   portName: string;
@@ -87,6 +93,8 @@ const PortRow = React.memo(({
   value: unknown;
   isHighlighted: boolean;
   onHover: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  valueElement?: React.ReactNode;
+  actionElement?: React.ReactNode;
 }) => (
   <div
     className={`inspector-port-row ${isHighlighted ? "highlighted" : ""}`}
@@ -118,14 +126,23 @@ const PortRow = React.memo(({
         {portType}
       </span>
     </div>
-    <PortValue value={value} />
+    <div style={{ flex: 1, minWidth: 0 }}>
+      {valueElement ?? <PortValue value={value} />}
+    </div>
+    {actionElement && (
+      <div style={{ flexShrink: 0 }}>{actionElement}</div>
+    )}
   </div>
 ));
 
 // Single node inspector card
 const NodeCard = ({
   node,
+  edges,
+  nodeNameById,
   onParamChange,
+  onInputValueChange,
+  onJumpToNode,
   onDelete,
   onDuplicate,
   isExpanded,
@@ -135,7 +152,11 @@ const NodeCard = ({
   onPortHover,
 }: {
   node: Node<BlueprintNodeData>;
+  edges: Edge[];
+  nodeNameById: Map<string, string>;
   onParamChange: (nodeId: string, param: string, value: string | number | boolean | null) => void;
+  onInputValueChange: (nodeId: string, port: string, value: string | number | boolean | null) => void;
+  onJumpToNode: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
   onDuplicate?: (nodeId: string) => void;
   isExpanded: boolean;
@@ -153,6 +174,7 @@ const NodeCard = ({
     return inputs.map((input) => ({
       name: input.name,
       type: formatPortTypeLabel(input.type),
+      rawType: input.type,
       value: inputValues[input.name],
     }));
   }, [node.data.metadata?.inputs, node.data.inputValues]);
@@ -167,6 +189,46 @@ const NodeCard = ({
       value: lastOutputs[output.name],
     }));
   }, [node.data.metadata?.outputs, node.data.last_outputs]);
+
+  const inputConnections = useMemo(() => {
+    const connections = new Map<string, string>();
+    edges.forEach((edge) => {
+      if (edge.target === node.id && edge.targetHandle) {
+        connections.set(edge.targetHandle, edge.source);
+      }
+    });
+    return connections;
+  }, [edges, node.id]);
+
+  const outputConnections = useMemo(() => {
+    const connections = new Map<string, string[]>();
+    edges.forEach((edge) => {
+      if (edge.source === node.id && edge.sourceHandle) {
+        const existing = connections.get(edge.sourceHandle) ?? [];
+        connections.set(edge.sourceHandle, existing.concat(edge.target));
+      }
+    });
+    return connections;
+  }, [edges, node.id]);
+
+  const coerceInputValue = useCallback((raw: string, rawType: any) => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    const kind = rawType?.kind;
+    if (kind === "int") {
+      const parsed = parseInt(trimmed, 10);
+      return Number.isNaN(parsed) ? trimmed : parsed;
+    }
+    if (kind === "float") {
+      const parsed = parseFloat(trimmed);
+      return Number.isNaN(parsed) ? trimmed : parsed;
+    }
+    if (kind === "boolean") {
+      if (trimmed.toLowerCase() === "true") return true;
+      if (trimmed.toLowerCase() === "false") return false;
+    }
+    return trimmed;
+  }, []);
 
   const handlePortHover = useCallback((info: { nodeId: string; port: string; direction: "input" | "output" } | null) => {
     onPortHover?.(info);
@@ -263,6 +325,10 @@ const NodeCard = ({
                     hoveredPort?.nodeId === node.id &&
                     hoveredPort?.port === port.name &&
                     hoveredPort?.direction === "input";
+                  const sourceNodeId = inputConnections.get(port.name);
+                  const sourceName = sourceNodeId ? nodeNameById.get(sourceNodeId) ?? "Source node" : null;
+                  const isConnected = Boolean(sourceNodeId);
+                  const inputValue = port.value === undefined || port.value === null ? "" : String(port.value);
                   return (
                     <PortRow
                       key={port.name}
@@ -273,6 +339,30 @@ const NodeCard = ({
                       value={port.value}
                       isHighlighted={isHighlighted}
                       onHover={handlePortHover}
+                      valueElement={
+                        isConnected ? (
+                          <span className="inspector-connected-tag">Connected</span>
+                        ) : (
+                          <input
+                            className="inspector-input"
+                            value={inputValue}
+                            onChange={(event) => onInputValueChange(node.id, port.name, coerceInputValue(event.target.value, port.rawType))}
+                            placeholder="Set value"
+                          />
+                        )
+                      }
+                      actionElement={
+                        isConnected && sourceNodeId ? (
+                          <button
+                            type="button"
+                            className="inspector-link-btn"
+                            onClick={() => onJumpToNode(sourceNodeId)}
+                            title={`Jump to ${sourceName}`}
+                          >
+                            Source
+                          </button>
+                        ) : undefined
+                      }
                     />
                   );
                 })}
@@ -289,6 +379,7 @@ const NodeCard = ({
                     hoveredPort?.nodeId === node.id &&
                     hoveredPort?.port === port.name &&
                     hoveredPort?.direction === "output";
+                  const targets = outputConnections.get(port.name) ?? [];
                   return (
                     <PortRow
                       key={port.name}
@@ -299,6 +390,23 @@ const NodeCard = ({
                       value={port.value}
                       isHighlighted={isHighlighted}
                       onHover={handlePortHover}
+                      actionElement={
+                        targets.length > 0 ? (
+                          <div className="inspector-targets">
+                            {targets.map((targetId) => (
+                              <button
+                                key={targetId}
+                                type="button"
+                                className="inspector-link-btn"
+                                onClick={() => onJumpToNode(targetId)}
+                                title={`Jump to ${nodeNameById.get(targetId) ?? "Target node"}`}
+                              >
+                                Target
+                              </button>
+                            ))}
+                          </div>
+                        ) : undefined
+                      }
                     />
                   );
                 })}
@@ -320,7 +428,11 @@ const MemoizedNodeCard = React.memo(NodeCard);
 
 const NodeInspector = ({
   nodes,
+  allNodes,
+  edges,
   onParamChange,
+  onInputValueChange,
+  onJumpToNode,
   onDelete,
   onDuplicate,
   hoveredPort,
@@ -328,6 +440,8 @@ const NodeInspector = ({
 }: InspectorProps) => {
   // Track expanded nodes in multi-select mode
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const isSingleNode = nodes.length === 1;
+  const nodeNameById = useMemo(() => new Map(allNodes.map((node) => [node.id, node.data.displayName])), [allNodes]);
 
   const toggleNode = (nodeId: string) => {
     setExpandedNodes((prev) => {
@@ -355,8 +469,6 @@ const NodeInspector = ({
     );
   }
 
-  const isSingleNode = nodes.length === 1;
-
   return (
     <div className="inspector-panel">
       <div className="inspector-node-list">
@@ -364,7 +476,11 @@ const NodeInspector = ({
           <MemoizedNodeCard
             key={node.id}
             node={node}
+            edges={edges}
+            nodeNameById={nodeNameById}
             onParamChange={onParamChange}
+            onInputValueChange={onInputValueChange}
+            onJumpToNode={onJumpToNode}
             onDelete={onDelete}
             onDuplicate={onDuplicate}
             isExpanded={expandedNodes.has(node.id)}

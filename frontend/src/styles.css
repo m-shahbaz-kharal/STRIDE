@@ -1761,6 +1761,54 @@ body {
   padding: 12px 0;
 }
 
+.inspector-input {
+  width: 100%;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+
+.inspector-connected-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.inspector-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  border: 1px solid rgba(74, 158, 255, 0.35);
+  background: rgba(74, 158, 255, 0.12);
+  cursor: pointer;
+}
+
+.inspector-link-btn:hover {
+  color: var(--text-primary);
+}
+
+.inspector-targets {
+  display: flex;
+  gap: 6px;
+}
+
 .inspector-section {
   margin-top: 10px;
 }

@@ -343,8 +343,6 @@ const App = () => {
     return "rgba(255,255,255,0.15)";
   }, []);
 
-  const minimapStrokeWidth = useCallback((node: Node<BlueprintNodeData>) => (node.selected ? 2 : 1), []);
-
   const serializeGraph = useCallback((): GraphData => {
     const safeNodes = nodes.map((node) => ({
       id: node.id,
@@ -1756,7 +1754,7 @@ const App = () => {
               <MiniMap
                 nodeColor={minimapNodeColor}
                 nodeStrokeColor={minimapNodeStroke}
-                nodeStrokeWidth={minimapStrokeWidth}
+                nodeStrokeWidth={1}
                 maskColor="rgba(0,0,0,0.65)"
                 style={{
                   backgroundColor: "rgba(20,25,35,0.9)",
@@ -1936,7 +1934,11 @@ const App = () => {
                         {rightPanelTab === "inspector" && (
                           <NodeInspector
                             nodes={selectedNodes}
+                            allNodes={nodes}
+                            edges={edges}
                             onParamChange={handleParamChange}
+                            onInputValueChange={handleInputValueChange}
+                            onJumpToNode={handleJumpToNode}
                             onDelete={handleDeleteNode}
                             onDuplicate={(nodeId) => {
                               setSelectedNodeIds([nodeId]);
