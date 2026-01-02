@@ -18,6 +18,7 @@ interface TokenResponse {
 export interface GraphRecord {
   id: string;
   name: string;
+  description?: string | null;
   data: GraphData;
   created_at: string;
   updated_at: string;
@@ -95,13 +96,13 @@ export const fetchMe = (session: AuthSession) =>
 export const listGraphs = (session: AuthSession) =>
   apiRequest<GraphRecord[]>("/api/graphs", {}, session);
 
-export const createGraph = (session: AuthSession, payload: { name: string; data: GraphData }) =>
+export const createGraph = (session: AuthSession, payload: { name: string; description?: string | null; data: GraphData }) =>
   apiRequest<GraphRecord>("/api/graphs", {
     method: "POST",
     body: JSON.stringify(payload),
   }, session);
 
-export const updateGraph = (session: AuthSession, graphId: string, payload: { name?: string; data?: GraphData }) =>
+export const updateGraph = (session: AuthSession, graphId: string, payload: { name?: string; description?: string | null; data?: GraphData }) =>
   apiRequest<GraphRecord>(`/api/graphs/${graphId}`, {
     method: "PUT",
     body: JSON.stringify(payload),

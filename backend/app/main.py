@@ -29,7 +29,7 @@ def _json_serializer(obj: Any) -> Any:
     return str(obj)
 
 
-app = FastAPI(title="LiGuard Web Graph Runtime")
+app = FastAPI(title="LiGuard DT Graph Runtime")
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

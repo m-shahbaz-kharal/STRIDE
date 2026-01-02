@@ -30,7 +30,12 @@ def create_graph(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> GraphOut:
-    graph = Graph(owner_id=current_user.id, name=payload.name, data=payload.data)
+    graph = Graph(
+        owner_id=current_user.id,
+        name=payload.name,
+        description=payload.description,
+        data=payload.data,
+    )
     db.add(graph)
     db.commit()
     db.refresh(graph)
@@ -72,6 +77,8 @@ def update_graph(
 
     if payload.name is not None:
         graph.name = payload.name
+    if payload.description is not None:
+        graph.description = payload.description
     if payload.data is not None:
         graph.data = payload.data
 

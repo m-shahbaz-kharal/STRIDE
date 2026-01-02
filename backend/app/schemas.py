@@ -34,11 +34,13 @@ class TokenResponse(BaseModel):
 
 class GraphCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
     data: dict
 
 
 class GraphUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
+    description: str | None = None
     data: dict | None = None
 
 
@@ -47,6 +49,7 @@ class GraphOut(BaseModel):
 
     id: UUID
     name: str
+    description: str | None = None
     data: dict
     created_at: datetime
     updated_at: datetime

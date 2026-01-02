@@ -44,6 +44,7 @@ import {
   BlueprintNodeData,
   NodeTypeDefinition,
 } from "./types";
+import { CloseIcon } from "./components/Icons";
 import {
   MIN_NODE_WIDTH,
   bezierIntersectsRect,
@@ -79,7 +80,9 @@ const App = () => {
   const [graphsLoading, setGraphsLoading] = useState(false);
   const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
   const [isGraphDirty, setIsGraphDirty] = useState(false);
+  const [unsavedDialog, setUnsavedDialog] = useState<null | { mode: "home" | "switch"; targetGraphId?: string }>(null);
   const lastSavedSnapshotRef = useRef<string | null>(null);
+  const skipDirtyRef = useRef(false);
 
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
@@ -101,7 +104,7 @@ const App = () => {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
 
   // Header tab state
-  const [headerTab, setHeaderTab] = useState<"graph-editor" | "display">("graph-editor");
+  const [headerTab, setHeaderTab] = useState<"home" | "graph-editor" | "display">("home");
 
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
@@ -359,6 +362,7 @@ const App = () => {
   }, [edges, leftPanelCollapsed, leftPanelWidth, nodes, rightPanelCollapsed, rightPanelWidth]);
 
   const hydrateGraph = useCallback((data: GraphData) => {
+    skipDirtyRef.current = true;
     const typeMap = new Map(nodeLibrary.map((nodeType) => [nodeType.node_type, nodeType]));
     const hydratedNodes = data.nodes.map((node: any) => {
       const nodeType = typeMap.get(node.data?.nodeType);
@@ -460,7 +464,28 @@ const App = () => {
     setEdges([]);
     setIsGraphDirty(false);
     lastSavedSnapshotRef.current = null;
-  }, [setEdges, setNodes]);
+    setHeaderTab("home");
+  }, [setEdges, setHeaderTab, setNodes]);
+
+  const handleAccountSettings = useCallback(() => {
+    window.alert("Account settings are coming soon.");
+  }, []);
+
+  const handleHeaderTabChange = useCallback((nextTab: "home" | "graph-editor" | "display") => {
+    if (nextTab === "home") {
+      if (isGraphDirty) {
+        setUnsavedDialog({ mode: "home" });
+        return;
+      }
+      setHeaderTab("home");
+      return;
+    }
+    if (!currentGraphId) {
+      setHeaderTab("home");
+      return;
+    }
+    setHeaderTab(nextTab);
+  }, [currentGraphId, isGraphDirty, setHeaderTab]);
 
   const refreshGraphs = useCallback(async () => {
     if (!session) return;
@@ -472,12 +497,6 @@ const App = () => {
         setCurrentGraphId(null);
         setNodes([]);
         setEdges([]);
-      }
-      if (!currentGraphId && data.length > 0) {
-        setCurrentGraphId(data[0].id);
-        hydrateGraph(data[0].data);
-        lastSavedSnapshotRef.current = JSON.stringify(data[0].data);
-        setIsGraphDirty(false);
       }
     } catch (err) {
       handleSignOut();
@@ -719,34 +738,65 @@ const App = () => {
       setIsGraphDirty(true);
       return;
     }
+    if (skipDirtyRef.current) {
+      skipDirtyRef.current = false;
+      lastSavedSnapshotRef.current = currentSnapshot;
+      setIsGraphDirty(false);
+      return;
+    }
     setIsGraphDirty(currentSnapshot !== lastSavedSnapshotRef.current);
   }, [currentGraphId, currentSnapshot]);
 
   // ========== Graph operations ==========
 
-  const handleCreateGraph = useCallback(async (name: string) => {
+  const handleCreateGraph = useCallback(async (name: string, description: string) => {
     if (!session) return;
     const payload: GraphData = { nodes: [], edges: [], ui: { leftPanelCollapsed, rightPanelCollapsed, leftPanelWidth, rightPanelWidth } };
-    const created = await createGraph(session, { name, data: payload });
+    const created = await createGraph(session, { name, description, data: payload });
     setGraphs((prev) => [created, ...prev]);
     setCurrentGraphId(created.id);
     hydrateGraph(created.data);
     lastSavedSnapshotRef.current = JSON.stringify(created.data);
     setIsGraphDirty(false);
-  }, [hydrateGraph, leftPanelCollapsed, leftPanelWidth, rightPanelCollapsed, rightPanelWidth, session]);
+    setHeaderTab("graph-editor");
+  }, [hydrateGraph, leftPanelCollapsed, leftPanelWidth, rightPanelCollapsed, rightPanelWidth, session, setHeaderTab]);
 
-  const handleSelectGraph = useCallback((graphId: string) => {
-    if (isGraphDirty) {
-      const confirmed = window.confirm("You have unsaved changes. Switch graphs anyway?");
-      if (!confirmed) return;
-    }
+  const selectGraph = useCallback((graphId: string) => {
     const graph = graphs.find((item) => item.id === graphId);
     if (!graph) return;
     setCurrentGraphId(graph.id);
     hydrateGraph(graph.data);
     lastSavedSnapshotRef.current = JSON.stringify(graph.data);
     setIsGraphDirty(false);
-  }, [graphs, hydrateGraph, isGraphDirty]);
+    setHeaderTab("graph-editor");
+  }, [graphs, hydrateGraph, setHeaderTab]);
+
+  const handleSelectGraph = useCallback((graphId: string) => {
+    if (isGraphDirty) {
+      setUnsavedDialog({ mode: "switch", targetGraphId: graphId });
+      return;
+    }
+    selectGraph(graphId);
+  }, [isGraphDirty, selectGraph]);
+
+  const applyUnsavedAction = useCallback(() => {
+    if (!unsavedDialog) return;
+    if (unsavedDialog.mode === "home") {
+      setHeaderTab("home");
+    }
+    if (unsavedDialog.mode === "switch" && unsavedDialog.targetGraphId) {
+      selectGraph(unsavedDialog.targetGraphId);
+    }
+    setUnsavedDialog(null);
+  }, [selectGraph, unsavedDialog]);
+
+  const handleUnsavedContinue = useCallback(() => {
+    applyUnsavedAction();
+  }, [applyUnsavedAction]);
+
+  const handleUnsavedCancel = useCallback(() => {
+    setUnsavedDialog(null);
+  }, []);
 
   const handleSaveGraph = useCallback(async () => {
     if (!session || !currentGraphId) return;
@@ -757,6 +807,12 @@ const App = () => {
     setIsGraphDirty(false);
   }, [currentGraphId, serializeGraph, session]);
 
+  const handleUnsavedSaveContinue = useCallback(async () => {
+    if (!currentGraphId) return;
+    await handleSaveGraph();
+    applyUnsavedAction();
+  }, [applyUnsavedAction, currentGraphId, handleSaveGraph]);
+
   const handleRenameGraph = useCallback(async () => {
     if (!session || !currentGraphId) return;
     const nextName = window.prompt("Rename graph", currentGraph?.name ?? "Untitled graph");
@@ -765,9 +821,9 @@ const App = () => {
     setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
   }, [currentGraph?.name, currentGraphId, session]);
 
-  const handleRenameGraphFromList = useCallback(async (graphId: string, name: string) => {
+  const handleRenameGraphFromList = useCallback(async (graphId: string, name: string, description: string) => {
     if (!session) return;
-    const updated = await updateGraph(session, graphId, { name });
+    const updated = await updateGraph(session, graphId, { name, description });
     setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
   }, [session]);
 
@@ -775,8 +831,6 @@ const App = () => {
     if (!session) return;
     const graph = graphs.find((item) => item.id === graphId);
     if (!graph) return;
-    const confirmed = window.confirm(`Delete "${graph.name}"? This cannot be undone.`);
-    if (!confirmed) return;
     await deleteGraph(session, graphId);
     setGraphs((prev) => prev.filter((item) => item.id !== graphId));
     if (currentGraphId === graphId) {
@@ -785,8 +839,9 @@ const App = () => {
       setEdges([]);
       setIsGraphDirty(false);
       lastSavedSnapshotRef.current = null;
+      setHeaderTab("home");
     }
-  }, [currentGraphId, graphs, session, setEdges, setNodes]);
+  }, [currentGraphId, graphs, session, setEdges, setHeaderTab, setNodes]);
 
   const buildGraphPayload = useCallback(
     (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
@@ -1577,6 +1632,20 @@ const App = () => {
     <PopupProvider>
       <ReactFlowProvider>
         <div className="app-shell">
+          <div
+            className="home-fullpage"
+            style={{ display: headerTab === "home" ? "flex" : "none" }}
+          >
+            <GraphLibrary
+              graphs={graphs}
+              currentGraphId={currentGraphId}
+              isLoading={graphsLoading}
+              onCreate={handleCreateGraph}
+              onSelect={handleSelectGraph}
+              onUpdate={handleRenameGraphFromList}
+              onDelete={handleDeleteGraph}
+            />
+          </div>
           {/* Keep both views mounted, use CSS to hide inactive view for instant switching */}
           <div
             className="reactflow-fullpage"
@@ -1658,7 +1727,7 @@ const App = () => {
 
           <AppHeader
             headerTab={headerTab}
-            onTabChange={setHeaderTab}
+            onTabChange={handleHeaderTabChange}
             graphSummary={graphSummary}
             displaySummary={displaySummary}
             graphName={currentGraph?.name ?? null}
@@ -1675,7 +1744,35 @@ const App = () => {
             onSaveGraph={handleSaveGraph}
             onRenameGraph={handleRenameGraph}
             onSignOut={handleSignOut}
+            onAccountSettings={handleAccountSettings}
           />
+
+          {unsavedDialog && (
+            <div className="modal-overlay">
+              <div className="modal-card">
+                <div className="modal-header">
+                  <h3>Unsaved changes</h3>
+                  <button type="button" className="icon-btn" onClick={handleUnsavedCancel}>
+                    <CloseIcon />
+                  </button>
+                </div>
+                <div className="modal-body">
+                  <p>You have unsaved changes. What would you like to do?</p>
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="ghost-btn" onClick={handleUnsavedCancel}>
+                    Stay
+                  </button>
+                  <button type="button" className="ghost-btn" onClick={handleUnsavedContinue}>
+                    Continue without saving
+                  </button>
+                  <button type="button" className="primary-btn" onClick={handleUnsavedSaveContinue}>
+                    Save and continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {headerTab === "graph-editor" && (
             <>
@@ -1685,16 +1782,6 @@ const App = () => {
               >
               {!leftPanelCollapsed && (
                   <>
-                    <GraphLibrary
-                      graphs={graphs}
-                      currentGraphId={currentGraphId}
-                      isLoading={graphsLoading}
-                      onCreate={handleCreateGraph}
-                      onSelect={handleSelectGraph}
-                      onRename={handleRenameGraphFromList}
-                      onDelete={handleDeleteGraph}
-                      onRefresh={refreshGraphs}
-                    />
                     <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
                     <div
                       className="resize-handle right"

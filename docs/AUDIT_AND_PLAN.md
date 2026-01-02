@@ -1,4 +1,4 @@
-# LiGuard Web Audit & Upgrade Plan
+# LiGuard DT Audit & Upgrade Plan
 
 This doc captures the current state, key risks, and the proposed architecture before large-scale changes. It is intentionally concise so we can execute quickly.
 

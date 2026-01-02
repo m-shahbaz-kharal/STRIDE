@@ -1,10 +1,15 @@
-import React from "react";
-import { PlayIcon, StopIcon, ClearCacheIcon, ConnectionIcon } from "../Icons";
-
-interface HeaderTabsProps {
-    activeTab: "graph-editor" | "display";
-    onTabChange: (tab: "graph-editor" | "display") => void;
-}
+import React, { useEffect, useRef, useState } from "react";
+import {
+    PlayIcon,
+    StopIcon,
+    ClearCacheIcon,
+    ConnectionIcon,
+    HomeIcon,
+    SaveIcon,
+    UserIcon,
+    SettingsIcon,
+    LogoutIcon,
+} from "../Icons";
 
 interface GraphSummary {
     nodeCount: number;
@@ -18,8 +23,8 @@ interface DisplaySummary {
 }
 
 interface AppHeaderProps {
-    headerTab: "graph-editor" | "display";
-    onTabChange: (tab: "graph-editor" | "display") => void;
+    headerTab: "home" | "graph-editor" | "display";
+    onTabChange: (tab: "home" | "graph-editor" | "display") => void;
     graphSummary: GraphSummary;
     displaySummary: DisplaySummary;
     graphName: string | null;
@@ -36,6 +41,7 @@ interface AppHeaderProps {
     onSaveGraph: () => void;
     onRenameGraph: () => void;
     onSignOut: () => void;
+    onAccountSettings: () => void;
 }
 
 const AppHeader: React.FC<AppHeaderProps> = ({
@@ -57,26 +63,54 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     onSaveGraph,
     onRenameGraph,
     onSignOut,
+    onAccountSettings,
 }) => {
+    const [accountOpen, setAccountOpen] = useState(false);
+    const accountRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClick = (event: MouseEvent) => {
+            if (!accountRef.current) return;
+            if (accountRef.current.contains(event.target as Node)) return;
+            setAccountOpen(false);
+        };
+        document.addEventListener("mousedown", handleClick);
+        return () => document.removeEventListener("mousedown", handleClick);
+    }, []);
+
     return (
         <header className="overlay-header">
             <div className="header-left">
-                <div className="header-tabs">
+                <div className="header-home-group">
                     <button
                         type="button"
-                        className={`header-tab ${headerTab === "graph-editor" ? "active" : ""}`}
-                        onClick={() => onTabChange("graph-editor")}
+                        className={`header-home-tab ${headerTab === "home" ? "active" : ""}`}
+                        onClick={() => onTabChange("home")}
+                        title="Home"
                     >
-                        Graph Editor
+                        <HomeIcon />
                     </button>
-                    <button
-                        type="button"
-                        className={`header-tab ${headerTab === "display" ? "active" : ""}`}
-                        onClick={() => onTabChange("display")}
-                    >
-                        Display
-                    </button>
+                    <span className="header-divider" />
                 </div>
+
+                {headerTab !== "home" && (
+                    <div className="header-tabs">
+                        <button
+                            type="button"
+                            className={`header-tab ${headerTab === "graph-editor" ? "active" : ""}`}
+                            onClick={() => onTabChange("graph-editor")}
+                        >
+                            Graph Editor
+                        </button>
+                        <button
+                            type="button"
+                            className={`header-tab ${headerTab === "display" ? "active" : ""}`}
+                            onClick={() => onTabChange("display")}
+                        >
+                            Display
+                        </button>
+                    </div>
+                )}
 
                 {headerTab === "graph-editor" && (
                     <div className="outputs-pills header-pills">
@@ -111,17 +145,30 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                 )}
             </div>
 
+            <div className="header-center">
+                {headerTab !== "home" && graphName && (
+                    <div className="header-graph-status">
+                        <button type="button" className="graph-title-btn" onClick={onRenameGraph}>
+                            {graphName}
+                        </button>
+                        <button
+                            className="save-icon-btn"
+                            onClick={onSaveGraph}
+                            disabled={!isGraphDirty}
+                            title="Save graph"
+                        >
+                            <SaveIcon />
+                        </button>
+                        <span className={`graph-save-indicator ${isGraphDirty ? "dirty" : "clean"}`}>
+                            {isGraphDirty ? "Unsaved" : "Saved"}
+                        </span>
+                    </div>
+                )}
+            </div>
+
             <div className="header-controls">
                 {headerTab === "graph-editor" && (
                     <>
-                        <div className="header-graph-status">
-                            <button type="button" className="graph-title-btn" onClick={onRenameGraph}>
-                                {graphName ?? "Untitled graph"}
-                            </button>
-                            <span className={`graph-save-indicator ${isGraphDirty ? "dirty" : "clean"}`}>
-                                {isGraphDirty ? "Unsaved" : "Saved"}
-                            </span>
-                        </div>
                         <ConnectionIcon connected={isConnected} />
                         <button
                             className="icon-btn primary"
@@ -148,14 +195,6 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         >
                             <ClearCacheIcon />
                         </button>
-                        <button
-                            className="icon-btn"
-                            onClick={onSaveGraph}
-                            disabled={!graphName || !isGraphDirty}
-                            title="Save graph"
-                        >
-                            Save
-                        </button>
                         {error && (
                             <span className="error-indicator" title={error}>
                                 !
@@ -163,19 +202,36 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         )}
                     </>
                 )}
-                <button
-                    className="icon-btn"
-                    onClick={onSignOut}
-                    title="Sign out"
-                >
-                    Sign out
-                </button>
+                <span className="header-divider" />
+                <div className="account-menu" ref={accountRef}>
+                    <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setAccountOpen((prev) => !prev)}
+                        title="Account"
+                    >
+                        <UserIcon />
+                    </button>
+                    {accountOpen && (
+                        <div className="account-dropdown">
+                            <button type="button" onClick={onAccountSettings}>
+                                <span className="account-item-icon">
+                                    <SettingsIcon />
+                                </span>
+                                Account settings
+                            </button>
+                            <button type="button" onClick={onSignOut}>
+                                <span className="account-item-icon">
+                                    <LogoutIcon />
+                                </span>
+                                Log out
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
         </header>
     );
 };
 
 export default AppHeader;
-
-
-

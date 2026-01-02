@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { GraphRecord } from "../api";
+import { CloseIcon, DeleteIcon, EditIcon, PlusIcon } from "./Icons";
 
 interface GraphLibraryProps {
   graphs: GraphRecord[];
   currentGraphId: string | null;
   isLoading: boolean;
-  onCreate: (name: string) => void;
+  onCreate: (name: string, description: string) => void;
   onSelect: (graphId: string) => void;
-  onRename: (graphId: string, name: string) => void;
+  onUpdate: (graphId: string, name: string, description: string) => void;
   onDelete: (graphId: string) => void;
-  onRefresh: () => void;
 }
 
 const GraphLibrary: React.FC<GraphLibraryProps> = ({
@@ -18,105 +18,173 @@ const GraphLibrary: React.FC<GraphLibraryProps> = ({
   isLoading,
   onCreate,
   onSelect,
-  onRename,
+  onUpdate,
   onDelete,
-  onRefresh,
 }) => {
-  const [newName, setNewName] = useState("");
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
+  const [editorName, setEditorName] = useState("");
+  const [editorDescription, setEditorDescription] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   const sortedGraphs = useMemo(() => {
     return [...graphs].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   }, [graphs]);
 
-  const handleCreate = () => {
-    if (!newName.trim()) return;
-    onCreate(newName.trim());
-    setNewName("");
+  const openCreate = () => {
+    setEditorMode("create");
+    setEditorName("");
+    setEditorDescription("");
+    setEditingId(null);
+    setIsEditorOpen(true);
   };
 
-  const handleRename = (graphId: string) => {
-    if (!editingName.trim()) return;
-    onRename(graphId, editingName.trim());
-    setEditingId(null);
-    setEditingName("");
+  const openEdit = (graph: GraphRecord) => {
+    setEditorMode("edit");
+    setEditorName(graph.name);
+    setEditorDescription(graph.description ?? "");
+    setEditingId(graph.id);
+    setIsEditorOpen(true);
+  };
+
+  const submitEditor = () => {
+    if (!editorName.trim()) return;
+    if (editorMode === "create") {
+      onCreate(editorName.trim(), editorDescription.trim());
+    } else if (editingId) {
+      onUpdate(editingId, editorName.trim(), editorDescription.trim());
+    }
+    setIsEditorOpen(false);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteId) return;
+    const target = graphs.find((graph) => graph.id === deleteId);
+    if (!target) return;
+    if (deleteConfirm.trim() !== target.name) return;
+    onDelete(deleteId);
+    setDeleteId(null);
+    setDeleteConfirm("");
   };
 
   return (
-    <section className="graph-library">
-      <div className="graph-library-header">
-        <button
-          type="button"
-          className={`graph-library-toggle ${isCollapsed ? "collapsed" : ""}`}
-          onClick={() => setIsCollapsed((prev) => !prev)}
-        >
-          <span>Graphs</span>
-          <span className="graph-library-count">{graphs.length}</span>
-        </button>
-        <button className="graph-library-refresh" type="button" onClick={onRefresh} title="Refresh graphs">
-          ↻
-        </button>
+    <section className="graph-home">
+      <div className="graph-home-header">
+        <div>
+          <p className="graph-home-eyebrow">LiGuard DT</p>
+          <h2>Graphs</h2>
+          <p className="graph-home-subtitle">Create, edit, and manage your saved node graphs.</p>
+        </div>
+        <div className="graph-home-actions">
+          <button className="primary-btn icon" type="button" onClick={openCreate} aria-label="New graph">
+            <PlusIcon />
+          </button>
+        </div>
       </div>
 
-      {!isCollapsed && (
-        <>
-          <div className="graph-library-new">
-            <input
-              type="text"
-              placeholder="New graph name"
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && handleCreate()}
-            />
-            <button type="button" onClick={handleCreate}>
-              Create
-            </button>
-          </div>
-
-          <div className="graph-library-list">
-            {isLoading && <div className="graph-library-empty">Loading graphs...</div>}
-            {!isLoading && sortedGraphs.length === 0 && (
-              <div className="graph-library-empty">No graphs yet. Create one above.</div>
-            )}
-            {sortedGraphs.map((graph) => (
-              <div
-                key={graph.id}
-                className={`graph-library-item ${currentGraphId === graph.id ? "active" : ""}`}
-              >
-                {editingId === graph.id ? (
-                  <input
-                    type="text"
-                    value={editingName}
-                    onChange={(event) => setEditingName(event.target.value)}
-                    onKeyDown={(event) => event.key === "Enter" && handleRename(graph.id)}
-                    onBlur={() => setEditingId(null)}
-                    autoFocus
-                  />
-                ) : (
-                  <button type="button" className="graph-library-name" onClick={() => onSelect(graph.id)}>
-                    {graph.name}
-                  </button>
-                )}
-                <div className="graph-library-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(graph.id);
-                      setEditingName(graph.name);
-                    }}
-                  >
-                    Rename
-                  </button>
-                  <button type="button" className="danger" onClick={() => onDelete(graph.id)}>
-                    Delete
-                  </button>
-                </div>
+      <div className="graph-home-list">
+        {isLoading && <div className="graph-home-empty">Loading graphs...</div>}
+        {!isLoading && sortedGraphs.length === 0 && (
+          <div className="graph-home-empty">No graphs yet. Create your first one.</div>
+        )}
+        {sortedGraphs.map((graph) => (
+          <div
+            key={graph.id}
+            className={`graph-home-item ${currentGraphId === graph.id ? "active" : ""}`}
+          >
+            <button type="button" className="graph-home-main" onClick={() => onSelect(graph.id)}>
+              <div>
+                <h3>{graph.name}</h3>
+                <p>{graph.description || "No description"}</p>
               </div>
-            ))}
+            </button>
+            <div className="graph-home-item-actions">
+              <button type="button" onClick={() => openEdit(graph)} title="Edit">
+                <EditIcon />
+              </button>
+              <button type="button" className="danger" onClick={() => setDeleteId(graph.id)} title="Delete">
+                <DeleteIcon />
+              </button>
+            </div>
           </div>
-        </>
+        ))}
+      </div>
+
+      {isEditorOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h3>{editorMode === "create" ? "Create graph" : "Edit graph"}</h3>
+              <button type="button" className="icon-btn" onClick={() => setIsEditorOpen(false)}>
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="modal-body">
+              <label>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={editorName}
+                  onChange={(event) => setEditorName(event.target.value)}
+                  placeholder="Graph name"
+                />
+              </label>
+              <label>
+                <span>Description</span>
+                <textarea
+                  value={editorDescription}
+                  onChange={(event) => setEditorDescription(event.target.value)}
+                  placeholder="Short description"
+                />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={() => setIsEditorOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="primary-btn" onClick={submitEditor}>
+                {editorMode === "create" ? "Create graph" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteId && (
+        <div className="modal-overlay">
+          <div className="modal-card danger">
+            <div className="modal-header">
+              <h3>Delete graph</h3>
+              <button type="button" className="icon-btn" onClick={() => setDeleteId(null)}>
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>Type the graph name to confirm deletion.</p>
+              <input
+                type="text"
+                value={deleteConfirm}
+                onChange={(event) => setDeleteConfirm(event.target.value)}
+                placeholder="Graph name"
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={() => setDeleteId(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={confirmDelete}
+                disabled={!deleteConfirm.trim()}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

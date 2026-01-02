@@ -1,4 +1,4 @@
-# LiGuard Web Prototype
+# LiGuard DT
 
 This repository contains the minimal prototype for a node-graph runtime inspired
 by Unreal Blueprints / ComfyUI + a GPU/CPU scheduler that fits into the
