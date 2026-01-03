@@ -17,33 +17,45 @@ conceptual architecture described in the project brief.
 
 ## Getting started
 
-1. Create a virtual environment (recommended) and install the backend dependencies:
+### Backend Setup
+
+Install Python dependencies using [uv](https://github.com/astral-sh/uv) and start the server:
+
+```bash
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Frontend Setup
+
+Install JavaScript dependencies and run the development server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dev server proxies API calls to `http://127.0.0.1:8000` by default so you can iterate on the editor while the backend is running.
+
+### Production Deployment
+
+For production, you can deploy frontend and backend to separate servers:
+
+1. **Backend**: Deploy the `backend/` directory to a powerful compute server
+2. **Frontend**: Build the static bundle and deploy to any web server:
    ```bash
-   cd backend
-   python -m venv .venv
-   .venv/Scripts/activate
-   pip install -r requirements.txt
+   cd frontend
+   VITE_API_URL=https://your-backend-server.com npm run build
    ```
-2. Install the React frontend dependencies and run the dev server:
-   ```bash
-   cd ../frontend
-   npm install
-   npm run dev
-   ```
-   The dev server proxies API calls to `http://127.0.0.1:8000` by default so you can iterate on the editor while the backend is running.
-3. For a production-backed experience, build the frontend bundle (this writes to `frontend/dist`) and then launch the backend so it can serve the static assets:
-   ```bash
-   npm run build
-   cd ../backend
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+   Then serve the `dist/` folder with nginx, Caddy, or any static file server.
 
 You can also validate the runner directly:
 
 ```bash
 cd backend
-.venv/Scripts/activate
-python -m app.test_graph
+uv run python -m app.test_graph
 ```
 
 ## Frontend experience
