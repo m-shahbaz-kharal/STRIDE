@@ -220,14 +220,20 @@ const App = () => {
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
   const edgeTypes = useMemo(() => ({ default: CustomEdge }), []);
 
+  // PERF: Use refs for values that change frequently to keep nodeHandlers stable
+  const executionIdRef = useRef(executionId);
+  useEffect(() => { executionIdRef.current = executionId; }, [executionId]);
+  const nodeMapRef = useRef(nodeMap);
+  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+
   // Create handlers object for node data - keep stable to avoid re-renders
-  // Note: onClearCache uses nodeMap which is already memoized
+  // PERF: Access changing values via refs to avoid recreating handlers
   const nodeHandlers = useMemo(() => ({
     onDelete: handleDeleteNode,
     onRunSelection: (nodeId: string) => handleRunGraph("selection", [nodeId]),
     onClearCache: async (nodeId: string) => {
-      // Access node from nodeMap which stays current
-      const node = nodeMap.get(nodeId);
+      // PERF: Access node from ref which stays current without causing re-renders
+      const node = nodeMapRef.current.get(nodeId);
       if (node) {
         try {
           await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
@@ -238,9 +244,10 @@ const App = () => {
       clearNodeCache(nodeId);
     },
     onInterrupt: async (nodeId: string) => {
-      if (!executionId) return;
+      // PERF: Access executionId from ref to keep handler stable
+      if (!executionIdRef.current) return;
       try {
-        await fetch(`/api/executions/${executionId}/cancel/${nodeId}`, { method: "POST" });
+        await fetch(`/api/executions/${executionIdRef.current}/cancel/${nodeId}`, { method: "POST" });
       } catch (e) {
         console.error("Failed to interrupt node:", e);
       }
@@ -258,8 +265,9 @@ const App = () => {
         })
       );
     },
+    // PERF: Removed executionId and nodeMap from deps - accessed via refs now
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, executionId, nodeMap, setNodes]);
+  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, setNodes]);
 
   // ========== Computed values ==========
 
@@ -539,6 +547,7 @@ const App = () => {
   }, [refreshGraphs, session]);
 
   // Update node execution states when nodeStatuses change
+  // PERF: Add early bailouts to avoid creating new objects when data hasn't changed
   useEffect(() => {
     if (nodeStatuses.size === 0 && !isRunning) return;
 
@@ -551,15 +560,28 @@ const App = () => {
       existing.map((node) => {
         const status = nodeStatuses.get(node.id);
         const traceEntry = latestTraceByNode.get(node.id);
+        const newOutputs = traceEntry?.outputs ?? node.data.last_outputs;
+        const newLogs = traceEntry?.logs ?? node.data.executionLogs;
+        const newDuration = traceEntry?.duration_ms;
+
+        // PERF: Early bailout - skip if nothing actually changed for this node
+        if (
+          node.data.executionStatus === status &&
+          node.data.executionDuration === newDuration &&
+          node.data.last_outputs === newOutputs &&
+          node.data.executionLogs === newLogs
+        ) {
+          return node;
+        }
 
         return {
           ...node,
           data: {
             ...node.data,
             executionStatus: status,
-            executionDuration: traceEntry?.duration_ms,
-            last_outputs: traceEntry?.outputs ?? node.data.last_outputs,
-            executionLogs: traceEntry?.logs ?? node.data.executionLogs,
+            executionDuration: newDuration,
+            last_outputs: newOutputs,
+            executionLogs: newLogs,
           },
         };
       })
@@ -591,11 +613,23 @@ const App = () => {
     return dependentIds;
   }, [edges, nodes]);
 
+  // PERF: Build a node lookup map for O(1) access instead of O(n) find() calls
+  const nodeById = useMemo(() => {
+    const map = new Map<string, typeof nodes[number]>();
+    for (const node of nodes) map.set(node.id, node);
+    return map;
+  }, [nodes]);
+
   // Update edges for running state
+  // PERF: Build node lookup inside effect to avoid dependency on nodeById map identity
   useEffect(() => {
+    // Build lookup inside effect - same O(n) but avoids Map identity change triggering effect
+    const nodeByIdLocal = new Map<string, typeof nodes[number]>();
+    for (const node of nodes) nodeByIdLocal.set(node.id, node);
+
     setEdges((existing) =>
       existing.map((edge) => {
-        const sourceNode = nodes.find((n) => n.id === edge.source);
+        const sourceNode = nodeByIdLocal.get(edge.source);
         const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
         const targetInRunningSet = runningNodeIds.has(edge.target);
         const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
@@ -617,6 +651,18 @@ const App = () => {
         }
 
         const loopDash = isLoopBodyEdge ? (isLoopRunning ? "2 4" : undefined) : edge.style?.strokeDasharray;
+        const newStrokeWidth = (isRunning && targetInRunningSet) ? 2.5 : 2;
+
+        // PERF: Early bailout - skip if this edge's styling wouldn't change
+        const currentStyle = edge.style as React.CSSProperties | undefined;
+        if (
+          edge.animated === shouldAnimate &&
+          currentStyle?.stroke === strokeColor &&
+          currentStyle?.strokeWidth === newStrokeWidth &&
+          currentStyle?.strokeDasharray === loopDash
+        ) {
+          return edge;
+        }
 
         return {
           ...edge,
@@ -624,7 +670,7 @@ const App = () => {
           style: {
             ...edge.style,
             stroke: strokeColor,
-            strokeWidth: (isRunning && targetInRunningSet) ? 2.5 : 2,
+            strokeWidth: newStrokeWidth,
             strokeDasharray: loopDash,
           },
         };
@@ -700,15 +746,22 @@ const App = () => {
   }, [hoveredPort, setNodes]);
 
   // Update edges with preview state during selection drag
+  // PERF: Use Set for O(1) lookup and early bailout
   useEffect(() => {
+    const previewSet = new Set(previewEdgeIds);
     setEdges((existing) =>
-      existing.map((edge) => ({
-        ...edge,
-        data: {
-          ...edge.data,
-          isPreview: previewEdgeIds.includes(edge.id),
-        },
-      }))
+      existing.map((edge) => {
+        const shouldPreview = previewSet.has(edge.id);
+        // PERF: Early bailout if preview state hasn't changed
+        if (edge.data?.isPreview === shouldPreview) return edge;
+        return {
+          ...edge,
+          data: {
+            ...edge.data,
+            isPreview: shouldPreview,
+          },
+        };
+      })
     );
   }, [previewEdgeIds, setEdges]);
 
@@ -732,16 +785,24 @@ const App = () => {
     );
   }, [getPortTypeForHandle, setEdges]);
 
-  // Update existing nodes with handlers
+  // PERF: Handler propagation effect removed - handlers are now stable and passed via createNodeFromType
+  // With stable nodeHandlers (using refs for changing values), we only need to update handlers once on mount
+  const handlersAppliedRef = useRef(false);
   useEffect(() => {
+    if (handlersAppliedRef.current) return;
+    handlersAppliedRef.current = true;
     setNodes((existing) =>
-      existing.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          ...nodeHandlers,
-        },
-      }))
+      existing.map((node) => {
+        // Only update if handlers are actually missing
+        if (node.data.onDelete === nodeHandlers.onDelete) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            ...nodeHandlers,
+          },
+        };
+      })
     );
   }, [nodeHandlers, setNodes]);
 
@@ -1835,7 +1896,7 @@ const App = () => {
                 className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}
                 style={{ width: leftPanelCollapsed ? 0 : leftPanelWidth }}
               >
-              {!leftPanelCollapsed && (
+                {!leftPanelCollapsed && (
                   <>
                     <NodePalette nodeTypes={nodeLibrary} onAddNode={handleAddNode} />
                     <div

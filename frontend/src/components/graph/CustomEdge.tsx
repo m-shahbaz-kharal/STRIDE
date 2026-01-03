@@ -118,4 +118,24 @@ const CustomEdge = ({
   );
 };
 
-export default CustomEdge;
+// PERF: Memoize edge to prevent re-renders when other edges change
+export default React.memo(CustomEdge, (prev, next) => {
+  // Only re-render if position, selection, or styling actually changed
+  if (prev.id !== next.id) return false;
+  if (prev.sourceX !== next.sourceX || prev.sourceY !== next.sourceY) return false;
+  if (prev.targetX !== next.targetX || prev.targetY !== next.targetY) return false;
+  if (prev.sourcePosition !== next.sourcePosition) return false;
+  if (prev.targetPosition !== next.targetPosition) return false;
+  if (prev.selected !== next.selected) return false;
+  if (prev.data?.isPreview !== next.data?.isPreview) return false;
+  if (prev.data?.kind !== next.data?.kind) return false;
+
+  // Check style changes
+  const prevStyle = prev.style as React.CSSProperties | undefined;
+  const nextStyle = next.style as React.CSSProperties | undefined;
+  if (prevStyle?.stroke !== nextStyle?.stroke) return false;
+  if (prevStyle?.strokeWidth !== nextStyle?.strokeWidth) return false;
+  if (prevStyle?.strokeDasharray !== nextStyle?.strokeDasharray) return false;
+
+  return true;
+});

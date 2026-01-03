@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Handle, NodeProps, Position, useReactFlow, useStore, useUpdateNodeInternals } from "reactflow";
+import { Handle, NodeProps, Position, useReactFlow, useStore, useUpdateNodeInternals, Edge } from "reactflow";
 
 import { usePopups } from "../../context/PopupContext";
 import {
@@ -13,6 +13,30 @@ import {
   getExecutionStatusClass,
   getPortTypeColor,
 } from "../../graph/utils";
+
+// PERF: Equality function for edge arrays - prevents re-renders when edges haven't changed
+const edgeArrayEquals = (a: Edge[], b: Edge[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id) return false;
+    // Check if target handle changed (affects connection status)
+    if (a[i].targetHandle !== b[i].targetHandle) return false;
+    if (a[i].sourceHandle !== b[i].sourceHandle) return false;
+  }
+  return true;
+};
+
+// PERF: Equality function for connected source nodes Map
+const sourceMapEquals = (a: Map<string, any>, b: Map<string, any>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const [key, nodeA] of a) {
+    const nodeB = b.get(key);
+    if (!nodeB) return false;
+    // Only care about last_outputs which affects displayed values
+    if (nodeA?.data?.last_outputs !== nodeB?.data?.last_outputs) return false;
+  }
+  return true;
+};
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | null;
 
@@ -64,15 +88,17 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const { getZoom } = useReactFlow();
 
   // PERF: Only subscribe to edges that connect to THIS node, not all edges
-  // This prevents re-renders when other nodes' edges change
+  // Uses equality function to prevent re-renders when edge array is semantically identical
   const relevantEdges = useStore(
     useCallback((state) => {
       const allEdges = state.edges || [];
       return allEdges.filter((edge) => edge.source === id || edge.target === id);
-    }, [id])
+    }, [id]),
+    edgeArrayEquals
   );
 
   // PERF: Only get source nodes for our incoming edges, not entire nodeInternals
+  // Uses equality function to prevent re-renders when source outputs haven't changed
   const connectedSources = useStore(
     useCallback((state) => {
       const allEdges = state.edges || [];
@@ -90,7 +116,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         if (node) result.set(sourceId, node);
       }
       return result;
-    }, [id])
+    }, [id]),
+    sourceMapEquals
   );
 
   const { showLogsPopup } = usePopups();
