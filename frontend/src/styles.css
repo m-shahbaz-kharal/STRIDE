@@ -88,6 +88,41 @@ body {
   background: var(--bg-canvas) !important;
 }
 
+/* ========== GPU Acceleration for Performance ========== */
+
+/* Promote ReactFlow nodes to GPU composite layers for smooth dragging */
+.react-flow__node {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Disable transitions during node drag for maximum performance */
+.react-flow__node.dragging .blueprint-node {
+  transition: none !important;
+}
+
+/* Pause execution ring animation during drag to reduce CPU load */
+.react-flow__node.dragging .node-execution-ring {
+  animation-play-state: paused;
+}
+
+/* Promote animated elements to GPU layers */
+.pulse-dot,
+.pulse-ring,
+.node-execution-ring,
+.status-dot.pulse,
+.level-node.running,
+.level-node.queued {
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Edge container optimization */
+.react-flow__edges {
+  contain: layout style;
+}
+
 .connection-toast {
   position: absolute;
   top: 56px;
@@ -452,6 +487,7 @@ body {
   width: 12px;
   height: 12px;
 }
+
 .header-graph-status {
   display: flex;
   align-items: center;
