@@ -31,6 +31,7 @@ import { ChevronLeft, ChevronRight, CopyIcon, DeleteIcon } from "./components/Ic
 import { PopupProvider } from "./context/PopupContext";
 import AuthScreen from "./components/AuthScreen";
 import GraphLibrary from "./components/GraphLibrary";
+import AppDialog from "./components/AppDialog";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useNodeLibrary } from "./hooks/useNodeLibrary";
@@ -81,6 +82,14 @@ const App = () => {
   const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
   const [isGraphDirty, setIsGraphDirty] = useState(false);
   const [unsavedDialog, setUnsavedDialog] = useState<null | { mode: "home" | "switch"; targetGraphId?: string }>(null);
+  const [appDialog, setAppDialog] = useState<{
+    variant: "alert" | "confirm" | "prompt";
+    title: string;
+    message?: string;
+    defaultValue?: string;
+    placeholder?: string;
+    onConfirm: (value?: string) => void;
+  } | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const lastSavedSnapshotRef = useRef<string | null>(null);
   const skipDirtyRef = useRef(false);
@@ -503,7 +512,12 @@ const App = () => {
   }, [setEdges, setHeaderTab, setNodes]);
 
   const handleAccountSettings = useCallback(() => {
-    window.alert("Account settings are coming soon.");
+    setAppDialog({
+      variant: "alert",
+      title: "Coming Soon",
+      message: "Account settings are coming soon.",
+      onConfirm: () => setAppDialog(null),
+    });
   }, []);
 
   const handleHeaderTabChange = useCallback((nextTab: "home" | "graph-editor" | "display") => {
@@ -901,12 +915,21 @@ const App = () => {
     applyUnsavedAction();
   }, [applyUnsavedAction, currentGraphId, handleSaveGraph]);
 
-  const handleRenameGraph = useCallback(async () => {
+  const handleRenameGraph = useCallback(() => {
     if (!session || !currentGraphId) return;
-    const nextName = window.prompt("Rename graph", currentGraph?.name ?? "Untitled graph");
-    if (!nextName || !nextName.trim()) return;
-    const updated = await updateGraph(session, currentGraphId, { name: nextName.trim() });
-    setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
+    setAppDialog({
+      variant: "prompt",
+      title: "Rename Graph",
+      message: "Enter a new name for this graph:",
+      defaultValue: currentGraph?.name ?? "Untitled graph",
+      placeholder: "Graph name",
+      onConfirm: async (value) => {
+        setAppDialog(null);
+        if (!value?.trim()) return;
+        const updated = await updateGraph(session, currentGraphId, { name: value.trim() });
+        setGraphs((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      },
+    });
   }, [currentGraph?.name, currentGraphId, session]);
 
   const handleRenameGraphFromList = useCallback(async (graphId: string, name: string, description: string) => {
@@ -1888,6 +1911,19 @@ const App = () => {
                 </div>
               </div>
             </div>
+          )}
+
+          {appDialog && (
+            <AppDialog
+              isOpen={true}
+              variant={appDialog.variant}
+              title={appDialog.title}
+              message={appDialog.message}
+              defaultValue={appDialog.defaultValue}
+              placeholder={appDialog.placeholder}
+              onConfirm={appDialog.onConfirm}
+              onCancel={() => setAppDialog(null)}
+            />
           )}
 
           {headerTab === "graph-editor" && (
