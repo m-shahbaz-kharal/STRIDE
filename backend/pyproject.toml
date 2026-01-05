@@ -17,4 +17,13 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-jose>=3.3.0",
     "email-validator>=2.1.1",
+    # Plugin packages (editable install from local packages/)
+    "liguard-core",
+    "liguard-sam3",
+    "liguard-fl511",
 ]
+
+[tool.uv.sources]
+liguard-core = { path = "../packages/liguard-core", editable = true }
+liguard-sam3 = { path = "../packages/liguard-sam3", editable = true }
+liguard-fl511 = { path = "../packages/liguard-fl511", editable = true }

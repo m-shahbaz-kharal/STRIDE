@@ -1,0 +1,39 @@
+"""
+liguard-core: Core interfaces for LiGuard-Web node plugins.
+
+This package provides the base classes and utilities needed to create
+LiGuard-Web node plugins.
+"""
+
+from .node_base import NodeBase, ExecutionContext
+from .node_spec import NodeSpec, PortSpec, ParamSpec
+from .registry import register_node, NODE_REGISTRY, get_node, list_node_types, list_node_definitions
+from .typesystem import TypeDescriptor
+from .plugin import discover_plugins, PluginInfo
+
+__version__ = "1.0.0"
+__api_version__ = "1.0"
+
+__all__ = [
+    # Base classes
+    "NodeBase",
+    "ExecutionContext",
+    # Specs
+    "NodeSpec",
+    "PortSpec",
+    "ParamSpec",
+    # Registry
+    "register_node",
+    "NODE_REGISTRY",
+    "get_node",
+    "list_node_types",
+    "list_node_definitions",
+    # Types
+    "TypeDescriptor",
+    # Plugins
+    "discover_plugins",
+    "PluginInfo",
+    # Version
+    "__version__",
+    "__api_version__",
+]
