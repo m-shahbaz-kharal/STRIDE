@@ -34,74 +34,77 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
   return (
     <div className="auth-screen">
-      <div className="auth-panel">
-        <div className="auth-header">
-          <p className="auth-eyebrow">LiGuard DT</p>
-          <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>
-          <p className="auth-subtitle">
-            {mode === "login"
-              ? "Sign in to manage your graphs across devices."
-              : "Set up your workspace and start building graphs."}
-          </p>
-        </div>
+      <div className="auth-container">
+        <img src="/logo.png" alt="Urban Sentinel" className="auth-logo" />
+        <h2 className="auth-app-title">LiGuard DT</h2>
+        <div className="auth-panel">
+          <div className="auth-header">
+            <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>
+            <p className="auth-subtitle">
+              {mode === "login"
+                ? "Sign in to manage your graphs across devices."
+                : "Set up your workspace and start building graphs."}
+            </p>
+          </div>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {mode === "register" && (
+          <form className="auth-form" onSubmit={handleSubmit}>
+            {mode === "register" && (
+              <label className="auth-field">
+                <span>Display name</span>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Optional"
+                  autoComplete="name"
+                />
+              </label>
+            )}
+
             <label className="auth-field">
-              <span>Display name</span>
+              <span>Email</span>
               <input
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Optional"
-                autoComplete="name"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
               />
             </label>
-          )}
 
-          <label className="auth-field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-            />
-          </label>
+            <label className="auth-field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Minimum 8 characters"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                required
+                minLength={8}
+              />
+            </label>
 
-          <label className="auth-field">
-            <span>Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Minimum 8 characters"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              required
-              minLength={8}
-            />
-          </label>
+            {error && <div className="auth-error">{error}</div>}
 
-          {error && <div className="auth-error">{error}</div>}
+            <button type="submit" className="auth-submit" disabled={isSubmitting}>
+              {isSubmitting ? "Working..." : mode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
 
-          <button type="submit" className="auth-submit" disabled={isSubmitting}>
-            {isSubmitting ? "Working..." : mode === "login" ? "Sign in" : "Create account"}
-          </button>
-        </form>
-
-        <div className="auth-footer">
-          <span>
-            {mode === "login" ? "New here?" : "Already have an account?"}
-          </span>
-          <button
-            type="button"
-            className="auth-toggle"
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
-          >
-            {mode === "login" ? "Create one" : "Sign in"}
-          </button>
+          <div className="auth-footer">
+            <span>
+              {mode === "login" ? "New here?" : "Already have an account?"}
+            </span>
+            <button
+              type="button"
+              className="auth-toggle"
+              onClick={() => setMode(mode === "login" ? "register" : "login")}
+            >
+              {mode === "login" ? "Create one" : "Sign in"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
