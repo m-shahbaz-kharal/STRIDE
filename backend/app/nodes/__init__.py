@@ -54,6 +54,7 @@ from . import programming  # noqa: E402,F401
 from . import fl511  # noqa: E402,F401
 from . import utilities  # noqa: E402,F401
 from . import display  # noqa: E402,F401
+from . import sam3  # noqa: E402,F401
 
 
 __all__ = [

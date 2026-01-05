@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
 CONTAINERS = {"list", "map", "record", "tuple", "option"}
-FLEXIBLE = {"any", "unknown", "tensor", "control", "stream"}
+FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session"}
 
 
 @dataclass(frozen=True)
@@ -198,3 +198,27 @@ def t_tensor(dtype: str = "float32", shape: Optional[list[int]] = None) -> TypeD
 
 def t_stream() -> TypeDescriptor:
     return TypeDescriptor(kind="stream")
+
+
+# =============================================================================
+# AI-Specific Types
+# =============================================================================
+
+def t_point() -> TypeDescriptor:
+    """A 2D point with x, y coordinates (normalized 0-1) and optional label."""
+    return TypeDescriptor(kind="point")
+
+
+def t_box() -> TypeDescriptor:
+    """A bounding box with x1, y1, x2, y2 (normalized 0-1) and optional label."""
+    return TypeDescriptor(kind="box")
+
+
+def t_mask() -> TypeDescriptor:
+    """A segmentation mask (base64 encoded PNG)."""
+    return TypeDescriptor(kind="mask")
+
+
+def t_session() -> TypeDescriptor:
+    """An AI model session handle."""
+    return TypeDescriptor(kind="session")
