@@ -1455,7 +1455,9 @@ const App = () => {
         { x: flowPosition.x - xOffset, y: flowPosition.y - portYOffset },
         nodeHandlers
       );
-      const isControlConnection = compatiblePort.sourceType?.kind === "control" || compatiblePort.targetType?.kind === "control";
+      const isControlConnection =
+        (typeof compatiblePort.sourceType === "object" && compatiblePort.sourceType?.kind === "control") ||
+        (typeof compatiblePort.targetType === "object" && compatiblePort.targetType?.kind === "control");
       const hydratedNewNode = isControlConnection
         ? { ...newNode, data: { ...newNode.data, showControlPorts: true } }
         : newNode;
