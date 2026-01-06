@@ -800,11 +800,13 @@ const App = () => {
     );
   }, [getPortTypeForHandle, setEdges]);
 
-  // PERF: Handler propagation effect removed - handlers are now stable and passed via createNodeFromType
-  // With stable nodeHandlers (using refs for changing values), we only need to update handlers once on mount
+  // Handler propagation effect - applies nodeHandlers to nodes after hydration
+  // When hydrateGraph loads nodes, it resets handlersAppliedRef to false so this effect re-runs
+  // NOTE: nodes.length is included as dependency to trigger when nodes are loaded (hydrateGraph sets new nodes)
   const handlersAppliedRef = useRef(false);
   useEffect(() => {
     if (handlersAppliedRef.current) return;
+    if (nodes.length === 0) return; // Don't apply handlers to empty graph
     handlersAppliedRef.current = true;
     setNodes((existing) =>
       existing.map((node) => {
@@ -819,7 +821,7 @@ const App = () => {
         };
       })
     );
-  }, [nodeHandlers, setNodes]);
+  }, [nodeHandlers, setNodes, nodes.length]);
 
   useEffect(() => {
     if (selectedNodeId && !nodes.some((node) => node.id === selectedNodeId)) {
