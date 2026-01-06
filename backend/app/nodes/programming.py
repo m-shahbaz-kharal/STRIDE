@@ -331,17 +331,15 @@ IF_ELSE_SPEC = NodeSpec(
     version="1.0.0",
     display_name="If / Else",
     category="Control",
-    summary="Select between two values based on condition.",
-    description="Returns then_value when condition is truthy, else else_value.",
+    summary="Branch execution based on condition.",
+    description="Executes the True branch when condition is truthy, else the False branch.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="condition", type=t_boolean(), required=False, default=False),
-        PortSpec(name="then_value", type=t_any(), required=False, default=None),
-        PortSpec(name="else_value", type=t_any(), required=False, default=None),
     ],
     outputs=[
-        PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="value", type=t_any()),
+        PortSpec(name="true", type=t_control(), required=False, default=None),
+        PortSpec(name="false", type=t_control(), required=False, default=None),
     ],
 )
 
@@ -350,9 +348,8 @@ IF_ELSE_SPEC = NodeSpec(
 class IfElseNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         cond = bool(inputs.get("condition"))
-        result = inputs.get("then_value") if cond else inputs.get("else_value")
-        ctx.log(f"IfElse cond={cond} -> {result}")
-        return {"control_out": None, "value": result}
+        ctx.log(f"IfElse cond={cond} -> {'True' if cond else 'False'} branch")
+        return {"true": None, "false": None}
 
 
 FOR_LOOP_SPEC = NodeSpec(

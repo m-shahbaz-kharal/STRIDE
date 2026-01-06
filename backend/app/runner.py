@@ -135,6 +135,13 @@ class GraphExecutor:
         self._loop_body_nodes: Dict[str, Set[str]] = {}
         self._nodes_in_loop_body: Set[str] = set()
         
+        # If/Else branch tracking
+        self._ifelse_nodes: Set[str] = set()
+        self._ifelse_true_branch: Dict[str, Set[str]] = {}  # ifelse_id -> nodes reachable from 'true' port
+        self._ifelse_false_branch: Dict[str, Set[str]] = {}  # ifelse_id -> nodes reachable from 'false' port
+        self._nodes_in_ifelse_branch: Set[str] = set()  # All nodes that are in an if/else branch
+        self._skipped_branches: Set[str] = set()  # Nodes skipped due to if/else condition
+        
         # Branch detection for hybrid execution model
         self._start_nodes: Set[str] = set()  # Nodes with type core.control.start
         self._branch_roots: Dict[str, str] = {}  # node_id -> branch_id (root start node)
@@ -148,6 +155,7 @@ class GraphExecutor:
         self._topo_order = self._topological_sort()
         self._compute_levels()
         self._build_loop_sets()
+        self._build_ifelse_sets()
         self._build_branch_info()
 
     @classmethod
@@ -188,6 +196,7 @@ class GraphExecutor:
         self._variables = {}
         self._shared_metadata = {}
         self._resources = []
+        self._skipped_branches = set()  # Reset If/Else skipped branches
         self._cancellation.reset()
 
     def _cleanup_resources(self, target_node_id: Optional[str] = None) -> None:
@@ -399,6 +408,9 @@ class GraphExecutor:
     def _is_loop_node(self, node_type: str) -> bool:
         return node_type in {"core.control.for", "core.control.repeat", "core.control.while"}
 
+    def _is_ifelse_node(self, node_type: str) -> bool:
+        return node_type == "core.control.ifelse"
+
     def _build_loop_sets(self) -> None:
         self._loop_nodes = {node_id for node_id, node in self.nodes.items() if self._is_loop_node(node.type)}
         self._loop_body_nodes = {}
@@ -429,6 +441,59 @@ class GraphExecutor:
                 if child not in body_nodes:
                     queue.append(child)
         return body_nodes
+
+    def _build_ifelse_sets(self) -> None:
+        """Build tracking sets for If/Else nodes and their branches."""
+        self._ifelse_nodes = {node_id for node_id, node in self.nodes.items() if self._is_ifelse_node(node.type)}
+        self._ifelse_true_branch = {}
+        self._ifelse_false_branch = {}
+        self._nodes_in_ifelse_branch = set()
+        
+        for ifelse_id in self._ifelse_nodes:
+            true_nodes = self._collect_branch_nodes(ifelse_id, "true")
+            false_nodes = self._collect_branch_nodes(ifelse_id, "false")
+            self._ifelse_true_branch[ifelse_id] = true_nodes
+            self._ifelse_false_branch[ifelse_id] = false_nodes
+            self._nodes_in_ifelse_branch.update(true_nodes)
+            self._nodes_in_ifelse_branch.update(false_nodes)
+
+    def _collect_branch_nodes(self, ifelse_id: str, branch_port: str) -> Set[str]:
+        """Collect all nodes reachable from an If/Else branch output."""
+        branch_nodes: Set[str] = set()
+        queue = deque()
+        
+        # Start from nodes connected to the specified branch port
+        for to_node, from_port, _ in self.control_outputs.get(ifelse_id, []):
+            if from_port == branch_port:
+                queue.append(to_node)
+        
+        while queue:
+            node_id = queue.popleft()
+            if node_id in branch_nodes:
+                continue
+            branch_nodes.add(node_id)
+            
+            # Follow control outputs (but handle nested loops/if-else specially)
+            child_outputs = self.control_outputs.get(node_id, [])
+            node_type = self.nodes[node_id].type
+            
+            if self._is_loop_node(node_type):
+                # For loops, only follow the 'completed' output to stay in branch
+                for child, from_port, _ in child_outputs:
+                    if from_port == "completed" and child not in branch_nodes:
+                        queue.append(child)
+            elif self._is_ifelse_node(node_type):
+                # For nested if/else, follow both true and false outputs
+                for child, _, _ in child_outputs:
+                    if child not in branch_nodes:
+                        queue.append(child)
+            else:
+                # Regular nodes, follow all control outputs
+                for child, _, _ in child_outputs:
+                    if child not in branch_nodes:
+                        queue.append(child)
+        
+        return branch_nodes
 
     def _build_branch_info(self) -> None:
         """Detect parallel branches from Start nodes and identify merge points.
@@ -952,6 +1017,25 @@ class GraphExecutor:
                     )
                     continue
 
+                # Skip nodes in inactive If/Else branches
+                if node_id in self._skipped_branches:
+                    skipped = self._record_interrupted(node_id)
+                    completed_nodes += 1
+                    yield ExecutionEvent(
+                        event_type="node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=skipped.node_type,
+                        status=NodeStatus.SKIPPED,
+                        logs=["Skipped: If/Else condition was False"],
+                        level=skipped.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                    )
+                    continue
+                
                 if self._is_loop_node(self.nodes[node_id].type):
                     loop_node = self.nodes[node_id]
                     body_nodes = self._loop_body_nodes.get(node_id, set())
@@ -1035,6 +1119,110 @@ class GraphExecutor:
                             if self._is_loop_node(self.nodes[body_id].type):
                                 self._execute_loop_sync(body_id, 0, None, set())
                                 completed_nodes += 1
+                                continue
+
+                            # Skip nodes in inactive If/Else branches
+                            if body_id in self._skipped_branches:
+                                skipped = self._record_interrupted(body_id)
+                                completed_nodes += 1
+                                yield ExecutionEvent(
+                                    event_type="node_skipped",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=body_id,
+                                    node_type=skipped.node_type,
+                                    status=NodeStatus.SKIPPED,
+                                    logs=["Skipped: If/Else condition was False"],
+                                    level=skipped.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                )
+                                continue
+
+                            # Handle If/Else nodes in loop body
+                            if self._is_ifelse_node(self.nodes[body_id].type):
+                                yield ExecutionEvent(
+                                    event_type="node_started",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=body_id,
+                                    node_type=self.nodes[body_id].type,
+                                    status=NodeStatus.RUNNING,
+                                    level=self._node_levels.get(body_id, 0),
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                )
+                                
+                                try:
+                                    inputs = self._prepare_inputs(body_id)
+                                except GraphExecutionError as exc:
+                                    result = self._make_input_error_result(body_id, exc)
+                                    self._finalize_node_result(body_id, {}, result, cached=False)
+                                    completed_nodes += 1
+                                    yield ExecutionEvent(
+                                        event_type="node_error",
+                                        execution_id=self.execution_id,
+                                        timestamp=time.time(),
+                                        node_id=body_id,
+                                        node_type=result.node_type,
+                                        status=NodeStatus.ERROR,
+                                        error=result.error,
+                                        error_code=result.error_code,
+                                        duration_ms=result.duration_ms,
+                                        level=result.level,
+                                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                        total_nodes=total_nodes,
+                                        completed_nodes=completed_nodes,
+                                        from_cache=result.from_cache,
+                                    )
+                                    if self._fail_fast:
+                                        loop_interrupted = True
+                                        break
+                                    continue
+                                
+                                # Evaluate condition and mark inactive branch
+                                true_nodes = self._ifelse_true_branch.get(body_id, set())
+                                false_nodes = self._ifelse_false_branch.get(body_id, set())
+                                self._skipped_branches -= true_nodes
+                                self._skipped_branches -= false_nodes
+                                
+                                condition = bool(inputs.get("condition", False))
+                                if condition:
+                                    self._skipped_branches.update(false_nodes)
+                                else:
+                                    self._skipped_branches.update(true_nodes)
+                                
+                                ifelse_outputs = {"true": None, "false": None}
+                                result = NodeExecutionResult(
+                                    node_id=body_id,
+                                    node_type=self.nodes[body_id].type,
+                                    status=NodeStatus.COMPLETED,
+                                    outputs=ifelse_outputs,
+                                    logs=[f"[loop {idx}] Condition evaluated to {condition}"],
+                                    duration_ms=0.0,
+                                    level=self._node_levels.get(body_id, 0),
+                                    from_cache=False,
+                                )
+                                self._finalize_node_result(body_id, inputs, result, cached=False)
+                                completed_nodes += 1
+                                yield ExecutionEvent(
+                                    event_type="node_completed",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=body_id,
+                                    node_type=self.nodes[body_id].type,
+                                    status=NodeStatus.COMPLETED,
+                                    outputs=ifelse_outputs,
+                                    logs=result.logs,
+                                    duration_ms=result.duration_ms,
+                                    level=result.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                    from_cache=False,
+                                )
                                 continue
 
                             yield ExecutionEvent(
@@ -1173,6 +1361,94 @@ class GraphExecutor:
                             completed_nodes=completed_nodes,
                             from_cache=False,
                         )
+                    continue
+
+                # Handle If/Else nodes specially - execute and mark inactive branch
+                if self._is_ifelse_node(self.nodes[node_id].type):
+                    yield ExecutionEvent(
+                        event_type="node_started",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=self.nodes[node_id].type,
+                        status=NodeStatus.RUNNING,
+                        level=self._node_levels.get(node_id, 0),
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                    )
+                    
+                    try:
+                        inputs = self._prepare_inputs(node_id)
+                    except GraphExecutionError as exc:
+                        result = self._make_input_error_result(node_id, exc)
+                        self._finalize_node_result(node_id, {}, result, cached=False)
+                        completed_nodes += 1
+                        yield ExecutionEvent(
+                            event_type="node_error",
+                            execution_id=self.execution_id,
+                            timestamp=time.time(),
+                            node_id=node_id,
+                            node_type=result.node_type,
+                            status=NodeStatus.ERROR,
+                            error=result.error,
+                            error_code=result.error_code,
+                            duration_ms=result.duration_ms,
+                            level=result.level,
+                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                            total_nodes=total_nodes,
+                            completed_nodes=completed_nodes,
+                            from_cache=result.from_cache,
+                        )
+                        if self._fail_fast:
+                            break
+                        continue
+                    
+                    # Evaluate the condition and mark inactive branch as skipped
+                    # Clear any previous skip state for this If/Else (important for loops)
+                    true_nodes = self._ifelse_true_branch.get(node_id, set())
+                    false_nodes = self._ifelse_false_branch.get(node_id, set())
+                    self._skipped_branches -= true_nodes
+                    self._skipped_branches -= false_nodes
+                    
+                    condition = bool(inputs.get("condition", False))
+                    if condition:
+                        # Condition is True: skip the false branch
+                        self._skipped_branches.update(false_nodes)
+                    else:
+                        # Condition is False: skip the true branch
+                        self._skipped_branches.update(true_nodes)
+                    
+                    # Execute the If/Else node to record it
+                    ifelse_outputs = {"true": None, "false": None}
+                    result = NodeExecutionResult(
+                        node_id=node_id,
+                        node_type=self.nodes[node_id].type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=ifelse_outputs,
+                        logs=[f"Condition evaluated to {condition}"],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(node_id, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(node_id, inputs, result, cached=False)
+                    completed_nodes += 1
+                    yield ExecutionEvent(
+                        event_type="node_completed",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=node_id,
+                        node_type=self.nodes[node_id].type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=ifelse_outputs,
+                        logs=result.logs,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                        total_nodes=total_nodes,
+                        completed_nodes=completed_nodes,
+                        from_cache=False,
+                    )
                     continue
 
                 yield ExecutionEvent(
@@ -2213,6 +2489,85 @@ class GraphExecutor:
                                 total_nodes=total_nodes,
                                 completed_nodes=completed_nodes,
                             )
+                            continue
+
+                        # Skip nodes in inactive If/Else branches
+                        if node_id in self._skipped_branches:
+                            skipped = self._record_interrupted(node_id)
+                            completed_nodes += 1
+                            yield ExecutionEvent(
+                                event_type="node_skipped",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=node_id,
+                                node_type=skipped.node_type,
+                                status=NodeStatus.SKIPPED,
+                                logs=["Skipped: If/Else condition was False"],
+                                level=skipped.level,
+                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                total_nodes=total_nodes,
+                                completed_nodes=completed_nodes,
+                            )
+                            # Still propagate dependencies so downstream nodes become ready
+                            for dep_node in self._dependents.get(node_id, []):
+                                if dep_node in remaining_inputs:
+                                    remaining_inputs[dep_node] -= 1
+                                    if remaining_inputs[dep_node] == 0 and dep_node in execution_set:
+                                        ready.append(dep_node)
+                            continue
+
+                        # Handle If/Else nodes specially
+                        if self._is_ifelse_node(self.nodes[node_id].type):
+                            inputs = self._prepare_inputs(node_id)
+                            
+                            # Evaluate condition and mark inactive branch
+                            true_nodes = self._ifelse_true_branch.get(node_id, set())
+                            false_nodes = self._ifelse_false_branch.get(node_id, set())
+                            self._skipped_branches -= true_nodes
+                            self._skipped_branches -= false_nodes
+                            
+                            condition = bool(inputs.get("condition", False))
+                            if condition:
+                                self._skipped_branches.update(false_nodes)
+                            else:
+                                self._skipped_branches.update(true_nodes)
+                            
+                            ifelse_outputs = {"true": None, "false": None}
+                            result = NodeExecutionResult(
+                                node_id=node_id,
+                                node_type=self.nodes[node_id].type,
+                                status=NodeStatus.COMPLETED,
+                                outputs=ifelse_outputs,
+                                logs=[f"Condition evaluated to {condition}"],
+                                duration_ms=0.0,
+                                level=self._node_levels.get(node_id, 0),
+                                from_cache=False,
+                            )
+                            self._finalize_node_result(node_id, inputs, result, cached=False)
+                            completed_nodes += 1
+                            executed_count += 1
+                            yield ExecutionEvent(
+                                event_type="node_completed",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=node_id,
+                                node_type=self.nodes[node_id].type,
+                                status=NodeStatus.COMPLETED,
+                                outputs=ifelse_outputs,
+                                logs=result.logs,
+                                duration_ms=result.duration_ms,
+                                level=result.level,
+                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                total_nodes=total_nodes,
+                                completed_nodes=completed_nodes,
+                                from_cache=False,
+                            )
+                            # Propagate dependencies - use remaining_inputs for dependency tracking
+                            for dep_node in self._dependents.get(node_id, []):
+                                if dep_node in remaining_inputs:
+                                    remaining_inputs[dep_node] -= 1
+                                    if remaining_inputs[dep_node] == 0 and dep_node in execution_set:
+                                        ready.append(dep_node)
                             continue
 
                         if max_steps is not None and executed_count >= max_steps:
