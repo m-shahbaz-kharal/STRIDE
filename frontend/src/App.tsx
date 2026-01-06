@@ -407,6 +407,7 @@ const App = () => {
 
   const hydrateGraph = useCallback((data: GraphData) => {
     skipDirtyRef.current = true;
+    handlersAppliedRef.current = false;  // Reset so handlers get applied to new nodes
     const typeMap = new Map(nodeLibrary.map((nodeType) => [nodeType.node_type, nodeType]));
     const hydratedNodes = data.nodes.map((node: any) => {
       const nodeType = typeMap.get(node.data?.nodeType);
