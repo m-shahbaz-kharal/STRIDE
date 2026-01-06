@@ -31,6 +31,7 @@ import { ChevronLeft, ChevronRight, CopyIcon, DeleteIcon } from "./components/Ic
 import { PopupProvider } from "./context/PopupContext";
 import AuthScreen from "./components/AuthScreen";
 import GraphLibrary from "./components/GraphLibrary";
+import JsonEditor from "./components/JsonEditor";
 import AppDialog from "./components/AppDialog";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
@@ -118,6 +119,10 @@ const App = () => {
 
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
+
+  // JSON editor view state
+  const [jsonViewEnabled, setJsonViewEnabled] = useState(false);
+  const [jsonEditorContent, setJsonEditorContent] = useState("");
 
   // Custom selection box tracking for edge intersection selection
   const [isSelecting, setIsSelecting] = useState(false);
@@ -1801,62 +1806,71 @@ const App = () => {
             onDrop={handleDrop}
             style={{ display: headerTab === "graph-editor" ? "block" : "none" }}
           >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onInit={setReactFlowInstance}
-              onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
-              onNodeMouseLeave={() => setHoveredNodeId(null)}
-              onConnect={handleConnect}
-              onConnectStart={onConnectStart}
-              onConnectEnd={onConnectEnd}
-              onNodeDragStart={() => takeSnapshot()}
-              onSelectionDragStart={() => takeSnapshot()}
-              onSelectionChange={handleSelectionChange}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              fitView
-              minZoom={0.02}
-              isValidConnection={isValidConnection}
-              connectionLineStyle={{
-                stroke: connectionLineColor || "#4a9eff",
-                strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
-                strokeDasharray: connectionLineDash,
-              }}
-              connectionLineComponent={TypeAwareConnectionLine}
-              attributionPosition="bottom-left"
-              selectionMode={SelectionMode.Partial}
-              selectionOnDrag
-              panOnDrag={[1, 2]}
-              selectNodesOnDrag
-              edgesFocusable
-              edgesUpdatable
-              elementsSelectable
-            >
-              <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
-              <Controls
-                showZoom
-                showFitView
-                showInteractive={false}
-                position="bottom-left"
-                style={{ left: actualLeftWidth }}
+            {jsonViewEnabled ? (
+              <JsonEditor
+                graphJson={jsonEditorContent}
+                onClose={() => setJsonViewEnabled(false)}
               />
-              <MiniMap
-                nodeColor={minimapNodeColor}
-                nodeStrokeColor={minimapNodeStroke}
-                nodeStrokeWidth={1}
-                maskColor="rgba(0,0,0,0.65)"
-                style={{
-                  backgroundColor: "rgba(20,25,35,0.9)",
-                  right: actualRightWidth,
-                }}
-                pannable
-                zoomable
-              />
-            </ReactFlow>
-            <ConnectionToast message={connectionMessage} />
+            ) : (
+              <>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onInit={setReactFlowInstance}
+                  onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
+                  onNodeMouseLeave={() => setHoveredNodeId(null)}
+                  onConnect={handleConnect}
+                  onConnectStart={onConnectStart}
+                  onConnectEnd={onConnectEnd}
+                  onNodeDragStart={() => takeSnapshot()}
+                  onSelectionDragStart={() => takeSnapshot()}
+                  onSelectionChange={handleSelectionChange}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  fitView
+                  minZoom={0.02}
+                  isValidConnection={isValidConnection}
+                  connectionLineStyle={{
+                    stroke: connectionLineColor || "#4a9eff",
+                    strokeWidth: connectionLineIsInvalid ? 3.2 : 2.5,
+                    strokeDasharray: connectionLineDash,
+                  }}
+                  connectionLineComponent={TypeAwareConnectionLine}
+                  attributionPosition="bottom-left"
+                  selectionMode={SelectionMode.Partial}
+                  selectionOnDrag
+                  panOnDrag={[1, 2]}
+                  selectNodesOnDrag
+                  edgesFocusable
+                  edgesUpdatable
+                  elementsSelectable
+                >
+                  <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
+                  <Controls
+                    showZoom
+                    showFitView
+                    showInteractive={false}
+                    position="bottom-left"
+                    style={{ left: actualLeftWidth }}
+                  />
+                  <MiniMap
+                    nodeColor={minimapNodeColor}
+                    nodeStrokeColor={minimapNodeStroke}
+                    nodeStrokeWidth={1}
+                    maskColor="rgba(0,0,0,0.65)"
+                    style={{
+                      backgroundColor: "rgba(20,25,35,0.9)",
+                      right: actualRightWidth,
+                    }}
+                    pannable
+                    zoomable
+                  />
+                </ReactFlow>
+                <ConnectionToast message={connectionMessage} />
+              </>
+            )}
           </div>
           <div
             className="outputs-fullpage"
@@ -1882,6 +1896,13 @@ const App = () => {
             error={error}
             executionId={executionId}
             nodesCount={nodes.length}
+            jsonViewEnabled={jsonViewEnabled}
+            onToggleJsonView={() => {
+              if (!jsonViewEnabled) {
+                setJsonEditorContent(JSON.stringify(serializeGraph(), null, 2));
+              }
+              setJsonViewEnabled((prev) => !prev);
+            }}
             onRunGraph={() => handleRunGraph("full")}
             onInterruptAll={handleInterruptAll}
             onClearCache={handleClearBackendCache}
@@ -1931,7 +1952,7 @@ const App = () => {
             />
           )}
 
-          {headerTab === "graph-editor" && (
+          {headerTab === "graph-editor" && !jsonViewEnabled && (
             <>
               <aside
                 className={`side-panel left-panel ${leftPanelCollapsed ? "collapsed" : ""}`}

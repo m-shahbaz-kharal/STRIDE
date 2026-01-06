@@ -1,0 +1,98 @@
+.json-editor {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg-primary);
+}
+
+.json-editor-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    gap: 12px;
+}
+
+.json-editor-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.json-editor-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.json-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.json-btn.primary {
+    background: var(--accent-blue);
+    color: white;
+}
+
+.json-btn.primary:hover {
+    background: var(--accent-blue-hover, #3a8ff7);
+}
+
+.json-btn.secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.json-btn.secondary:hover {
+    background: var(--bg-hover);
+}
+
+.json-editor-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.json-editor-error .error-icon {
+    font-size: 14px;
+}
+
+.json-editor-textarea {
+    flex: 1;
+    padding: 16px;
+    margin: 0;
+    border: none;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+    overflow: auto;
+    tab-size: 2;
+}
+
+.json-editor-textarea::placeholder {
+    color: var(--text-muted);
+}
+
+.json-editor-textarea:focus {
+    background: var(--bg-primary);
+}

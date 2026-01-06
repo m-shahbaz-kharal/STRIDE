@@ -133,3 +133,17 @@ export const PlusIcon = () => (
         <path d="M11 5h2v14h-2zM5 11h14v2H5z" />
     </svg>
 );
+
+// Code/JSON icon (curly braces) for JSON editor toggle
+export const CodeIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z" />
+    </svg>
+);
+
+// Eye icon for visual mode indicator
+export const EyeIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+    </svg>
+);

@@ -9,6 +9,8 @@ import {
     UserIcon,
     SettingsIcon,
     LogoutIcon,
+    CodeIcon,
+    EyeIcon,
 } from "../Icons";
 
 interface GraphSummary {
@@ -35,6 +37,8 @@ interface AppHeaderProps {
     error: string | null;
     executionId: string | null;
     nodesCount: number;
+    jsonViewEnabled: boolean;
+    onToggleJsonView: () => void;
     onRunGraph: () => void;
     onInterruptAll: () => void;
     onClearCache: () => void;
@@ -57,6 +61,8 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     error,
     executionId,
     nodesCount,
+    jsonViewEnabled,
+    onToggleJsonView,
     onRunGraph,
     onInterruptAll,
     onClearCache,
@@ -101,6 +107,20 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                             onClick={() => onTabChange("graph-editor")}
                         >
                             Graph Editor
+                            <span
+                                className={`tab-mode-toggle ${headerTab !== "graph-editor" ? "disabled" : ""}`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (headerTab !== "graph-editor") {
+                                        onTabChange("graph-editor");
+                                    } else {
+                                        onToggleJsonView();
+                                    }
+                                }}
+                                title={jsonViewEnabled ? "Switch to Visual Editor" : "Switch to JSON Viewer"}
+                            >
+                                {jsonViewEnabled ? <CodeIcon /> : <EyeIcon />}
+                            </span>
                         </button>
                         <button
                             type="button"
@@ -173,7 +193,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         <button
                             className="icon-btn primary"
                             onClick={onRunGraph}
-                            disabled={nodesCount === 0 || isRunning}
+                            disabled={nodesCount === 0 || isRunning || jsonViewEnabled}
                             title="Run Graph"
                         >
                             <PlayIcon />

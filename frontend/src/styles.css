@@ -347,6 +347,51 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
+.header-tab .tab-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  margin-right: -4px;
+  padding: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  opacity: 0.5;
+}
+
+.header-tab:hover .tab-mode-toggle,
+.header-tab .tab-mode-toggle:hover {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+
+.header-tab .tab-mode-toggle:hover {
+  color: var(--accent-blue);
+}
+
+.header-tab .tab-mode-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.header-tab .tab-mode-toggle.disabled {
+  opacity: 0.3;
+  cursor: pointer;
+}
+
+.header-tab .tab-mode-toggle.disabled:hover {
+  opacity: 0.6;
+  color: var(--text-secondary);
+}
+
 .header-stats {
   display: flex;
   gap: 8px;
