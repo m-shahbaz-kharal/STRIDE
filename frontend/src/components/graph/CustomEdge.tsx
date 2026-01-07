@@ -71,29 +71,6 @@ const CustomEdge = ({
         }}
         markerEnd={markerEnd}
       />
-      {isControl && (
-        <g transform={`translate(${labelX - 10}, ${labelY - 10})`}>
-          <rect
-            x={0}
-            y={0}
-            rx={4}
-            width={38}
-            height={18}
-            fill="rgba(249,115,22,0.15)"
-            stroke="rgba(249,115,22,0.9)"
-            strokeWidth={1}
-          />
-          <text
-            x={6}
-            y={12}
-            fill="rgba(249,115,22,0.95)"
-            fontSize="10"
-            fontFamily="monospace"
-          >
-            control
-          </text>
-        </g>
-      )}
       {(isHovered || selected) && !isPreview && (
         <g
           transform={`translate(${labelX - 8}, ${labelY - 8})`}

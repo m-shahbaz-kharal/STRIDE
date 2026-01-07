@@ -455,15 +455,37 @@ const App = () => {
       };
     });
 
-    const hydratedEdges = data.edges.map((edge: any) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      type: edge.type ?? "default",
-      data: edge.data ?? {},
-    }));
+    const portTypeByNode = new Map(
+      hydratedNodes.map((node) => [
+        node.id,
+        {
+          input: node.data.input_port_types ?? {},
+          output: node.data.output_port_types ?? {},
+        },
+      ])
+    );
+
+    const hydratedEdges = data.edges.map((edge: any) => {
+      const data = { ...(edge.data ?? {}) } as { kind?: string };
+      if (!data.kind && edge.sourceHandle && edge.targetHandle) {
+        const types = portTypeByNode.get(edge.source);
+        const targetTypes = portTypeByNode.get(edge.target);
+        const sourceType = types?.output?.[edge.sourceHandle];
+        const targetType = targetTypes?.input?.[edge.targetHandle];
+        const sourceKind = typeof sourceType === "string" ? sourceType : sourceType?.kind;
+        const targetKind = typeof targetType === "string" ? targetType : targetType?.kind;
+        data.kind = (sourceKind === "control" || targetKind === "control") ? "control" : "data";
+      }
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        type: edge.type ?? "default",
+        data,
+      };
+    });
 
     const maxId = hydratedNodes.reduce((acc, node) => {
       const match = typeof node.id === "string" ? node.id.match(/node-(\d+)/) : null;
@@ -622,7 +644,13 @@ const App = () => {
       for (const edge of edges) {
         if (edge.target === nodeId && !dependentIds.has(edge.source)) {
           const sourceNode = nodes.find((n) => n.id === edge.source);
-          if (!sourceNode?.data.last_outputs) {
+          let isControl = edge.data?.kind === "control";
+          if (!isControl && edge.sourceHandle && edge.targetHandle) {
+            const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle, "source");
+            const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
+            isControl = sourceType.kind === "control" || targetType.kind === "control";
+          }
+          if (isControl || !sourceNode?.data.last_outputs) {
             dependentIds.add(edge.source);
             queue.push(edge.source);
           }
@@ -631,7 +659,7 @@ const App = () => {
     }
 
     return dependentIds;
-  }, [edges, nodes]);
+  }, [edges, getPortTypeForHandle, nodes]);
 
   // PERF: Build a node lookup map for O(1) access instead of O(n) find() calls
   const nodeById = useMemo(() => {
