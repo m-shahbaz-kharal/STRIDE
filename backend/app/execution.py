@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, is_dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -114,12 +114,104 @@ class ExecutionCache:
         self.enabled = enabled
 
     @staticmethod
+    def _hash_bytes(data: bytes) -> Dict[str, Any]:
+        return {
+            "__bytes__": hashlib.sha256(data).hexdigest(),
+            "len": len(data),
+        }
+
+    @classmethod
+    def _normalize_for_key(cls, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, bytes):
+            return cls._hash_bytes(value)
+        if isinstance(value, bytearray):
+            return cls._hash_bytes(bytes(value))
+        if isinstance(value, memoryview):
+            return cls._hash_bytes(value.tobytes())
+        if isinstance(value, dict):
+            return {
+                str(key): cls._normalize_for_key(val)
+                for key, val in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, (list, tuple)):
+            return [cls._normalize_for_key(item) for item in value]
+        if isinstance(value, set):
+            normalized = [cls._normalize_for_key(item) for item in value]
+            return sorted(
+                normalized,
+                key=lambda item: json.dumps(item, sort_keys=True, default=str),
+            )
+        if is_dataclass(value):
+            return cls._normalize_for_key(asdict(value))
+
+        try:
+            import numpy as np  # type: ignore
+
+            if isinstance(value, np.ndarray):
+                return {
+                    "__ndarray__": cls._hash_bytes(value.tobytes())["__bytes__"],
+                    "dtype": str(value.dtype),
+                    "shape": list(value.shape),
+                }
+            if isinstance(value, np.generic):
+                return value.item()
+        except Exception:
+            pass
+
+        try:
+            import torch  # type: ignore
+
+            if isinstance(value, torch.Tensor):
+                cpu_tensor = value.detach().cpu()
+                return {
+                    "__tensor__": cls._hash_bytes(cpu_tensor.numpy().tobytes())["__bytes__"],
+                    "dtype": str(cpu_tensor.dtype),
+                    "shape": list(cpu_tensor.shape),
+                }
+        except Exception:
+            pass
+
+        try:
+            from PIL import Image  # type: ignore
+
+            if isinstance(value, Image.Image):
+                return {
+                    "__image__": cls._hash_bytes(value.tobytes())["__bytes__"],
+                    "mode": value.mode,
+                    "size": list(value.size),
+                }
+        except Exception:
+            pass
+
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            try:
+                return cls._normalize_for_key(to_dict())
+            except Exception:
+                pass
+
+        if hasattr(value, "__dict__"):
+            shallow: Dict[str, Any] = {}
+            for key, val in vars(value).items():
+                if val is None or isinstance(val, (str, int, float, bool)):
+                    shallow[key] = val
+            if shallow:
+                return {
+                    "__object__": value.__class__.__name__,
+                    "fields": shallow,
+                }
+
+        return {"__repr__": repr(value)}
+
+    @staticmethod
     def _compute_key(node_type: str, params: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Create a stable hash from node metadata and inputs."""
         key_data = {
             "type": node_type,
-            "params": params,
-            "inputs": inputs,
+            "params": ExecutionCache._normalize_for_key(params),
+            "inputs": ExecutionCache._normalize_for_key(inputs),
         }
         key_str = json.dumps(key_data, sort_keys=True, default=str)
         return hashlib.sha256(key_str.encode()).hexdigest()[:16]

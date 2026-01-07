@@ -224,6 +224,10 @@ class GraphExecutor:
         node = self.nodes[node_id]
         if node.type.startswith("core.control"):
             return False
+        spec = getattr(node, "spec", None)
+        tags = getattr(spec, "tags", None) or []
+        if "control" in tags:
+            return False
         return bool(getattr(node, "cache_enabled", False))
 
     def _cache_params(self, node_id: str) -> Dict[str, Any]:
@@ -361,6 +365,7 @@ class GraphExecutor:
             except KeyError as exc:
                 raise GraphExecutionError(str(exc), code="unknown_node") from exc
             node = registration.cls(node_config, spec=registration.spec)
+            node.cache_enabled = bool(node_config.get("cache_enabled", getattr(node, "cache_enabled", False)))
             self.nodes[node.id] = node
             self._node_status[node.id] = NodeStatus.PENDING
 
