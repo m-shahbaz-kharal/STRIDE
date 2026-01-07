@@ -239,12 +239,19 @@ const App = () => {
   useEffect(() => { executionIdRef.current = executionId; }, [executionId]);
   const nodeMapRef = useRef(nodeMap);
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+  const handleRunGraphRef = useRef<(
+    mode: "full" | "selection" | "from_node",
+    targetNodes?: string[],
+    extras?: { max_steps?: number }
+  ) => void>();
 
   // Create handlers object for node data - keep stable to avoid re-renders
   // PERF: Access changing values via refs to avoid recreating handlers
   const nodeHandlers = useMemo(() => ({
     onDelete: handleDeleteNode,
-    onRunSelection: (nodeId: string) => handleRunGraph("selection", [nodeId]),
+    onRunSelection: (nodeId: string) => {
+      handleRunGraphRef.current?.("from_node", [nodeId]);
+    },
     onClearCache: async (nodeId: string) => {
       // PERF: Access node from ref which stays current without causing re-renders
       const node = nodeMapRef.current.get(nodeId);
@@ -631,7 +638,7 @@ const App = () => {
   }, [nodeStatuses, trace, isRunning, setNodes]);
 
   // Helper to get all dependent nodes (upstream dependencies)
-  const getDependentNodes = useCallback((targetNodeIds: string[]): Set<string> => {
+  const getDependentNodes = useCallback((targetNodeIds: string[], includeCached = false): Set<string> => {
     const dependentIds = new Set<string>(targetNodeIds);
     const visited = new Set<string>();
     const queue = [...targetNodeIds];
@@ -650,7 +657,7 @@ const App = () => {
             const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
             isControl = sourceType.kind === "control" || targetType.kind === "control";
           }
-          if (isControl || !sourceNode?.data.last_outputs) {
+          if (isControl || includeCached || !sourceNode?.data.last_outputs) {
             dependentIds.add(edge.source);
             queue.push(edge.source);
           }
@@ -660,6 +667,23 @@ const App = () => {
 
     return dependentIds;
   }, [edges, getPortTypeForHandle, nodes]);
+
+  const getDownstreamNodes = useCallback((startNodeIds: string[]): Set<string> => {
+    const downstream = new Set<string>(startNodeIds);
+    const queue = [...startNodeIds];
+
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!;
+      for (const edge of edges) {
+        if (edge.source === nodeId && !downstream.has(edge.target)) {
+          downstream.add(edge.target);
+          queue.push(edge.target);
+        }
+      }
+    }
+
+    return downstream;
+  }, [edges]);
 
   // PERF: Build a node lookup map for O(1) access instead of O(n) find() calls
   const nodeById = useMemo(() => {
@@ -991,7 +1015,7 @@ const App = () => {
   }, [currentGraphId, graphs, session, setEdges, setHeaderTab, setNodes]);
 
   const buildGraphPayload = useCallback(
-    (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
+    (mode: "full" | "selection" | "from_node", targetNodes?: string[], extras?: { max_steps?: number }) => {
       const nodePayload = nodes.map((node) => ({
         id: node.id,
         type: node.data.nodeType,
@@ -1023,6 +1047,9 @@ const App = () => {
       if (mode === "selection" && targetNodes?.length) {
         options.target_nodes = targetNodes;
       }
+      if (mode === "from_node" && targetNodes?.length) {
+        options.entry_nodes = targetNodes;
+      }
       if (extras?.max_steps != null) {
         options.max_steps = extras.max_steps;
       }
@@ -1036,12 +1063,17 @@ const App = () => {
   );
 
   const handleRunGraph = useCallback(
-    async (mode: "full" | "selection", targetNodes?: string[], extras?: { max_steps?: number }) => {
+    async (mode: "full" | "selection" | "from_node", targetNodes?: string[], extras?: { max_steps?: number }) => {
       if (nodes.length === 0) return;
 
       const runNodes = mode === "full"
         ? new Set(nodes.map((n) => n.id))
-        : getDependentNodes(targetNodes || selectedNodeIds);
+        : mode === "from_node"
+          ? getDependentNodes(
+            Array.from(getDownstreamNodes(targetNodes || selectedNodeIds)),
+            true
+          )
+          : getDependentNodes(targetNodes || selectedNodeIds);
 
       setRunningNodeIds((prev) => {
         const merged = new Set(prev);
@@ -1049,7 +1081,11 @@ const App = () => {
         return merged;
       });
 
-      const payload = buildGraphPayload(mode, targetNodes || (mode === "selection" ? selectedNodeIds : undefined), extras);
+      const payload = buildGraphPayload(
+        mode,
+        targetNodes || (mode === "selection" ? selectedNodeIds : undefined),
+        extras
+      );
 
       setNodes((existing) =>
         existing.map((node) => ({
@@ -1072,8 +1108,11 @@ const App = () => {
         });
       }
     },
-    [buildGraphPayload, getDependentNodes, isRunning, nodes, runGraph, runGraphSync, selectedNodeIds, setNodes, useStreaming]
+    [buildGraphPayload, getDependentNodes, getDownstreamNodes, isRunning, nodes, runGraph, runGraphSync, selectedNodeIds, setNodes, useStreaming]
   );
+  useEffect(() => {
+    handleRunGraphRef.current = handleRunGraph;
+  }, [handleRunGraph]);
 
   const handleInterruptAll = useCallback(async () => {
     if (!executionId) return;

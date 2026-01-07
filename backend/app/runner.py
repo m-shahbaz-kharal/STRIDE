@@ -141,6 +141,7 @@ class GraphExecutor:
         self._ifelse_false_branch: Dict[str, Set[str]] = {}  # ifelse_id -> nodes reachable from 'false' port
         self._nodes_in_ifelse_branch: Set[str] = set()  # All nodes that are in an if/else branch
         self._skipped_branches: Set[str] = set()  # Nodes skipped due to if/else condition
+        self._force_no_cache: Set[str] = set()
         
         # Branch detection for hybrid execution model
         self._start_nodes: Set[str] = set()  # Nodes with type core.control.start
@@ -322,6 +323,8 @@ class GraphExecutor:
 
     def _try_get_cached(self, node_id: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Try to get cached outputs for a node. Returns None if not cached or disabled."""
+        if node_id in self._force_no_cache:
+            return None
         if not self._can_cache(node_id):
             return None
         node = self.nodes[node_id]
@@ -711,13 +714,43 @@ class GraphExecutor:
                     queue.append(parent)
         return collected
 
+    def _collect_downstream(self, node_ids: List[str]) -> Set[str]:
+        """Collect all nodes reachable downstream from the given nodes."""
+        queue = deque(node_ids)
+        collected: Set[str] = set()
+        while queue:
+            current = queue.popleft()
+            if current in collected or current not in self.nodes:
+                continue
+            collected.add(current)
+            for child in self._dependents.get(current, []):
+                if child not in collected:
+                    queue.append(child)
+        return collected
+
     def _resolve_execution_order(self) -> List[str]:
         """Resolve which nodes to execute based on options."""
         mode = str(self.options.get("mode", "full")).lower()
+        self._force_no_cache = set()
         if mode == "selection":
             target_nodes = [node_id for node_id in (self.options.get("target_nodes") or []) if node_id in self.nodes]
             if target_nodes:
                 allowed = self._expand_dependencies(target_nodes)
+                return [
+                    node_id
+                    for node_id in self._topo_order
+                    if node_id in allowed and node_id not in self._nodes_in_loop_body
+                ]
+        if mode in {"from_node", "from_nodes", "downstream"}:
+            entry_nodes = [
+                node_id
+                for node_id in (self.options.get("entry_nodes") or self.options.get("target_nodes") or [])
+                if node_id in self.nodes
+            ]
+            if entry_nodes:
+                downstream = self._collect_downstream(entry_nodes)
+                self._force_no_cache = set(downstream)
+                allowed = self._expand_dependencies(list(downstream))
                 return [
                     node_id
                     for node_id in self._topo_order
