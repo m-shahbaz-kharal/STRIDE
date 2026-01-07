@@ -174,7 +174,6 @@ const App = () => {
     handleInputValueChange,
     handleAddInputPort,
     handleDeleteNode,
-    clearNodeCache,
     clearAllCache,
     getPortYOffset,
     buildDefaultInputValues,
@@ -242,8 +241,126 @@ const App = () => {
   const handleRunGraphRef = useRef<(
     mode: "full" | "selection" | "from_node",
     targetNodes?: string[],
-    extras?: { max_steps?: number }
+    extras?: { max_steps?: number; force_no_cache_nodes?: string[]; invalidate_cache_nodes?: string[] }
   ) => void>();
+  const dirtyCacheNodesRef = useRef<Set<string>>(new Set());
+
+  const clearBackendCacheForNodes = useCallback(async (nodeIds: Iterable<string>) => {
+    const uniqueIds = Array.from(new Set(nodeIds));
+    if (uniqueIds.length === 0) return;
+    try {
+      await fetch("/api/cache/clear-nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_ids: uniqueIds }),
+      });
+    } catch (e) {
+      console.error("Failed to clear backend cache for nodes:", e);
+    }
+  }, []);
+
+  // Helper to get all dependent nodes (upstream dependencies)
+  const getDependentNodes = useCallback((targetNodeIds: string[], includeCached = false): Set<string> => {
+    const dependentIds = new Set<string>(targetNodeIds);
+    const visited = new Set<string>();
+    const queue = [...targetNodeIds];
+
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!;
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+
+      for (const edge of edges) {
+        if (edge.target === nodeId && !dependentIds.has(edge.source)) {
+          const sourceNode = nodes.find((n) => n.id === edge.source);
+          let isControl = edge.data?.kind === "control";
+          if (!isControl && edge.sourceHandle && edge.targetHandle) {
+            const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle, "source");
+            const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
+            isControl = sourceType.kind === "control" || targetType.kind === "control";
+          }
+          if (isControl || includeCached || !sourceNode?.data.last_outputs) {
+            dependentIds.add(edge.source);
+            queue.push(edge.source);
+          }
+        }
+      }
+    }
+
+    return dependentIds;
+  }, [edges, getPortTypeForHandle, nodes]);
+
+  const getDownstreamNodes = useCallback((startNodeIds: string[]): Set<string> => {
+    const downstream = new Set<string>(startNodeIds);
+    const queue = [...startNodeIds];
+
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!;
+      for (const edge of edges) {
+        if (edge.source === nodeId && !downstream.has(edge.target)) {
+          downstream.add(edge.target);
+          queue.push(edge.target);
+        }
+      }
+    }
+
+    return downstream;
+  }, [edges]);
+
+  const clearNodesCacheUI = useCallback((nodeIds: Set<string>) => {
+    if (nodeIds.size === 0) return;
+    setNodes((existing) =>
+      existing.map((node) =>
+        nodeIds.has(node.id)
+          ? {
+            ...node,
+            data: {
+              ...node.data,
+              last_outputs: undefined,
+              executionStatus: undefined,
+              executionDuration: undefined,
+              executionLogs: [],
+            },
+          }
+          : node
+      )
+    );
+  }, [setNodes]);
+
+  const markCacheDirtyForNodes = useCallback((nodeIds: Set<string>) => {
+    if (nodeIds.size === 0) return;
+    nodeIds.forEach((nodeId) => dirtyCacheNodesRef.current.add(nodeId));
+    clearNodesCacheUI(nodeIds);
+  }, [clearNodesCacheUI]);
+
+  const markNodeAndDownstreamDirty = useCallback((nodeId: string) => {
+    const downstream = getDownstreamNodes([nodeId]);
+    markCacheDirtyForNodes(downstream);
+  }, [getDownstreamNodes, markCacheDirtyForNodes]);
+
+  const handleParamChangeWithCache = useCallback(
+    (nodeId: string, param: string, value: string | number | boolean | null) => {
+      handleParamChange(nodeId, param, value);
+      markNodeAndDownstreamDirty(nodeId);
+    },
+    [handleParamChange, markNodeAndDownstreamDirty]
+  );
+
+  const handleInputValueChangeWithCache = useCallback(
+    (nodeId: string, port: string, value: string | number | boolean | null) => {
+      handleInputValueChange(nodeId, port, value);
+      markNodeAndDownstreamDirty(nodeId);
+    },
+    [handleInputValueChange, markNodeAndDownstreamDirty]
+  );
+
+  const handleAddInputPortWithCache = useCallback(
+    (nodeId: string) => {
+      handleAddInputPort(nodeId);
+      markNodeAndDownstreamDirty(nodeId);
+    },
+    [handleAddInputPort, markNodeAndDownstreamDirty]
+  );
 
   // Create handlers object for node data - keep stable to avoid re-renders
   // PERF: Access changing values via refs to avoid recreating handlers
@@ -253,16 +370,9 @@ const App = () => {
       handleRunGraphRef.current?.("from_node", [nodeId]);
     },
     onClearCache: async (nodeId: string) => {
-      // PERF: Access node from ref which stays current without causing re-renders
-      const node = nodeMapRef.current.get(nodeId);
-      if (node) {
-        try {
-          await fetch(`/api/cache/clear/${encodeURIComponent(node.data.nodeType)}`, { method: "POST" });
-        } catch (e) {
-          console.error("Failed to clear backend cache for node type:", e);
-        }
-      }
-      clearNodeCache(nodeId);
+      const downstream = getDownstreamNodes([nodeId]);
+      markCacheDirtyForNodes(downstream);
+      await clearBackendCacheForNodes(downstream);
     },
     onInterrupt: async (nodeId: string) => {
       // PERF: Access executionId from ref to keep handler stable
@@ -273,10 +383,10 @@ const App = () => {
         console.error("Failed to interrupt node:", e);
       }
     },
-    onParamChange: handleParamChange,
+    onParamChange: handleParamChangeWithCache,
     onPortHover: setHoveredPort,
-    onInputValueChange: handleInputValueChange,
-    onAddInputPort: handleAddInputPort,
+    onInputValueChange: handleInputValueChangeWithCache,
+    onAddInputPort: handleAddInputPortWithCache,
     onToggleControlPorts: (nodeId: string) => {
       setNodes((nds) =>
         nds.map((n) => {
@@ -287,6 +397,8 @@ const App = () => {
       );
     },
     onToggleCache: (nodeId: string) => {
+      const node = nodeMapRef.current.get(nodeId);
+      const wasEnabled = Boolean(node?.data.cacheEnabled);
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== nodeId) return n;
@@ -294,10 +406,22 @@ const App = () => {
           return { ...n, data: { ...n.data, cacheEnabled: !n.data.cacheEnabled } };
         })
       );
+      if (wasEnabled) {
+        void clearBackendCacheForNodes([nodeId]);
+      }
     },
     // PERF: Removed executionId and nodeMap from deps - accessed via refs now
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, setNodes]);
+  }), [
+    clearBackendCacheForNodes,
+    getDownstreamNodes,
+    handleAddInputPortWithCache,
+    handleDeleteNode,
+    handleInputValueChangeWithCache,
+    handleParamChangeWithCache,
+    markCacheDirtyForNodes,
+    setNodes,
+  ]);
 
   // ========== Computed values ==========
 
@@ -430,6 +554,7 @@ const App = () => {
   const hydrateGraph = useCallback((data: GraphData) => {
     skipDirtyRef.current = true;
     handlersAppliedRef.current = false;  // Reset so handlers get applied to new nodes
+    dirtyCacheNodesRef.current.clear();
     const typeMap = new Map(nodeLibrary.map((nodeType) => [nodeType.node_type, nodeType]));
     const hydratedNodes = data.nodes.map((node: any) => {
       const nodeType = typeMap.get(node.data?.nodeType);
@@ -647,54 +772,6 @@ const App = () => {
       })
     );
   }, [nodeStatuses, trace, isRunning, setNodes]);
-
-  // Helper to get all dependent nodes (upstream dependencies)
-  const getDependentNodes = useCallback((targetNodeIds: string[], includeCached = false): Set<string> => {
-    const dependentIds = new Set<string>(targetNodeIds);
-    const visited = new Set<string>();
-    const queue = [...targetNodeIds];
-
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      if (visited.has(nodeId)) continue;
-      visited.add(nodeId);
-
-      for (const edge of edges) {
-        if (edge.target === nodeId && !dependentIds.has(edge.source)) {
-          const sourceNode = nodes.find((n) => n.id === edge.source);
-          let isControl = edge.data?.kind === "control";
-          if (!isControl && edge.sourceHandle && edge.targetHandle) {
-            const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle, "source");
-            const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
-            isControl = sourceType.kind === "control" || targetType.kind === "control";
-          }
-          if (isControl || includeCached || !sourceNode?.data.last_outputs) {
-            dependentIds.add(edge.source);
-            queue.push(edge.source);
-          }
-        }
-      }
-    }
-
-    return dependentIds;
-  }, [edges, getPortTypeForHandle, nodes]);
-
-  const getDownstreamNodes = useCallback((startNodeIds: string[]): Set<string> => {
-    const downstream = new Set<string>(startNodeIds);
-    const queue = [...startNodeIds];
-
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      for (const edge of edges) {
-        if (edge.source === nodeId && !downstream.has(edge.target)) {
-          downstream.add(edge.target);
-          queue.push(edge.target);
-        }
-      }
-    }
-
-    return downstream;
-  }, [edges]);
 
   // PERF: Build a node lookup map for O(1) access instead of O(n) find() calls
   const nodeById = useMemo(() => {
@@ -1026,7 +1103,11 @@ const App = () => {
   }, [currentGraphId, graphs, session, setEdges, setHeaderTab, setNodes]);
 
   const buildGraphPayload = useCallback(
-    (mode: "full" | "selection" | "from_node", targetNodes?: string[], extras?: { max_steps?: number }) => {
+    (
+      mode: "full" | "selection" | "from_node",
+      targetNodes?: string[],
+      extras?: { max_steps?: number; force_no_cache_nodes?: string[]; invalidate_cache_nodes?: string[] }
+    ) => {
       const nodePayload = nodes.map((node) => ({
         id: node.id,
         type: node.data.nodeType,
@@ -1065,6 +1146,12 @@ const App = () => {
       if (extras?.max_steps != null) {
         options.max_steps = extras.max_steps;
       }
+      if (extras?.force_no_cache_nodes?.length) {
+        options.force_no_cache_nodes = extras.force_no_cache_nodes;
+      }
+      if (extras?.invalidate_cache_nodes?.length) {
+        options.invalidate_cache_nodes = extras.invalidate_cache_nodes;
+      }
 
       return {
         graph: { nodes: nodePayload, links: linkPayload },
@@ -1075,17 +1162,26 @@ const App = () => {
   );
 
   const handleRunGraph = useCallback(
-    async (mode: "full" | "selection" | "from_node", targetNodes?: string[], extras?: { max_steps?: number }) => {
+    async (
+      mode: "full" | "selection" | "from_node",
+      targetNodes?: string[],
+      extras?: { max_steps?: number }
+    ) => {
       if (nodes.length === 0) return;
+
+      const resolvedTargets = targetNodes || (mode !== "full" ? selectedNodeIds : undefined);
+      const downstreamForRerun = mode === "from_node"
+        ? getDownstreamNodes(resolvedTargets?.length ? resolvedTargets : selectedNodeIds)
+        : null;
 
       const runNodes = mode === "full"
         ? new Set(nodes.map((n) => n.id))
         : mode === "from_node"
           ? getDependentNodes(
-            Array.from(getDownstreamNodes(targetNodes || selectedNodeIds)),
+            Array.from(downstreamForRerun ?? getDownstreamNodes(resolvedTargets || selectedNodeIds)),
             true
           )
-          : getDependentNodes(targetNodes || selectedNodeIds);
+          : getDependentNodes(resolvedTargets || selectedNodeIds);
 
       setRunningNodeIds((prev) => {
         const merged = new Set(prev);
@@ -1093,10 +1189,26 @@ const App = () => {
         return merged;
       });
 
+      const dirtyNodesInRun = new Set<string>();
+      dirtyCacheNodesRef.current.forEach((nodeId) => {
+        if (runNodes.has(nodeId)) {
+          dirtyNodesInRun.add(nodeId);
+        }
+      });
+      const forceNoCacheNodes = new Set<string>(dirtyNodesInRun);
+      const invalidateCacheNodes = new Set<string>(dirtyNodesInRun);
+      if (downstreamForRerun) {
+        downstreamForRerun.forEach((nodeId) => forceNoCacheNodes.add(nodeId));
+      }
+
       const payload = buildGraphPayload(
         mode,
-        targetNodes || (mode === "selection" ? selectedNodeIds : undefined),
-        extras
+        resolvedTargets || (mode === "selection" ? selectedNodeIds : undefined),
+        {
+          max_steps: extras?.max_steps,
+          force_no_cache_nodes: Array.from(forceNoCacheNodes),
+          invalidate_cache_nodes: Array.from(invalidateCacheNodes),
+        }
       );
 
       setNodes((existing) =>
@@ -1111,6 +1223,8 @@ const App = () => {
       );
 
       const runIds = Array.from(runNodes);
+
+      dirtyNodesInRun.forEach((nodeId) => dirtyCacheNodesRef.current.delete(nodeId));
 
       if (useStreaming && !isRunning) {
         runGraph(payload, runIds);
@@ -1142,6 +1256,7 @@ const App = () => {
         const data = await response.json();
         console.log(`Cleared ${data.cleared} cached entries`);
         clearAllCache();
+        dirtyCacheNodesRef.current.clear();
       }
     } catch (e) {
       console.error("Failed to clear backend cache:", e);

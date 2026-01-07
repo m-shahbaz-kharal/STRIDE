@@ -88,6 +88,16 @@ class GraphExecutor:
         return ExecutionCache.clear_by_type(node_type)
 
     @classmethod
+    def clear_cache_by_node(cls, node_id: str) -> int:
+        """Clear cache entries for a specific node id. Returns number of entries cleared."""
+        return ExecutionCache.clear_by_node(node_id)
+
+    @classmethod
+    def clear_cache_by_nodes(cls, node_ids: List[str]) -> int:
+        """Clear cache entries for a list of node ids. Returns number of entries cleared."""
+        return ExecutionCache.clear_by_nodes(node_ids)
+
+    @classmethod
     def get_cache_size(cls) -> int:
         """Get the current number of cached entries."""
         return ExecutionCache.size()
@@ -344,7 +354,7 @@ class GraphExecutor:
         if not self._can_cache(node_id):
             return
         node = self.nodes[node_id]
-        self._cache.set(node.type, self._cache_params(node_id), inputs, outputs)
+        self._cache.set(node.type, self._cache_params(node_id), inputs, outputs, node_id=node_id)
 
     def _build_nodes(self) -> None:
         node_configs = self.definition.get("nodes", [])
@@ -747,7 +757,10 @@ class GraphExecutor:
     def _resolve_execution_order(self) -> List[str]:
         """Resolve which nodes to execute based on options."""
         mode = str(self.options.get("mode", "full")).lower()
-        self._force_no_cache = set()
+        self._force_no_cache = set(str(node_id) for node_id in (self.options.get("force_no_cache_nodes") or []))
+        invalidate_nodes = [str(node_id) for node_id in (self.options.get("invalidate_cache_nodes") or [])]
+        if invalidate_nodes:
+            ExecutionCache.clear_by_nodes(invalidate_nodes)
         if mode == "selection":
             target_nodes = [node_id for node_id in (self.options.get("target_nodes") or []) if node_id in self.nodes]
             if target_nodes:
@@ -765,7 +778,7 @@ class GraphExecutor:
             ]
             if entry_nodes:
                 downstream = self._collect_downstream(entry_nodes)
-                self._force_no_cache = set(downstream)
+                self._force_no_cache.update(downstream)
                 allowed = self._expand_dependencies(list(downstream))
                 return [
                     node_id

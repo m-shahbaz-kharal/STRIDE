@@ -107,7 +107,7 @@ class ExecutionCache:
     """Thread-safe cache shared across executor instances."""
 
     _cache: Dict[str, Dict[str, Any]] = {}
-    _metadata: Dict[str, str] = {}
+    _metadata: Dict[str, Any] = {}
     _lock = threading.Lock()
 
     def __init__(self, enabled: bool = True) -> None:
@@ -223,13 +223,25 @@ class ExecutionCache:
         with self._lock:
             return self._cache.get(cache_key)
 
-    def set(self, node_type: str, params: Dict[str, Any], inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
+    def set(
+        self,
+        node_type: str,
+        params: Dict[str, Any],
+        inputs: Dict[str, Any],
+        outputs: Dict[str, Any],
+        node_id: Optional[str] = None,
+    ) -> None:
         if not self.enabled:
             return
         cache_key = self._compute_key(node_type, params, inputs)
+        node_id_value = node_id
+        if node_id_value is None and isinstance(params, dict):
+            raw_id = params.get("__cache_node_id")
+            if raw_id is not None:
+                node_id_value = str(raw_id)
         with self._lock:
             self._cache[cache_key] = outputs
-            self._metadata[cache_key] = node_type
+            self._metadata[cache_key] = {"node_type": node_type, "node_id": node_id_value}
 
     @classmethod
     def clear_all(cls) -> int:
@@ -242,7 +254,42 @@ class ExecutionCache:
     @classmethod
     def clear_by_type(cls, node_type: str) -> int:
         with cls._lock:
-            keys_to_remove = [key for key, cached_type in cls._metadata.items() if cached_type == node_type]
+            keys_to_remove = []
+            for key, meta in cls._metadata.items():
+                cached_type = meta if isinstance(meta, str) else meta.get("node_type")
+                if cached_type == node_type:
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                cls._cache.pop(key, None)
+                cls._metadata.pop(key, None)
+            return len(keys_to_remove)
+
+    @classmethod
+    def clear_by_node(cls, node_id: str) -> int:
+        with cls._lock:
+            keys_to_remove = []
+            for key, meta in cls._metadata.items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("node_id") == node_id:
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                cls._cache.pop(key, None)
+                cls._metadata.pop(key, None)
+            return len(keys_to_remove)
+
+    @classmethod
+    def clear_by_nodes(cls, node_ids: List[str]) -> int:
+        node_id_set = {str(node_id) for node_id in node_ids}
+        if not node_id_set:
+            return 0
+        with cls._lock:
+            keys_to_remove = []
+            for key, meta in cls._metadata.items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("node_id") in node_id_set:
+                    keys_to_remove.append(key)
             for key in keys_to_remove:
                 cls._cache.pop(key, None)
                 cls._metadata.pop(key, None)

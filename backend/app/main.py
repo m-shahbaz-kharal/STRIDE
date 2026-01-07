@@ -110,6 +110,20 @@ async def clear_cache_by_type(node_type: str) -> Dict[str, Any]:
     cleared = GraphExecutor.clear_cache_by_type(node_type)
     return {"cleared": cleared, "node_type": node_type, "message": f"Cleared {cleared} cached entries for {node_type}"}
 
+@app.post("/api/cache/clear-nodes")
+async def clear_cache_by_nodes(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Clear the execution cache for a list of node ids."""
+    node_ids = payload.get("node_ids") or []
+    if not isinstance(node_ids, list):
+        raise HTTPException(status_code=400, detail="node_ids must be a list")
+    normalized_ids = [str(node_id) for node_id in node_ids]
+    cleared = GraphExecutor.clear_cache_by_nodes(normalized_ids)
+    return {
+        "cleared": cleared,
+        "node_ids": normalized_ids,
+        "message": f"Cleared {cleared} cached entries for {len(normalized_ids)} nodes",
+    }
+
 
 @app.get("/api/cache/stats")
 async def get_cache_stats() -> Dict[str, Any]:
