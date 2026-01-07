@@ -286,6 +286,15 @@ const App = () => {
         })
       );
     },
+    onToggleCache: (nodeId: string) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== nodeId) return n;
+          if (n.data.nodeType.startsWith("core.control")) return n;
+          return { ...n, data: { ...n.data, cacheEnabled: !n.data.cacheEnabled } };
+        })
+      );
+    },
     // PERF: Removed executionId and nodeMap from deps - accessed via refs now
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [handleDeleteNode, handleParamChange, handleInputValueChange, handleAddInputPort, clearNodeCache, setNodes]);
@@ -392,6 +401,7 @@ const App = () => {
         inputValues: node.data.inputValues,
         breakpoint: node.data.breakpoint,
         showControlPorts: node.data.showControlPorts,
+        cacheEnabled: node.data.cacheEnabled,
       },
     }));
 
@@ -457,6 +467,7 @@ const App = () => {
           width: node.width ?? fallbackSize.width,
           height: node.height ?? fallbackSize.height,
           showControlPorts: node.data?.showControlPorts ?? false,
+          cacheEnabled: node.data?.cacheEnabled ?? false,
           executionLogs: [],
         },
       };
@@ -1025,6 +1036,7 @@ const App = () => {
         input_port_types_override: node.data.input_port_types,
         output_ports_override: node.data.output_ports,
         output_port_types_override: node.data.output_port_types,
+        cache_enabled: Boolean(node.data.cacheEnabled),
       }));
 
       const linkPayload = edges

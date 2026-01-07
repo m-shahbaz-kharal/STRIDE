@@ -188,9 +188,11 @@ export interface BlueprintNodeData {
   // Hybrid execution model
   executionMode?: "dataflow" | "controlflow";  // default: "dataflow"
   showControlPorts?: boolean;  // Whether to show control ports (default: false for dataflow)
+  cacheEnabled?: boolean;  // Whether node outputs should be cached
   branchId?: string;  // Branch this node belongs to during execution
   isMergePoint?: boolean;  // Whether this node receives inputs from multiple branches
   onToggleControlPorts?: (nodeId: string) => void;  // Toggle control port visibility
+  onToggleCache?: (nodeId: string) => void;  // Toggle node caching
   hoverControlPorts?: boolean;  // Temporary control port reveal during connection hover
 }
 

@@ -3546,6 +3546,31 @@ body {
   box-shadow: 0 0 10px rgba(210, 153, 34, 0.6);
 }
 
+/* Cache toggle button */
+.node-action-btn.cache-toggle-btn {
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: all 0.2s ease;
+}
+
+.node-action-btn.cache-toggle-btn:hover {
+  opacity: 1;
+  color: var(--accent-cyan);
+  background: rgba(57, 211, 232, 0.15);
+}
+
+.node-action-btn.cache-toggle-btn.cache-toggle-on {
+  opacity: 1;
+  color: var(--accent-cyan);
+  background: rgba(57, 211, 232, 0.2);
+  box-shadow: 0 0 6px rgba(57, 211, 232, 0.35);
+}
+
+.node-action-btn.cache-toggle-btn.cache-toggle-on:hover {
+  background: rgba(57, 211, 232, 0.3);
+  box-shadow: 0 0 10px rgba(57, 211, 232, 0.5);
+}
+
 .node-delete-btn {
   display: flex;
   align-items: center;

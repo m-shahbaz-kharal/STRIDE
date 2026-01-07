@@ -44,6 +44,7 @@ class NodeBase(abc.ABC):
         self.type: str = config.get("type") or (self.spec.type if self.spec else "")
         self.params: Dict[str, Any] = config.get("params", {})
         self.input_values: Dict[str, Any] = config.get("input_values", {})
+        self.cache_enabled: bool = bool(config.get("cache_enabled", False))
         self.config: Dict[str, Any] = config
 
         # Derived for compatibility with the existing executor/UI.

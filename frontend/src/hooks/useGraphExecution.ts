@@ -18,6 +18,7 @@ interface GraphPayload {
       input_port_types_override?: Record<string, unknown>;
       output_ports_override?: string[];
       output_port_types_override?: Record<string, unknown>;
+      cache_enabled?: boolean;
     }>;
     links: Array<{
       from_node: string;

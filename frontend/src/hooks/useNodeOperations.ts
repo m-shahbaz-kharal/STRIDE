@@ -18,6 +18,7 @@ interface NodeHandlers {
     onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
     onInputValueChange?: (nodeId: string, port: string, value: string | number | boolean | null) => void;
     onAddInputPort?: (nodeId: string) => void;
+    onToggleCache?: (nodeId: string) => void;
 }
 
 interface UseNodeOperationsOptions {
@@ -107,6 +108,7 @@ export const useNodeOperations = ({
                 params,
                 inputValues: seededInputValues,
                 breakpoint: false,
+                cacheEnabled: false,
                 metadata: nodeType,
                 width: initialWidth,
                 height: initialHeight,

@@ -134,6 +134,7 @@ class GraphExecutor:
         self._loop_nodes: Set[str] = set()
         self._loop_body_nodes: Dict[str, Set[str]] = {}
         self._nodes_in_loop_body: Set[str] = set()
+        self._loop_parent: Dict[str, str] = {}
         
         # If/Else branch tracking
         self._ifelse_nodes: Set[str] = set()
@@ -221,10 +222,14 @@ class GraphExecutor:
 
     def _can_cache(self, node_id: str) -> bool:
         node = self.nodes[node_id]
-        spec = getattr(node, "spec", None)
-        if spec and getattr(spec, "cache_policy", "default") == "disabled":
+        if node.type.startswith("core.control"):
             return False
-        return True
+        return bool(getattr(node, "cache_enabled", False))
+
+    def _cache_params(self, node_id: str) -> Dict[str, Any]:
+        node = self.nodes[node_id]
+        params = node.params or {}
+        return {**params, "__cache_node_id": node_id}
 
     @staticmethod
     def _normalize_type(raw_type: Any) -> Optional[TypeDescriptor]:
@@ -328,14 +333,14 @@ class GraphExecutor:
         if not self._can_cache(node_id):
             return None
         node = self.nodes[node_id]
-        return self._cache.get(node.type, node.params, inputs)
+        return self._cache.get(node.type, self._cache_params(node_id), inputs)
 
     def _cache_outputs(self, node_id: str, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> None:
         """Cache the outputs for a node when caching is enabled."""
         if not self._can_cache(node_id):
             return
         node = self.nodes[node_id]
-        self._cache.set(node.type, node.params, inputs, outputs)
+        self._cache.set(node.type, self._cache_params(node_id), inputs, outputs)
 
     def _build_nodes(self) -> None:
         node_configs = self.definition.get("nodes", [])
@@ -527,10 +532,16 @@ class GraphExecutor:
         self._loop_nodes = {node_id for node_id in self.nodes if self._is_loop_node(node_id)}
         self._loop_body_nodes = {}
         self._nodes_in_loop_body = set()
+        self._loop_parent = {}
         for loop_id in self._loop_nodes:
             body_nodes = self._collect_loop_body_nodes(loop_id)
             self._loop_body_nodes[loop_id] = body_nodes
             self._nodes_in_loop_body.update(body_nodes)
+        for node_id in self._topo_order:
+            if node_id not in self._loop_nodes:
+                continue
+            for body_id in self._loop_body_nodes.get(node_id, set()):
+                self._loop_parent.setdefault(body_id, node_id)
 
     def _collect_loop_body_nodes(self, loop_id: str) -> Set[str]:
         body_nodes: Set[str] = set()
@@ -1077,7 +1088,7 @@ class GraphExecutor:
                     executed_count += 1
                     continue
                 inputs = self._prepare_inputs(node_id)
-                result = self._execute_node_sync(node_id, inputs, allow_cache=False)
+                result = self._execute_node_sync(node_id, inputs, allow_cache=True)
                 executed_count += 1
                 if result.status == NodeStatus.ERROR:
                     break
@@ -1570,110 +1581,199 @@ class GraphExecutor:
                                     break
                                 continue
 
-                            future = loop.run_in_executor(self._thread_pool, self._execute_node_work, body_id, inputs)
-                            task = asyncio.wrap_future(future)
-                            self._cancellation.register_running(body_id, task)
-                            try:
-                                result = await task
-                            except asyncio.CancelledError:
-                                result = self._make_interrupted_result(body_id)
-                            result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]
-                            self._finalize_node_result(body_id, inputs, result, cached=False)
-                            completed_nodes += 1
-                            executed_count += 1
-
-                            if result.status == NodeStatus.ERROR:
-                                yield ExecutionEvent(
-                                    event_type="node_error",
-                                    execution_id=self.execution_id,
-                                    timestamp=time.time(),
-                                    node_id=result.node_id,
-                                    node_type=result.node_type,
-                                    status=NodeStatus.ERROR,
-                                    error=result.error,
-                                    error_code=result.error_code,
-                                    duration_ms=result.duration_ms,
-                                    level=result.level,
-                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                    total_nodes=total_nodes,
-                                    completed_nodes=completed_nodes,
-                                    from_cache=result.from_cache,
-                                )
-                                if self._fail_fast:
-                                    break
-                            else:
-                                event_type = "node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped"
-                                yield ExecutionEvent(
-                                    event_type=event_type,
-                                    execution_id=self.execution_id,
-                                    timestamp=time.time(),
-                                    node_id=result.node_id,
-                                    node_type=result.node_type,
-                                    status=result.status,
-                                    outputs=result.outputs,
-                                    logs=result.logs,
-                                    duration_ms=result.duration_ms,
-                                    level=result.level,
-                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                    total_nodes=total_nodes,
-                                    completed_nodes=completed_nodes,
-                                    from_cache=result.from_cache,
-                                )
-                                if result.status == NodeStatus.SKIPPED:
-                                    self._cancel_dependents(body_id)
-
-                    if loop_interrupted or self._should_stop_execution():
-                        loop_result = self._record_interrupted(node_id)
-                        completed_nodes += 1
-                        executed_count += 1
-                        yield ExecutionEvent(
-                            event_type="node_skipped",
-                            execution_id=self.execution_id,
-                            timestamp=time.time(),
-                            node_id=node_id,
-                            node_type=loop_node.type,
-                            status=NodeStatus.SKIPPED,
-                            logs=loop_result.logs,
-                            duration_ms=loop_result.duration_ms,
-                            level=loop_result.level,
-                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                            total_nodes=total_nodes,
-                            completed_nodes=completed_nodes,
-                            from_cache=False,
-                        )
-                        for dep in self._record_skipped_dependents(
-                            node_id,
-                            f"Dependency '{node_id}' was interrupted",
-                            execution_set=execution_set,
-                        ):
+                                future = loop.run_in_executor(self._thread_pool, self._execute_node_work, body_id, inputs)
+                                task = asyncio.wrap_future(future)
+                                self._cancellation.register_running(body_id, task)
+                                try:
+                                    result = await task
+                                except asyncio.CancelledError:
+                                    result = self._make_interrupted_result(body_id)
+                                result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]
+                                self._finalize_node_result(body_id, inputs, result, cached=False)
+                                completed_nodes += 1
+                                executed_count += 1
+    
+                                if result.status == NodeStatus.ERROR:
+                                    yield ExecutionEvent(
+                                        event_type="node_error",
+                                        execution_id=self.execution_id,
+                                        timestamp=time.time(),
+                                        node_id=result.node_id,
+                                        node_type=result.node_type,
+                                        status=NodeStatus.ERROR,
+                                        error=result.error,
+                                        error_code=result.error_code,
+                                        duration_ms=result.duration_ms,
+                                        level=result.level,
+                                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                        total_nodes=total_nodes,
+                                        completed_nodes=completed_nodes,
+                                        from_cache=result.from_cache,
+                                    )
+                                    if self._fail_fast:
+                                        break
+                                else:
+                                    event_type = "node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped"
+                                    yield ExecutionEvent(
+                                        event_type=event_type,
+                                        execution_id=self.execution_id,
+                                        timestamp=time.time(),
+                                        node_id=result.node_id,
+                                        node_type=result.node_type,
+                                        status=result.status,
+                                        outputs=result.outputs,
+                                        logs=result.logs,
+                                        duration_ms=result.duration_ms,
+                                        level=result.level,
+                                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                        total_nodes=total_nodes,
+                                        completed_nodes=completed_nodes,
+                                        from_cache=result.from_cache,
+                                    )
+                                    if result.status == NodeStatus.SKIPPED:
+                                        self._cancel_dependents(body_id)
+    
+                        if loop_interrupted or self._should_stop_execution():
+                            loop_result = self._record_interrupted(node_id)
                             completed_nodes += 1
                             executed_count += 1
                             yield ExecutionEvent(
                                 event_type="node_skipped",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
-                                node_id=dep.node_id,
-                                node_type=dep.node_type,
+                                node_id=node_id,
+                                node_type=loop_node.type,
                                 status=NodeStatus.SKIPPED,
-                                logs=dep.logs,
-                                level=dep.level,
+                                logs=loop_result.logs,
+                                duration_ms=loop_result.duration_ms,
+                                level=loop_result.level,
                                 progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                                 total_nodes=total_nodes,
                                 completed_nodes=completed_nodes,
+                                from_cache=False,
                             )
-                    else:
-                        loop_outputs = {"loop_body": None, "index": last_index, "completed": None}
-                        loop_result = NodeExecutionResult(
+                            for dep in self._record_skipped_dependents(
+                                node_id,
+                                f"Dependency '{node_id}' was interrupted",
+                                execution_set=execution_set,
+                            ):
+                                completed_nodes += 1
+                                executed_count += 1
+                                yield ExecutionEvent(
+                                    event_type="node_skipped",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=dep.node_id,
+                                    node_type=dep.node_type,
+                                    status=NodeStatus.SKIPPED,
+                                    logs=dep.logs,
+                                    level=dep.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                )
+                        else:
+                            loop_outputs = {"loop_body": None, "index": last_index, "completed": None}
+                            loop_result = NodeExecutionResult(
+                                node_id=node_id,
+                                node_type=loop_node.type,
+                                status=NodeStatus.COMPLETED,
+                                outputs=loop_outputs,
+                                logs=[f"Looped {iterations} iterations"],
+                                duration_ms=0.0,
+                                level=self._node_levels.get(node_id, 0),
+                                from_cache=False,
+                            )
+                            self._finalize_node_result(node_id, {}, loop_result, cached=False)
+                            completed_nodes += 1
+                            executed_count += 1
+                            yield ExecutionEvent(
+                                event_type="node_completed",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=node_id,
+                                node_type=loop_node.type,
+                                status=NodeStatus.COMPLETED,
+                                outputs=loop_outputs,
+                                logs=loop_result.logs,
+                                duration_ms=loop_result.duration_ms,
+                                level=loop_result.level,
+                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                total_nodes=total_nodes,
+                                completed_nodes=completed_nodes,
+                                from_cache=False,
+                            )
+                        continue
+    
+                    # Handle If/Else nodes specially - execute and mark inactive branch
+                    if self._is_ifelse_node(node_id):
+                        yield ExecutionEvent(
+                            event_type="node_started",
+                            execution_id=self.execution_id,
+                            timestamp=time.time(),
                             node_id=node_id,
-                            node_type=loop_node.type,
+                            node_type=self.nodes[node_id].type,
+                            status=NodeStatus.RUNNING,
+                            level=self._node_levels.get(node_id, 0),
+                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                            total_nodes=total_nodes,
+                            completed_nodes=completed_nodes,
+                        )
+                        
+                        try:
+                            inputs = self._prepare_inputs(node_id)
+                        except GraphExecutionError as exc:
+                            result = self._make_input_error_result(node_id, exc)
+                            self._finalize_node_result(node_id, {}, result, cached=False)
+                            completed_nodes += 1
+                            yield ExecutionEvent(
+                                event_type="node_error",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=node_id,
+                                node_type=result.node_type,
+                                status=NodeStatus.ERROR,
+                                error=result.error,
+                                error_code=result.error_code,
+                                duration_ms=result.duration_ms,
+                                level=result.level,
+                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                total_nodes=total_nodes,
+                                completed_nodes=completed_nodes,
+                                from_cache=result.from_cache,
+                            )
+                            if self._fail_fast:
+                                break
+                            continue
+                        
+                        # Evaluate the condition and mark inactive branch as skipped
+                        # Clear any previous skip state for this If/Else (important for loops)
+                        true_nodes = self._ifelse_true_branch.get(node_id, set())
+                        false_nodes = self._ifelse_false_branch.get(node_id, set())
+                        self._skipped_branches -= true_nodes
+                        self._skipped_branches -= false_nodes
+                        
+                        condition = bool(inputs.get("condition", False))
+                        if condition:
+                            # Condition is True: skip the false branch
+                            self._skipped_branches.update(false_nodes)
+                        else:
+                            # Condition is False: skip the true branch
+                            self._skipped_branches.update(true_nodes)
+                        
+                        # Execute the If/Else node to record it
+                        ifelse_outputs = {"true": None, "false": None}
+                        result = NodeExecutionResult(
+                            node_id=node_id,
+                            node_type=self.nodes[node_id].type,
                             status=NodeStatus.COMPLETED,
-                            outputs=loop_outputs,
-                            logs=[f"Looped {iterations} iterations"],
+                            outputs=ifelse_outputs,
+                            logs=[f"Condition evaluated to {condition}"],
                             duration_ms=0.0,
                             level=self._node_levels.get(node_id, 0),
                             from_cache=False,
                         )
-                        self._finalize_node_result(node_id, {}, loop_result, cached=False)
+                        self._finalize_node_result(node_id, inputs, result, cached=False)
                         completed_nodes += 1
                         executed_count += 1
                         yield ExecutionEvent(
@@ -1681,21 +1781,19 @@ class GraphExecutor:
                             execution_id=self.execution_id,
                             timestamp=time.time(),
                             node_id=node_id,
-                            node_type=loop_node.type,
+                            node_type=self.nodes[node_id].type,
                             status=NodeStatus.COMPLETED,
-                            outputs=loop_outputs,
-                            logs=loop_result.logs,
-                            duration_ms=loop_result.duration_ms,
-                            level=loop_result.level,
+                            outputs=ifelse_outputs,
+                            logs=result.logs,
+                            duration_ms=result.duration_ms,
+                            level=result.level,
                             progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
                             total_nodes=total_nodes,
                             completed_nodes=completed_nodes,
                             from_cache=False,
                         )
-                    continue
-
-                # Handle If/Else nodes specially - execute and mark inactive branch
-                if self._is_ifelse_node(node_id):
+                        continue
+    
                     yield ExecutionEvent(
                         event_type="node_started",
                         execution_id=self.execution_id,
@@ -1708,13 +1806,13 @@ class GraphExecutor:
                         total_nodes=total_nodes,
                         completed_nodes=completed_nodes,
                     )
-                    
                     try:
                         inputs = self._prepare_inputs(node_id)
                     except GraphExecutionError as exc:
                         result = self._make_input_error_result(node_id, exc)
                         self._finalize_node_result(node_id, {}, result, cached=False)
                         completed_nodes += 1
+                        executed_count += 1
                         yield ExecutionEvent(
                             event_type="node_error",
                             execution_id=self.execution_id,
@@ -1734,213 +1832,126 @@ class GraphExecutor:
                         if self._fail_fast:
                             break
                         continue
-                    
-                    # Evaluate the condition and mark inactive branch as skipped
-                    # Clear any previous skip state for this If/Else (important for loops)
-                    true_nodes = self._ifelse_true_branch.get(node_id, set())
-                    false_nodes = self._ifelse_false_branch.get(node_id, set())
-                    self._skipped_branches -= true_nodes
-                    self._skipped_branches -= false_nodes
-                    
-                    condition = bool(inputs.get("condition", False))
-                    if condition:
-                        # Condition is True: skip the false branch
-                        self._skipped_branches.update(false_nodes)
-                    else:
-                        # Condition is False: skip the true branch
-                        self._skipped_branches.update(true_nodes)
-                    
-                    # Execute the If/Else node to record it
-                    ifelse_outputs = {"true": None, "false": None}
-                    result = NodeExecutionResult(
-                        node_id=node_id,
-                        node_type=self.nodes[node_id].type,
-                        status=NodeStatus.COMPLETED,
-                        outputs=ifelse_outputs,
-                        logs=[f"Condition evaluated to {condition}"],
-                        duration_ms=0.0,
-                        level=self._node_levels.get(node_id, 0),
-                        from_cache=False,
-                    )
+    
+                    cached_outputs = self._try_get_cached(node_id, inputs)
+    
+                    if cached_outputs is not None:
+                        cached_start = time.perf_counter()
+                        result = NodeExecutionResult(
+                            node_id=node_id,
+                            node_type=self.nodes[node_id].type,
+                            status=NodeStatus.COMPLETED,
+                            outputs=cached_outputs,
+                            logs=[f"[CACHED] Skipped execution, using cached result"],
+                            start_time=cached_start,
+                            end_time=cached_start,
+                            duration_ms=0.0,
+                            level=self._node_levels.get(node_id, 0),
+                            from_cache=True,
+                        )
+                        self._finalize_node_result(node_id, inputs, result, cached=True)
+                        completed_nodes += 1
+                        executed_count += 1
+                        yield ExecutionEvent(
+                            event_type="node_cached",
+                            execution_id=self.execution_id,
+                            timestamp=time.time(),
+                            node_id=result.node_id,
+                            node_type=result.node_type,
+                            status=result.status,
+                            outputs=result.outputs,
+                            logs=result.logs,
+                            duration_ms=result.duration_ms,
+                            level=result.level,
+                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                            total_nodes=total_nodes,
+                            completed_nodes=completed_nodes,
+                            from_cache=result.from_cache,
+                        )
+                        continue
+    
+                    future = loop.run_in_executor(self._thread_pool, self._execute_node_work, node_id, inputs)
+                    task = asyncio.wrap_future(future)
+                    self._cancellation.register_running(node_id, task)
+                    try:
+                        result = await task
+                    except asyncio.CancelledError:
+                        result = self._make_interrupted_result(node_id)
                     self._finalize_node_result(node_id, inputs, result, cached=False)
                     completed_nodes += 1
                     executed_count += 1
-                    yield ExecutionEvent(
-                        event_type="node_completed",
-                        execution_id=self.execution_id,
-                        timestamp=time.time(),
-                        node_id=node_id,
-                        node_type=self.nodes[node_id].type,
-                        status=NodeStatus.COMPLETED,
-                        outputs=ifelse_outputs,
-                        logs=result.logs,
-                        duration_ms=result.duration_ms,
-                        level=result.level,
-                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                        total_nodes=total_nodes,
-                        completed_nodes=completed_nodes,
-                        from_cache=False,
-                    )
-                    continue
-
+    
+                    if result.status == NodeStatus.ERROR:
+                        yield ExecutionEvent(
+                            event_type="node_error",
+                            execution_id=self.execution_id,
+                            timestamp=time.time(),
+                            node_id=result.node_id,
+                            node_type=result.node_type,
+                            status=NodeStatus.ERROR,
+                            error=result.error,
+                            error_code=result.error_code,
+                            duration_ms=result.duration_ms,
+                            level=result.level,
+                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                            total_nodes=total_nodes,
+                            completed_nodes=completed_nodes,
+                            from_cache=result.from_cache,
+                        )
+                        if self._fail_fast:
+                            break
+                    else:
+                        event_type = "node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped"
+                        yield ExecutionEvent(
+                            event_type=event_type,
+                            execution_id=self.execution_id,
+                            timestamp=time.time(),
+                            node_id=result.node_id,
+                            node_type=result.node_type,
+                            status=result.status,
+                            outputs=result.outputs,
+                            logs=result.logs,
+                            duration_ms=result.duration_ms,
+                            level=result.level,
+                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                            total_nodes=total_nodes,
+                            completed_nodes=completed_nodes,
+                            from_cache=result.from_cache,
+                        )
+                        if result.status == NodeStatus.SKIPPED:
+                            for dep in self._record_skipped_dependents(
+                                node_id,
+                                f"Dependency '{node_id}' was interrupted",
+                                execution_set=execution_set,
+                            ):
+                                completed_nodes += 1
+                                executed_count += 1
+                                yield ExecutionEvent(
+                                    event_type="node_skipped",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=dep.node_id,
+                                    node_type=dep.node_type,
+                                    status=NodeStatus.SKIPPED,
+                                    logs=dep.logs,
+                                    level=dep.level,
+                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                                    total_nodes=total_nodes,
+                                    completed_nodes=completed_nodes,
+                                )
+    
+                total_time = (time.perf_counter() - start_time) * 1000
+                self._total_execution_time_ms = total_time
+                self._max_parallelism = 1 if executed_count > 0 else 0
+                self.outputs = self._collect_outputs()
                 yield ExecutionEvent(
-                    event_type="node_started",
+                    event_type="complete",
                     execution_id=self.execution_id,
                     timestamp=time.time(),
-                    node_id=node_id,
-                    node_type=self.nodes[node_id].type,
-                    status=NodeStatus.RUNNING,
-                    level=self._node_levels.get(node_id, 0),
-                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
+                    progress=1.0,
                     total_nodes=total_nodes,
                     completed_nodes=completed_nodes,
                 )
-                try:
-                    inputs = self._prepare_inputs(node_id)
-                except GraphExecutionError as exc:
-                    result = self._make_input_error_result(node_id, exc)
-                    self._finalize_node_result(node_id, {}, result, cached=False)
-                    completed_nodes += 1
-                    executed_count += 1
-                    yield ExecutionEvent(
-                        event_type="node_error",
-                        execution_id=self.execution_id,
-                        timestamp=time.time(),
-                        node_id=node_id,
-                        node_type=result.node_type,
-                        status=NodeStatus.ERROR,
-                        error=result.error,
-                        error_code=result.error_code,
-                        duration_ms=result.duration_ms,
-                        level=result.level,
-                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                        total_nodes=total_nodes,
-                        completed_nodes=completed_nodes,
-                        from_cache=result.from_cache,
-                    )
-                    if self._fail_fast:
-                        break
-                    continue
-
-                cached_outputs = self._try_get_cached(node_id, inputs)
-
-                if cached_outputs is not None:
-                    cached_start = time.perf_counter()
-                    result = NodeExecutionResult(
-                        node_id=node_id,
-                        node_type=self.nodes[node_id].type,
-                        status=NodeStatus.COMPLETED,
-                        outputs=cached_outputs,
-                        logs=[f"[CACHED] Skipped execution, using cached result"],
-                        start_time=cached_start,
-                        end_time=cached_start,
-                        duration_ms=0.0,
-                        level=self._node_levels.get(node_id, 0),
-                        from_cache=True,
-                    )
-                    self._finalize_node_result(node_id, inputs, result, cached=True)
-                    completed_nodes += 1
-                    executed_count += 1
-                    yield ExecutionEvent(
-                        event_type="node_cached",
-                        execution_id=self.execution_id,
-                        timestamp=time.time(),
-                        node_id=result.node_id,
-                        node_type=result.node_type,
-                        status=result.status,
-                        outputs=result.outputs,
-                        logs=result.logs,
-                        duration_ms=result.duration_ms,
-                        level=result.level,
-                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                        total_nodes=total_nodes,
-                        completed_nodes=completed_nodes,
-                        from_cache=result.from_cache,
-                    )
-                    continue
-
-                future = loop.run_in_executor(self._thread_pool, self._execute_node_work, node_id, inputs)
-                task = asyncio.wrap_future(future)
-                self._cancellation.register_running(node_id, task)
-                try:
-                    result = await task
-                except asyncio.CancelledError:
-                    result = self._make_interrupted_result(node_id)
-                self._finalize_node_result(node_id, inputs, result, cached=False)
-                completed_nodes += 1
-                executed_count += 1
-
-                if result.status == NodeStatus.ERROR:
-                    yield ExecutionEvent(
-                        event_type="node_error",
-                        execution_id=self.execution_id,
-                        timestamp=time.time(),
-                        node_id=result.node_id,
-                        node_type=result.node_type,
-                        status=NodeStatus.ERROR,
-                        error=result.error,
-                        error_code=result.error_code,
-                        duration_ms=result.duration_ms,
-                        level=result.level,
-                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                        total_nodes=total_nodes,
-                        completed_nodes=completed_nodes,
-                        from_cache=result.from_cache,
-                    )
-                    if self._fail_fast:
-                        break
-                else:
-                    event_type = "node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped"
-                    yield ExecutionEvent(
-                        event_type=event_type,
-                        execution_id=self.execution_id,
-                        timestamp=time.time(),
-                        node_id=result.node_id,
-                        node_type=result.node_type,
-                        status=result.status,
-                        outputs=result.outputs,
-                        logs=result.logs,
-                        duration_ms=result.duration_ms,
-                        level=result.level,
-                        progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                        total_nodes=total_nodes,
-                        completed_nodes=completed_nodes,
-                        from_cache=result.from_cache,
-                    )
-                    if result.status == NodeStatus.SKIPPED:
-                        for dep in self._record_skipped_dependents(
-                            node_id,
-                            f"Dependency '{node_id}' was interrupted",
-                            execution_set=execution_set,
-                        ):
-                            completed_nodes += 1
-                            executed_count += 1
-                            yield ExecutionEvent(
-                                event_type="node_skipped",
-                                execution_id=self.execution_id,
-                                timestamp=time.time(),
-                                node_id=dep.node_id,
-                                node_type=dep.node_type,
-                                status=NodeStatus.SKIPPED,
-                                logs=dep.logs,
-                                level=dep.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
-                            )
-
-            total_time = (time.perf_counter() - start_time) * 1000
-            self._total_execution_time_ms = total_time
-            self._max_parallelism = 1 if executed_count > 0 else 0
-            self.outputs = self._collect_outputs()
-            yield ExecutionEvent(
-                event_type="complete",
-                execution_id=self.execution_id,
-                timestamp=time.time(),
-                progress=1.0,
-                total_nodes=total_nodes,
-                completed_nodes=completed_nodes,
-            )
         finally:
             if self._thread_pool:
                 self._thread_pool.shutdown(wait=False)
@@ -2251,28 +2262,12 @@ class GraphExecutor:
         event_queue: asyncio.Queue,
         progress_state: Dict[str, Any],
         execution_set: Optional[Set[str]] = None,
+        adjust_total: bool = True,
     ) -> AsyncIterator[ExecutionEvent]:
         """Execute a loop node, yielding events for each iteration."""
         loop_node = self.nodes[node_id]
         body_nodes = self._loop_body_nodes.get(node_id, set())
         body_order = [nid for nid in self._topo_order if nid in body_nodes]
-
-        with progress_state["lock"]:
-            total = progress_state["total"]
-            completed = progress_state["completed"]
-
-        yield ExecutionEvent(
-            event_type="node_started",
-            execution_id=self.execution_id,
-            timestamp=time.time(),
-            node_id=node_id,
-            node_type=loop_node.type,
-            status=NodeStatus.RUNNING,
-            level=self._node_levels.get(node_id, 0),
-            progress=completed / total if total > 0 else 0,
-            total_nodes=total,
-            completed_nodes=completed,
-        )
 
         iterations = 0
         last_index = 0
@@ -2294,6 +2289,29 @@ class GraphExecutor:
                 max_iterations_value = loop_node.params.get("max_iterations", 100)
             max_iterations = int(max_iterations_value)
             indices = range(max_iterations)
+
+        if adjust_total:
+            additional = len(indices) * len(body_order)
+            if additional:
+                with progress_state["lock"]:
+                    progress_state["total"] += additional
+
+        with progress_state["lock"]:
+            total = progress_state["total"]
+            completed = progress_state["completed"]
+
+        yield ExecutionEvent(
+            event_type="node_started",
+            execution_id=self.execution_id,
+            timestamp=time.time(),
+            node_id=node_id,
+            node_type=loop_node.type,
+            status=NodeStatus.RUNNING,
+            level=self._node_levels.get(node_id, 0),
+            progress=completed / total if total > 0 else 0,
+            total_nodes=total,
+            completed_nodes=completed,
+        )
 
         loop = asyncio.get_running_loop()
 
@@ -2440,23 +2458,6 @@ class GraphExecutor:
                     )
                     continue
 
-                with progress_state["lock"]:
-                    total = progress_state["total"]
-                    completed = progress_state["completed"]
-
-                yield ExecutionEvent(
-                    event_type="node_started",
-                    execution_id=self.execution_id,
-                    timestamp=time.time(),
-                    node_id=body_id,
-                    node_type=self.nodes[body_id].type,
-                    status=NodeStatus.RUNNING,
-                    level=self._node_levels.get(body_id, 0),
-                    progress=completed / total if total > 0 else 0,
-                    total_nodes=total,
-                    completed_nodes=completed,
-                )
-
                 try:
                     inputs = self._prepare_inputs(body_id)
                 except GraphExecutionError as exc:
@@ -2486,6 +2487,60 @@ class GraphExecutor:
                         loop_interrupted = True
                         break
                     continue
+                cached_outputs = self._try_get_cached(body_id, inputs)
+                if cached_outputs is not None:
+                    cached_start = time.perf_counter()
+                    result = NodeExecutionResult(
+                        node_id=body_id,
+                        node_type=self.nodes[body_id].type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=cached_outputs,
+                        logs=[f"[loop {idx}] [CACHED] Skipped execution, using cached result"],
+                        start_time=cached_start,
+                        end_time=cached_start,
+                        duration_ms=0.0,
+                        level=self._node_levels.get(body_id, 0),
+                        from_cache=True,
+                    )
+                    self._finalize_node_result(body_id, inputs, result, cached=True)
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
+                    yield ExecutionEvent(
+                        event_type="node_cached",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=body_id,
+                        node_type=self.nodes[body_id].type,
+                        status=NodeStatus.COMPLETED,
+                        outputs=result.outputs,
+                        logs=result.logs,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=True,
+                    )
+                    continue
+
+                with progress_state["lock"]:
+                    total = progress_state["total"]
+                    completed = progress_state["completed"]
+
+                yield ExecutionEvent(
+                    event_type="node_started",
+                    execution_id=self.execution_id,
+                    timestamp=time.time(),
+                    node_id=body_id,
+                    node_type=self.nodes[body_id].type,
+                    status=NodeStatus.RUNNING,
+                    level=self._node_levels.get(body_id, 0),
+                    progress=completed / total if total > 0 else 0,
+                    total_nodes=total,
+                    completed_nodes=completed,
+                )
                 future = loop.run_in_executor(
                     self._thread_pool,
                     self._execute_node_work,
@@ -2785,71 +2840,25 @@ class GraphExecutor:
             self._unregister_execution(self.execution_id)
 
 
-    async def run_async(self) -> Dict[str, Any]:
-        """Execute the graph asynchronously using the streaming scheduler for consistency."""
-        async for _ in self.run_streaming():
-            pass
 
-        legacy_trace = [
-            {
-                "node_id": r.node_id,
-                "type": r.node_type,
-                "outputs": r.outputs,
-                "logs": r.logs,
-                "duration_ms": r.duration_ms,
-                "level": r.level,
-                "from_cache": r.from_cache,
-            }
-            for r in self.execution_trace
-        ]
 
-        stats = self._calculate_stats(self._total_execution_time_ms, self._max_parallelism)
-
-        return {
-            "outputs": self.outputs,
-            "trace": legacy_trace,
-            "stats": stats.__dict__,
-            "levels": self._levels,
-            "execution_id": self.execution_id,
-        }
-
-    async def run_streaming(self) -> AsyncIterator[ExecutionEvent]:
-        """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
-        # Check if we have multiple independent branches that can run in parallel
-        # even if they contain loops
-        allow_parallel = bool(self.options.get("allow_parallel_branches", False))
-        has_parallel_branches = allow_parallel and len(self._branches) > 1
-        
-        if has_parallel_branches and (self._merge_points or self._has_cross_branch_data_edges()):
-            has_parallel_branches = False
-
-        if has_parallel_branches:
-            # Use parallel branch execution - each branch runs sequentially internally
-            # but multiple branches execute concurrently
-            async for event in self._run_parallel_branches():
-                yield event
-            return
-        
-        # Fall back to sequential execution for single-branch graphs with loops
-        if self._loop_nodes:
-            async for event in self._run_streaming_sequential():
-                yield event
-            return
+    async def _run_streaming_ready_queue(self, event_queue: asyncio.Queue) -> None:
+        """Execute the graph with readiness-based scheduling and emit events to a queue."""
         self._execution_order = self._resolve_execution_order()
         execution_set = set(self._execution_order)
         self._reset_execution_state()
-        
+
         max_steps = self.options.get("max_steps")
         breakpoints: Set[str] = set(self.options.get("breakpoints") or [])
-        
+
         total_nodes = len(self._execution_order)
-        completed_nodes = 0
+        progress_state = {"total": total_nodes, "completed": 0, "lock": threading.Lock()}
         executed_count = 0
         max_parallelism = 0
         loop = asyncio.get_running_loop()
         self._thread_pool = ThreadPoolExecutor(max_workers=self._max_workers)
         self._register_execution(self)
-        
+
         execution_plan = [
             {
                 "node_id": node_id,
@@ -2860,14 +2869,13 @@ class GraphExecutor:
             }
             for node_id in self._execution_order
         ]
-        
-        # Convert branch sets to lists for JSON serialization
+
         branches_dict = {
-            branch_id: list(node_ids) 
+            branch_id: list(node_ids)
             for branch_id, node_ids in self._branches.items()
         } if self._branches else None
-        
-        yield ExecutionEvent(
+
+        await event_queue.put(ExecutionEvent(
             event_type="start",
             execution_id=self.execution_id,
             timestamp=time.time(),
@@ -2876,66 +2884,109 @@ class GraphExecutor:
             levels=self._levels,
             branches=branches_dict,
             merge_points=list(self._merge_points) if self._merge_points else None,
-        )
-        
+        ))
+
         remaining_inputs: Dict[str, int] = {
-            node_id: len(self.input_map.get(node_id, {})) + len(self.control_inputs.get(node_id, [])) for node_id in execution_set
+            node_id: len(self.input_map.get(node_id, {})) + len(self.control_inputs.get(node_id, []))
+            for node_id in execution_set
         }
         ready: deque[str] = deque([nid for nid, deg in remaining_inputs.items() if deg == 0])
-        tasks: Dict[asyncio.Task[NodeExecutionResult], Tuple[str, Dict[str, Any]]] = {}
+        tasks: Dict[asyncio.Task[Any], Tuple[str, Optional[Dict[str, Any]], str]] = {}
         pending_interrupted = False
+        stop_scheduling = False
 
-        def _propagate_failure(failed_id: str, reason: str, status: NodeStatus = NodeStatus.ERROR):
+        async def _propagate_failure(
+            failed_id: str,
+            reason: str,
+            status: NodeStatus = NodeStatus.ERROR,
+        ) -> None:
             """Mark downstream nodes as skipped/errors and emit events so UI doesn't show them stuck as queued."""
-            nonlocal ready, completed_nodes
+            nonlocal ready
             stack = list(self._dependents.get(failed_id, []))
+            visited: Set[str] = set()
             while stack:
                 dep = stack.pop()
+                if dep in visited:
+                    continue
+                visited.add(dep)
+                if dep in execution_set:
+                    if remaining_inputs.get(dep, 0) < 0:
+                        stack.extend(self._dependents.get(dep, []))
+                        continue
+                    if dep in ready:
+                        ready = deque([n for n in ready if n != dep])
+                    remaining_inputs[dep] = -1
+                    result = NodeExecutionResult(
+                        node_id=dep,
+                        node_type=self.nodes[dep].type,
+                        status=status,
+                        logs=[reason],
+                        duration_ms=0.0,
+                        level=self._node_levels.get(dep, 0),
+                        from_cache=False,
+                    )
+                    self._finalize_node_result(dep, {}, result, cached=False)
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
+                    await event_queue.put(ExecutionEvent(
+                        event_type="node_error" if status == NodeStatus.ERROR else "node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=dep,
+                        node_type=result.node_type,
+                        status=status,
+                        error=reason if status == NodeStatus.ERROR else None,
+                        error_code="dependency_failed" if status == NodeStatus.ERROR else "dependency_skipped",
+                        duration_ms=0.0,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=False,
+                    ))
+                stack.extend(self._dependents.get(dep, []))
+
+        def _enqueue_dependents(source_id: str) -> None:
+            for dep in self._dependents.get(source_id, []):
                 if dep not in execution_set:
                     continue
                 if remaining_inputs.get(dep, 0) < 0:
                     continue
-                if dep in ready:
-                    ready = deque([n for n in ready if n != dep])
-                remaining_inputs[dep] = -1
-                result = NodeExecutionResult(
-                    node_id=dep,
-                    node_type=self.nodes[dep].type,
-                    status=status,
-                    logs=[reason],
-                    duration_ms=0.0,
-                    level=self._node_levels.get(dep, 0),
-                    from_cache=False,
-                )
-                self._finalize_node_result(dep, {}, result, cached=False)
-                completed_nodes += 1
-                yield ExecutionEvent(
-                    event_type="node_error" if status == NodeStatus.ERROR else "node_skipped",
-                    execution_id=self.execution_id,
-                    timestamp=time.time(),
-                    node_id=dep,
-                    node_type=result.node_type,
-                    status=status,
-                    error=reason if status == NodeStatus.ERROR else None,
-                    error_code="dependency_failed" if status == NodeStatus.ERROR else "dependency_skipped",
-                    duration_ms=0.0,
-                    level=result.level,
-                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                    total_nodes=total_nodes,
-                    completed_nodes=completed_nodes,
-                    from_cache=False,
-                )
-                stack.extend(self._dependents.get(dep, []))
+                remaining_inputs[dep] -= 1
+                if remaining_inputs[dep] == 0:
+                    ready.append(dep)
+
+        def _enqueue_loop_body_dependents(loop_id: str) -> None:
+            for body_id in self._loop_body_nodes.get(loop_id, set()):
+                if self._loop_parent.get(body_id) != loop_id:
+                    continue
+                _enqueue_dependents(body_id)
+
+        async def _run_loop_task(loop_id: str) -> None:
+            async for event in self._execute_loop_streaming(
+                loop_id,
+                event_queue,
+                progress_state,
+                execution_set=execution_set,
+            ):
+                await event_queue.put(event)
 
         start_time = time.perf_counter()
 
         try:
             while ready or tasks:
+                if stop_scheduling:
+                    ready.clear()
                 if self._should_stop_execution():
                     if not pending_interrupted:
                         for skipped in self._mark_pending_interrupted(execution_set):
-                            completed_nodes += 1
-                            yield ExecutionEvent(
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
+                            await event_queue.put(ExecutionEvent(
                                 event_type="node_skipped",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
@@ -2943,22 +2994,34 @@ class GraphExecutor:
                                 node_type=skipped.node_type,
                                 status=NodeStatus.SKIPPED,
                                 level=skipped.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
-                            )
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
+                            ))
                         pending_interrupted = True
                     for pending in tasks.keys():
                         pending.cancel()
                     ready.clear()
                 else:
-                    # Queue ready nodes
                     while ready and len(tasks) < self._max_workers:
                         node_id = ready.popleft()
+                        if self._node_status.get(node_id) != NodeStatus.PENDING:
+                            continue
+                        if max_steps is not None and executed_count >= max_steps:
+                            stop_scheduling = True
+                            ready.clear()
+                            break
+                        if node_id in breakpoints:
+                            stop_scheduling = True
+                            ready.clear()
+                            break
                         if self._should_interrupt(node_id):
                             skipped = self._record_interrupted(node_id)
-                            completed_nodes += 1
-                            yield ExecutionEvent(
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
+                            await event_queue.put(ExecutionEvent(
                                 event_type="node_skipped",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
@@ -2966,23 +3029,24 @@ class GraphExecutor:
                                 node_type=skipped.node_type,
                                 status=NodeStatus.SKIPPED,
                                 level=skipped.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
-                            )
-                            for event in _propagate_failure(
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
+                            ))
+                            await _propagate_failure(
                                 node_id,
                                 f"Dependency '{node_id}' was interrupted",
                                 status=NodeStatus.SKIPPED,
-                            ):
-                                yield event
+                            )
                             continue
 
-                        # Skip nodes in inactive If/Else branches
                         if node_id in self._skipped_branches:
                             skipped = self._record_interrupted(node_id)
-                            completed_nodes += 1
-                            yield ExecutionEvent(
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
+                            await event_queue.put(ExecutionEvent(
                                 event_type="node_skipped",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
@@ -2991,28 +3055,25 @@ class GraphExecutor:
                                 status=NodeStatus.SKIPPED,
                                 logs=["Skipped: If/Else condition was False"],
                                 level=skipped.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
-                            )
-                            # Still propagate dependencies so downstream nodes become ready
-                            for dep_node in self._dependents.get(node_id, []):
-                                if dep_node in remaining_inputs:
-                                    remaining_inputs[dep_node] -= 1
-                                    if remaining_inputs[dep_node] == 0 and dep_node in execution_set:
-                                        ready.append(dep_node)
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
+                            ))
+                            _enqueue_dependents(node_id)
                             continue
 
-                        # Handle If/Else nodes specially
                         if self._is_ifelse_node(node_id):
                             try:
                                 inputs = self._prepare_inputs(node_id)
                             except GraphExecutionError as exc:
                                 result = self._make_input_error_result(node_id, exc)
                                 self._finalize_node_result(node_id, {}, result, cached=False)
-                                completed_nodes += 1
+                                with progress_state["lock"]:
+                                    progress_state["completed"] += 1
+                                    completed = progress_state["completed"]
+                                    total = progress_state["total"]
                                 executed_count += 1
-                                yield ExecutionEvent(
+                                await event_queue.put(ExecutionEvent(
                                     event_type="node_error",
                                     execution_id=self.execution_id,
                                     timestamp=time.time(),
@@ -3023,28 +3084,33 @@ class GraphExecutor:
                                     error_code=result.error_code,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
-                                    progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                    total_nodes=total_nodes,
-                                    completed_nodes=completed_nodes,
+                                    progress=completed / total if total > 0 else 0,
+                                    total_nodes=total,
+                                    completed_nodes=completed,
                                     from_cache=result.from_cache,
+                                ))
+                                await _propagate_failure(
+                                    node_id,
+                                    f"Dependency '{node_id}' failed",
+                                    status=NodeStatus.ERROR,
                                 )
                                 if self._fail_fast:
-                                    tasks.clear()
+                                    stop_scheduling = True
+                                    ready.clear()
                                     break
                                 continue
-                            
-                            # Evaluate condition and mark inactive branch
+
                             true_nodes = self._ifelse_true_branch.get(node_id, set())
                             false_nodes = self._ifelse_false_branch.get(node_id, set())
                             self._skipped_branches -= true_nodes
                             self._skipped_branches -= false_nodes
-                            
+
                             condition = bool(inputs.get("condition", False))
                             if condition:
                                 self._skipped_branches.update(false_nodes)
                             else:
                                 self._skipped_branches.update(true_nodes)
-                            
+
                             ifelse_outputs = {"true": None, "false": None}
                             result = NodeExecutionResult(
                                 node_id=node_id,
@@ -3057,9 +3123,12 @@ class GraphExecutor:
                                 from_cache=False,
                             )
                             self._finalize_node_result(node_id, inputs, result, cached=False)
-                            completed_nodes += 1
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
                             executed_count += 1
-                            yield ExecutionEvent(
+                            await event_queue.put(ExecutionEvent(
                                 event_type="node_completed",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
@@ -3070,28 +3139,19 @@ class GraphExecutor:
                                 logs=result.logs,
                                 duration_ms=result.duration_ms,
                                 level=result.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
                                 from_cache=False,
-                            )
-                            # Propagate dependencies - use remaining_inputs for dependency tracking
-                            for dep_node in self._dependents.get(node_id, []):
-                                if dep_node in remaining_inputs:
-                                    remaining_inputs[dep_node] -= 1
-                                    if remaining_inputs[dep_node] == 0 and dep_node in execution_set:
-                                        ready.append(dep_node)
+                            ))
+                            _enqueue_dependents(node_id)
                             continue
 
-                        if max_steps is not None and executed_count >= max_steps:
-                            tasks.clear()
-                            break
-                        if node_id in breakpoints:
-                            tasks.clear()
-                            break
-
                         node = self.nodes[node_id]
-                        yield ExecutionEvent(
+                        with progress_state["lock"]:
+                            total = progress_state["total"]
+                            completed = progress_state["completed"]
+                        await event_queue.put(ExecutionEvent(
                             event_type="node_queued",
                             execution_id=self.execution_id,
                             timestamp=time.time(),
@@ -3099,12 +3159,55 @@ class GraphExecutor:
                             node_type=node.type,
                             status=NodeStatus.QUEUED,
                             level=self._node_levels.get(node_id, 0),
-                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                            total_nodes=total_nodes,
-                            completed_nodes=completed_nodes,
-                        )
+                            progress=completed / total if total > 0 else 0,
+                            total_nodes=total,
+                            completed_nodes=completed,
+                        ))
 
-                        inputs = self._prepare_inputs(node_id)
+                        if self._is_loop_node(node_id):
+                            loop_task = asyncio.create_task(_run_loop_task(node_id))
+                            tasks[loop_task] = (node_id, None, "loop")
+                            self._cancellation.register_running(node_id, loop_task)
+                            executed_count += 1
+                            continue
+
+                        try:
+                            inputs = self._prepare_inputs(node_id)
+                        except GraphExecutionError as exc:
+                            result = self._make_input_error_result(node_id, exc)
+                            self._finalize_node_result(node_id, {}, result, cached=False)
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
+                            executed_count += 1
+                            await event_queue.put(ExecutionEvent(
+                                event_type="node_error",
+                                execution_id=self.execution_id,
+                                timestamp=time.time(),
+                                node_id=node_id,
+                                node_type=result.node_type,
+                                status=NodeStatus.ERROR,
+                                error=result.error,
+                                error_code=result.error_code,
+                                duration_ms=result.duration_ms,
+                                level=result.level,
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
+                                from_cache=result.from_cache,
+                            ))
+                            await _propagate_failure(
+                                node_id,
+                                f"Dependency '{node_id}' failed",
+                                status=NodeStatus.ERROR,
+                            )
+                            if self._fail_fast:
+                                stop_scheduling = True
+                                ready.clear()
+                                break
+                            continue
+
                         cached_outputs = self._try_get_cached(node_id, inputs)
 
                         if cached_outputs is not None:
@@ -3114,7 +3217,7 @@ class GraphExecutor:
                                 node_type=node.type,
                                 status=NodeStatus.COMPLETED,
                                 outputs=cached_outputs,
-                                logs=[f"[CACHED] Skipped execution, using cached result"],
+                                logs=["[CACHED] Skipped execution, using cached result"],
                                 start_time=cached_start,
                                 end_time=cached_start,
                                 duration_ms=0.0,
@@ -3122,9 +3225,12 @@ class GraphExecutor:
                                 from_cache=True,
                             )
                             self._finalize_node_result(node_id, inputs, result, cached=True)
-                            completed_nodes += 1
+                            with progress_state["lock"]:
+                                progress_state["completed"] += 1
+                                completed = progress_state["completed"]
+                                total = progress_state["total"]
                             executed_count += 1
-                            yield ExecutionEvent(
+                            await event_queue.put(ExecutionEvent(
                                 event_type="node_cached",
                                 execution_id=self.execution_id,
                                 timestamp=time.time(),
@@ -3135,24 +3241,19 @@ class GraphExecutor:
                                 logs=result.logs,
                                 duration_ms=result.duration_ms,
                                 level=result.level,
-                                progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                                total_nodes=total_nodes,
-                                completed_nodes=completed_nodes,
+                                progress=completed / total if total > 0 else 0,
+                                total_nodes=total,
+                                completed_nodes=completed,
                                 from_cache=True,
-                            )
-                            # Enqueue dependents immediately
-                            for dep in self._dependents.get(node_id, []):
-                                if dep not in execution_set:
-                                    continue
-                                if remaining_inputs.get(dep, 0) < 0:
-                                    continue
-                                remaining_inputs[dep] -= 1
-                                if remaining_inputs[dep] == 0:
-                                    ready.append(dep)
+                            ))
+                            _enqueue_dependents(node_id)
                             continue
 
                         self._node_status[node_id] = NodeStatus.RUNNING
-                        yield ExecutionEvent(
+                        with progress_state["lock"]:
+                            total = progress_state["total"]
+                            completed = progress_state["completed"]
+                        await event_queue.put(ExecutionEvent(
                             event_type="node_started",
                             execution_id=self.execution_id,
                             timestamp=time.time(),
@@ -3160,14 +3261,14 @@ class GraphExecutor:
                             node_type=node.type,
                             status=NodeStatus.RUNNING,
                             level=self._node_levels.get(node_id, 0),
-                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                            total_nodes=total_nodes,
-                            completed_nodes=completed_nodes,
-                        )
+                            progress=completed / total if total > 0 else 0,
+                            total_nodes=total,
+                            completed_nodes=completed,
+                        ))
 
                         future = loop.run_in_executor(self._thread_pool, self._execute_node_work, node_id, inputs)
                         task = asyncio.wrap_future(future)
-                        tasks[task] = (node_id, inputs)
+                        tasks[task] = (node_id, inputs, "node")
                         self._cancellation.register_running(node_id, task)
                         executed_count += 1
 
@@ -3178,16 +3279,95 @@ class GraphExecutor:
 
                 done, _ = await asyncio.wait(tasks.keys(), return_when=FIRST_COMPLETED)
                 for task in done:
-                    node_id, inputs = tasks.pop(task)
+                    node_id, inputs, kind = tasks.pop(task)
+                    if kind == "loop":
+                        try:
+                            task.result()
+                        except asyncio.CancelledError:
+                            if self._node_status.get(node_id) == NodeStatus.PENDING:
+                                loop_result = self._record_interrupted(node_id)
+                                with progress_state["lock"]:
+                                    progress_state["completed"] += 1
+                                    completed = progress_state["completed"]
+                                    total = progress_state["total"]
+                                await event_queue.put(ExecutionEvent(
+                                    event_type="node_skipped",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=node_id,
+                                    node_type=loop_result.node_type,
+                                    status=NodeStatus.SKIPPED,
+                                    logs=loop_result.logs,
+                                    duration_ms=loop_result.duration_ms,
+                                    level=loop_result.level,
+                                    progress=completed / total if total > 0 else 0,
+                                    total_nodes=total,
+                                    completed_nodes=completed,
+                                    from_cache=False,
+                                ))
+                        except Exception as exc:
+                            if self._node_status.get(node_id) == NodeStatus.PENDING:
+                                result = NodeExecutionResult(
+                                    node_id=node_id,
+                                    node_type=self.nodes[node_id].type,
+                                    status=NodeStatus.ERROR,
+                                    error=str(exc),
+                                    error_code="loop_error",
+                                    duration_ms=0.0,
+                                    level=self._node_levels.get(node_id, 0),
+                                    from_cache=False,
+                                )
+                                self._finalize_node_result(node_id, {}, result, cached=False)
+                                with progress_state["lock"]:
+                                    progress_state["completed"] += 1
+                                    completed = progress_state["completed"]
+                                    total = progress_state["total"]
+                                await event_queue.put(ExecutionEvent(
+                                    event_type="node_error",
+                                    execution_id=self.execution_id,
+                                    timestamp=time.time(),
+                                    node_id=node_id,
+                                    node_type=result.node_type,
+                                    status=NodeStatus.ERROR,
+                                    error=result.error,
+                                    error_code=result.error_code,
+                                    duration_ms=result.duration_ms,
+                                    level=result.level,
+                                    progress=completed / total if total > 0 else 0,
+                                    total_nodes=total,
+                                    completed_nodes=completed,
+                                    from_cache=False,
+                                ))
+                        status = self._node_status.get(node_id, NodeStatus.SKIPPED)
+                        if status != NodeStatus.COMPLETED:
+                            status_to_use = NodeStatus.ERROR if status == NodeStatus.ERROR else NodeStatus.SKIPPED
+                            reason = (
+                                f"Dependency '{node_id}' failed"
+                                if status_to_use == NodeStatus.ERROR
+                                else f"Dependency '{node_id}' was interrupted"
+                            )
+                            await _propagate_failure(node_id, reason, status=status_to_use)
+                            if status_to_use == NodeStatus.ERROR and self._fail_fast:
+                                for pending in tasks.keys():
+                                    pending.cancel()
+                                tasks.clear()
+                                stop_scheduling = True
+                        _enqueue_dependents(node_id)
+                        _enqueue_loop_body_dependents(node_id)
+                        continue
+
                     try:
                         result = task.result()
                     except asyncio.CancelledError:
                         result = self._make_interrupted_result(node_id)
-                    self._finalize_node_result(node_id, inputs, result, cached=False)
-                    completed_nodes += 1
+                    self._finalize_node_result(node_id, inputs or {}, result, cached=False)
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
 
                     if result.status == NodeStatus.ERROR:
-                        yield ExecutionEvent(
+                        await event_queue.put(ExecutionEvent(
                             event_type="node_error",
                             execution_id=self.execution_id,
                             timestamp=time.time(),
@@ -3198,18 +3378,18 @@ class GraphExecutor:
                             error_code=result.error_code,
                             duration_ms=result.duration_ms,
                             level=result.level,
-                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                            total_nodes=total_nodes,
-                            completed_nodes=completed_nodes,
+                            progress=completed / total if total > 0 else 0,
+                            total_nodes=total,
+                            completed_nodes=completed,
                             from_cache=result.from_cache,
-                        )
+                        ))
                         if self._fail_fast:
                             for pending in tasks.keys():
                                 pending.cancel()
                             tasks.clear()
-                            break
+                            stop_scheduling = True
                     else:
-                        yield ExecutionEvent(
+                        await event_queue.put(ExecutionEvent(
                             event_type="node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped",
                             execution_id=self.execution_id,
                             timestamp=time.time(),
@@ -3220,11 +3400,11 @@ class GraphExecutor:
                             logs=result.logs,
                             duration_ms=result.duration_ms,
                             level=result.level,
-                            progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
-                            total_nodes=total_nodes,
-                            completed_nodes=completed_nodes,
+                            progress=completed / total if total > 0 else 0,
+                            total_nodes=total,
+                            completed_nodes=completed,
                             from_cache=result.from_cache,
-                        )
+                        ))
 
                     if result.status != NodeStatus.COMPLETED:
                         status = NodeStatus.ERROR if result.status == NodeStatus.ERROR else NodeStatus.SKIPPED
@@ -3233,20 +3413,20 @@ class GraphExecutor:
                             if status == NodeStatus.ERROR
                             else f"Dependency '{result.node_id}' was interrupted"
                         )
-                        for event in _propagate_failure(result.node_id, reason, status=status):
-                            yield event
+                        await _propagate_failure(result.node_id, reason, status=status)
 
-                    # Enqueue dependents
-                    for dep in self._dependents.get(node_id, []):
-                        if dep not in execution_set:
-                            continue
-                        if remaining_inputs.get(dep, 0) < 0:
-                            continue
-                        remaining_inputs[dep] -= 1
-                        if remaining_inputs[dep] == 0:
-                            ready.append(dep)
-                
+                    _enqueue_dependents(node_id)
+
                 await asyncio.sleep(0)
+
+        except Exception as exc:
+            await event_queue.put(ExecutionEvent(
+                event_type="error",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                error=str(exc),
+                error_code="execution_error",
+            ))
 
         finally:
             if self._thread_pool:
@@ -3255,23 +3435,77 @@ class GraphExecutor:
             self._cleanup_resources()
             self._unregister_execution(self.execution_id)
 
-        if max_parallelism == 0 and executed_count > 0:
-            max_parallelism = 1
+            if max_parallelism == 0 and executed_count > 0:
+                max_parallelism = 1
 
-        total_time = (time.perf_counter() - start_time) * 1000
-        self._total_execution_time_ms = total_time
-        self._max_parallelism = max_parallelism
-        self.outputs = self._collect_outputs()
-        
-        yield ExecutionEvent(
-            event_type="complete",
-            execution_id=self.execution_id,
-            timestamp=time.time(),
-            progress=1.0,
-            total_nodes=total_nodes,
-            completed_nodes=completed_nodes,
-        )
+            total_time = (time.perf_counter() - start_time) * 1000
+            self._total_execution_time_ms = total_time
+            self._max_parallelism = max_parallelism
+            self.outputs = self._collect_outputs()
 
+            with progress_state["lock"]:
+                completed = progress_state["completed"]
+                total = progress_state["total"]
+
+            await event_queue.put(ExecutionEvent(
+                event_type="complete",
+                execution_id=self.execution_id,
+                timestamp=time.time(),
+                progress=1.0,
+                total_nodes=total,
+                completed_nodes=completed,
+            ))
+
+            await event_queue.put(None)
+
+    async def run_async(self) -> Dict[str, Any]:
+        """Execute the graph asynchronously using the streaming scheduler for consistency."""
+        async for _ in self.run_streaming():
+            pass
+    
+        legacy_trace = [
+            {
+                "node_id": r.node_id,
+                "type": r.node_type,
+                "outputs": r.outputs,
+                "logs": r.logs,
+                "duration_ms": r.duration_ms,
+                "level": r.level,
+                "from_cache": r.from_cache,
+            }
+            for r in self.execution_trace
+        ]
+    
+        stats = self._calculate_stats(self._total_execution_time_ms, self._max_parallelism)
+    
+        return {
+            "outputs": self.outputs,
+            "trace": legacy_trace,
+            "stats": stats.__dict__,
+            "levels": self._levels,
+            "execution_id": self.execution_id,
+        }
+    
+    
+    async def run_streaming(self) -> AsyncIterator[ExecutionEvent]:
+        """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
+        event_queue: asyncio.Queue = asyncio.Queue()
+        runner = asyncio.create_task(self._run_streaming_ready_queue(event_queue))
+    
+        try:
+            while True:
+                event = await event_queue.get()
+                if event is None:
+                    break
+                yield event
+        finally:
+            if not runner.done():
+                runner.cancel()
+            try:
+                await runner
+            except Exception:
+                pass
+    
     def _collect_outputs(self) -> Dict[str, Any]:
         """Collect final outputs from executed nodes."""
         results: Dict[str, Any] = {}
@@ -3288,7 +3522,7 @@ class GraphExecutor:
                 for port, value in output_map.items():
                     results[f"{node_id}.{port}"] = value
         return results
-
+    
     def _calculate_stats(self, total_time_ms: float, max_parallelism: int = 1) -> ExecutionStats:
         """Calculate execution statistics."""
         node_time_ms = sum(r.duration_ms for r in self.execution_trace)
@@ -3314,7 +3548,7 @@ class GraphExecutor:
             max_parallelism=max_parallelism,
             levels_executed=levels_executed,
         )
-
+    
     def get_execution_plan(self) -> Dict[str, Any]:
         """Get the execution plan without running."""
         self._execution_order = self._resolve_execution_order()

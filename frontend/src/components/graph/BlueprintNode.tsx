@@ -424,6 +424,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               </button>
             );
           })()}
+          {!isCoreControlNode && (
+            <button
+              className={`node-action-btn cache-toggle-btn nodrag${data.cacheEnabled ? " cache-toggle-on" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onToggleCache?.(id);
+              }}
+              title={data.cacheEnabled ? "Disable node caching" : "Enable node caching"}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2c-4.42 0-8 1.79-8 4s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zm0 10c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4V8c0 2.21-3.58 4-8 4zm0 6c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4v-4c0 2.21-3.58 4-8 4z" />
+              </svg>
+            </button>
+          )}
           {/* Toggle control ports visibility button */}
           {hasControlPorts && !isCoreControlNode && (
             <button
@@ -733,6 +747,7 @@ export default React.memo(BlueprintNode, (prevProps, nextProps) => {
   if (prevProps.data.isHighlighted !== nextProps.data.isHighlighted) return false;
   if (prevProps.data.last_outputs !== nextProps.data.last_outputs) return false;
   if (prevProps.data.highlightedPort !== nextProps.data.highlightedPort) return false;
+  if (prevProps.data.cacheEnabled !== nextProps.data.cacheEnabled) return false;
 
   // Check for structural changes that affect handles
   if (prevProps.data.showControlPorts !== nextProps.data.showControlPorts) return false;
