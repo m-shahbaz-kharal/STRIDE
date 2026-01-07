@@ -24,6 +24,7 @@ interface GraphPayload {
       from_port: string;
       to_node: string;
       to_port: string;
+      kind?: "data" | "control";
     }>;
   };
   options: Record<string, unknown>;

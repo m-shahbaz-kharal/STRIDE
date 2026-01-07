@@ -8,8 +8,14 @@ interface UseKeyboardShortcutsOptions {
     onPaste?: () => void;
     onUndo?: () => void;
     onRedo?: () => void;
+    onRunGraph?: () => void;
+    onRunSelection?: () => void;
+    onInterruptAll?: () => void;
     canDuplicate?: boolean;
     canCopy?: boolean;
+    canRunGraph?: boolean;
+    canRunSelection?: boolean;
+    canInterrupt?: boolean;
 }
 
 export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
@@ -21,8 +27,14 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
         onPaste,
         onUndo,
         onRedo,
+        onRunGraph,
+        onRunSelection,
+        onInterruptAll,
         canDuplicate = true,
         canCopy = true,
+        canRunGraph = true,
+        canRunSelection = true,
+        canInterrupt = true,
     } = options;
 
     useEffect(() => {
@@ -87,9 +99,47 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
                 onRedo?.();
                 return;
             }
+
+            // Ctrl+Enter - Run graph, Ctrl+Shift+Enter - Run selection
+            if (isCtrlOrCmd && event.key === "Enter") {
+                event.preventDefault();
+                if (event.shiftKey) {
+                    if (canRunSelection) {
+                        onRunSelection?.();
+                    }
+                } else if (canRunGraph) {
+                    onRunGraph?.();
+                }
+                return;
+            }
+
+            // Escape - Interrupt all
+            if (event.key === "Escape") {
+                if (canInterrupt) {
+                    event.preventDefault();
+                    onInterruptAll?.();
+                }
+                return;
+            }
         };
 
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [onDelete, onSelectAll, onDuplicate, onCopy, onPaste, onUndo, onRedo, canDuplicate, canCopy]);
+    }, [
+        onDelete,
+        onSelectAll,
+        onDuplicate,
+        onCopy,
+        onPaste,
+        onUndo,
+        onRedo,
+        onRunGraph,
+        onRunSelection,
+        onInterruptAll,
+        canDuplicate,
+        canCopy,
+        canRunGraph,
+        canRunSelection,
+        canInterrupt,
+    ]);
 };

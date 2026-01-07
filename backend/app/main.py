@@ -175,7 +175,8 @@ def serialize_event(event) -> str:
     optional_fields = [
         "node_id", "node_type", "status", "outputs", "logs",
         "duration_ms", "error", "level", "progress", "total_nodes",
-        "completed_nodes", "execution_plan", "levels", "from_cache", "error_code"
+        "completed_nodes", "execution_plan", "levels", "from_cache", "error_code",
+        "branch_id", "is_merge_point", "branches", "merge_points",
     ]
     
     for field in optional_fields:

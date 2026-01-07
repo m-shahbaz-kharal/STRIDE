@@ -333,6 +333,7 @@ IF_ELSE_SPEC = NodeSpec(
     category="Control",
     summary="Branch execution based on condition.",
     description="Executes the True branch when condition is truthy, else the False branch.",
+    tags=["control", "ifelse", "branch"],
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="condition", type=t_boolean(), required=False, default=False),
@@ -359,6 +360,7 @@ FOR_LOOP_SPEC = NodeSpec(
     category="Control",
     summary="Iterate from first to last index.",
     description="Blueprint-style for loop with control pins and an index output.",
+    tags=["control", "loop"],
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="first_index", type=t_int(), required=False, default=0),
@@ -388,6 +390,7 @@ REPEAT_LOOP_SPEC = NodeSpec(
     category="Control",
     summary="Repeat N times.",
     description="Executes the loop body a fixed number of times.",
+    tags=["control", "loop"],
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="count", type=t_int(), required=False, default=1),
@@ -415,6 +418,7 @@ WHILE_LOOP_SPEC = NodeSpec(
     category="Control",
     summary="Repeat while condition is true.",
     description="Executes the loop body while condition remains true, with a max iteration safeguard.",
+    tags=["control", "loop"],
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="condition", type=t_boolean(), required=False, default=False),

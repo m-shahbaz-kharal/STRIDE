@@ -1513,6 +1513,7 @@ SAVE_IMAGE_SPEC = NodeSpec(
         PortSpec(name="saved", type=t_boolean()),
         PortSpec(name="file_path", type=t_string()),
     ],
+    cache_policy="disabled",
 )
 
 

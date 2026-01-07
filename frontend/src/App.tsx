@@ -1230,8 +1230,14 @@ const App = () => {
     onPaste: handlePaste,
     onUndo: undo,
     onRedo: redo,
+    onRunGraph: () => handleRunGraph("full"),
+    onRunSelection: () => handleRunGraph("selection"),
+    onInterruptAll: handleInterruptAll,
     canDuplicate: selectedNodeIds.length > 0,
     canCopy: selectedNodeIds.length > 0,
+    canRunGraph: nodes.length > 0 && !isRunning && !jsonViewEnabled,
+    canRunSelection: selectedNodeIds.length > 0 && !isRunning && !jsonViewEnabled,
+    canInterrupt: isRunning && Boolean(executionId),
   });
 
   // ========== Node adding ==========
@@ -1296,6 +1302,7 @@ const App = () => {
             type: "default",
             animated: false,
             style: { stroke: edgeColor, strokeWidth: 2 },
+            data: { kind: isControlConnection ? "control" : "data" },
           },
           filtered
         );
@@ -1505,6 +1512,7 @@ const App = () => {
                 type: "default",
                 animated: false,
                 style: { stroke: edgeColor, strokeWidth: 2 },
+                data: { kind: isControlConnection ? "control" : "data" },
               },
               filtered
             );

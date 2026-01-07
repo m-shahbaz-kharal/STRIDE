@@ -7,21 +7,47 @@ export const useNodeLibrary = () => {
     const [error, setError] = useState<string | null>(null);
 
     const normalizeDefinition = useCallback((def: any): NodeTypeDefinition => {
+        const coerceType = (raw: any): TypeDescriptor => {
+            if (!raw) return { kind: "any" };
+            if (typeof raw === "string") return { kind: raw as TypeDescriptor["kind"] };
+            const normalized: TypeDescriptor & Record<string, unknown> = { ...raw } as TypeDescriptor;
+            const elementType = (normalized as any).elementType ?? (normalized as any).element_type;
+            const normalizedElement = elementType ? coerceType(elementType) : undefined;
+            if (normalized.kind === "map") {
+                if (normalizedElement && !normalized.value) {
+                    normalized.value = normalizedElement as TypeDescriptor;
+                }
+                if (!normalized.value && normalized.item) {
+                    normalized.value = normalized.item;
+                }
+            } else if (normalizedElement && !normalized.item) {
+                normalized.item = normalizedElement as TypeDescriptor;
+            }
+            if (normalized.item && typeof normalized.item === "object") {
+                normalized.item = coerceType(normalized.item);
+            }
+            if (normalized.value && typeof normalized.value === "object") {
+                normalized.value = coerceType(normalized.value);
+            }
+            if (normalized.fields) {
+                normalized.fields = Object.fromEntries(
+                    Object.entries(normalized.fields).map(([key, value]) => [key, coerceType(value)])
+                );
+            }
+            return normalized;
+        };
+
         const inputs: { name: string; type: TypeDescriptor }[] =
             def.inputs ??
             (def.input_ports || []).map((name: string) => ({
                 name,
-                type: typeof def.input_port_types?.[name] === "object"
-                    ? def.input_port_types[name]
-                    : { kind: def.input_port_types?.[name] || "any" },
+                type: coerceType(def.input_port_types?.[name]),
             }));
         const outputs: { name: string; type: TypeDescriptor }[] =
             def.outputs ??
             (def.output_ports || []).map((name: string) => ({
                 name,
-                type: typeof def.output_port_types?.[name] === "object"
-                    ? def.output_port_types[name]
-                    : { kind: def.output_port_types?.[name] || "any" },
+                type: coerceType(def.output_port_types?.[name]),
             }));
 
         return {

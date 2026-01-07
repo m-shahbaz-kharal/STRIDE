@@ -103,6 +103,7 @@ SAM3_CONNECT_SPEC = NodeSpec(
                                 options=[{"label": "Image", "value": "image"}, {"label": "Video", "value": "video"}]),
         "timeout": ParamSpec(name="timeout", type="int", label="Timeout (s)", default=30),
     },
+    cache_policy="disabled",
 )
 
 
@@ -173,6 +174,7 @@ SAM3_IS_ALIVE_SPEC = NodeSpec(
     params={
         "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
     },
+    cache_policy="disabled",
 )
 
 
@@ -485,6 +487,7 @@ SAM3_DISCONNECT_SPEC = NodeSpec(
     params={
         "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
     },
+    cache_policy="disabled",
 )
 
 

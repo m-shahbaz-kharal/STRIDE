@@ -35,7 +35,31 @@ export const useConnectionValidation = ({
                 if (type === "number") return { kind: "float" };
                 return { kind: type as TypeDescriptor["kind"] };
             }
-            return type;
+            const normalized: TypeDescriptor & Record<string, unknown> = { ...type } as TypeDescriptor;
+            const elementType = (normalized as any).elementType ?? (normalized as any).element_type;
+            const normalizedElement = elementType ? normalizeType(elementType) : undefined;
+            if (normalized.kind === "map") {
+                if (normalizedElement && !normalized.value) {
+                    normalized.value = normalizedElement;
+                }
+                if (!normalized.value && normalized.item) {
+                    normalized.value = normalized.item;
+                }
+            } else if (normalizedElement && !normalized.item) {
+                normalized.item = normalizedElement;
+            }
+            if (normalized.item && typeof normalized.item === "object") {
+                normalized.item = normalizeType(normalized.item);
+            }
+            if (normalized.value && typeof normalized.value === "object") {
+                normalized.value = normalizeType(normalized.value);
+            }
+            if (normalized.fields) {
+                normalized.fields = Object.fromEntries(
+                    Object.entries(normalized.fields).map(([key, value]) => [key, normalizeType(value)])
+                );
+            }
+            return normalized;
         },
         []
     );
