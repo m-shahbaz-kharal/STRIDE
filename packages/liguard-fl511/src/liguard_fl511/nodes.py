@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections import deque
 from typing import Any, Dict, Optional, Tuple
 
 try:
@@ -148,9 +149,13 @@ class StreamResource:
         self._running = threading.Event()
         self._running.set()
         self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._stderr_thread: Optional[threading.Thread] = None
         self._proc: Optional[subprocess.Popen] = None
         self._last_frame_time = 0.0
         self._lock = threading.Lock()
+        self._stderr_lines = deque(maxlen=20)
+        self._stderr_lock = threading.Lock()
+        self._ffmpeg_exit_code: Optional[int] = None
         
         ACTIVE_STREAMS[self.stream_id] = self
         self._start()
@@ -158,6 +163,8 @@ class StreamResource:
     def _ffmpeg_cmd(self) -> list[str]:
         return [
             "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
             "-headers", "Origin: https://fl511.com\r\nReferer: https://fl511.com/\r\n",
             "-reconnect", "1",
             "-reconnect_streamed", "1",
@@ -175,10 +182,27 @@ class StreamResource:
         self._proc = subprocess.Popen(
             self._ffmpeg_cmd(),
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             bufsize=10**7,
         )
+        self._stderr_thread = threading.Thread(target=self._stderr_loop, daemon=True)
+        self._stderr_thread.start()
         self._thread.start()
+
+    def _stderr_loop(self) -> None:
+        assert self._proc and self._proc.stderr
+        while True:
+            line = self._proc.stderr.readline()
+            if not line:
+                break
+            try:
+                text = line.decode("utf-8", "replace").strip()
+            except Exception:
+                text = ""
+            if text:
+                with self._stderr_lock:
+                    self._stderr_lines.append(text)
+        self._ffmpeg_exit_code = self._proc.poll()
 
     def _reader_loop(self) -> None:
         assert self._proc and self._proc.stdout
@@ -201,6 +225,8 @@ class StreamResource:
                 # Buffer full, skip this frame to avoid deadlock.
                 pass
         self._running.clear()
+        if self._proc:
+            self._ffmpeg_exit_code = self._proc.poll()
 
     def latest_frame(self, timeout: float, pace: bool = True) -> Optional["np.ndarray"]:
         if pace:
@@ -217,6 +243,20 @@ class StreamResource:
         except queue.Empty:
             return None
 
+    def diagnostics(self) -> str:
+        details = []
+        if self._proc:
+            exit_code = self._proc.poll()
+            if exit_code is not None:
+                details.append(f"ffmpeg exit code {exit_code}")
+        if self._ffmpeg_exit_code is not None and (not details or str(self._ffmpeg_exit_code) not in details[-1]):
+            details.append(f"ffmpeg exit code {self._ffmpeg_exit_code}")
+        with self._stderr_lock:
+            if self._stderr_lines:
+                tail = list(self._stderr_lines)[-5:]
+                details.append("ffmpeg stderr: " + " | ".join(tail))
+        return "; ".join(details)
+
     def close(self) -> None:
         """Stop the stream and release resources."""
         ACTIVE_STREAMS.pop(self.stream_id, None)
@@ -229,6 +269,8 @@ class StreamResource:
                 self._proc.kill()
         if self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=1.0)
             
     def __repr__(self) -> str:
         return f"<StreamResource id={self.stream_id} url={self.hls_url} size={self.width}x{self.height}>"
@@ -395,6 +437,9 @@ class Fl511TickNode(NodeBase):
         frame = stream.latest_frame(timeout=timeout, pace=pace)
         if frame is None:
             if require_frame:
+                diagnostics = stream.diagnostics()
+                if diagnostics:
+                    raise TimeoutError(f"No frame available within {timeout}s. {diagnostics}")
                 raise TimeoutError(f"No frame available within {timeout}s")
             return {
                 "control_out": None,
