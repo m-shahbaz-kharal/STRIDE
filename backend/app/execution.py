@@ -50,6 +50,7 @@ class NodeExecutionResult:
     duration_ms: float = 0.0
     error: Optional[str] = None
     error_code: Optional[str] = None
+    error_details: Optional[str] = None  # Full stacktrace for debugging
     level: int = 0  # Topological level for parallel execution
     from_cache: bool = False  # Whether result came from cache
     branch_id: Optional[str] = None  # Branch this node belongs to (hybrid execution)
@@ -72,6 +73,7 @@ class ExecutionEvent:
     duration_ms: Optional[float] = None
     error: Optional[str] = None
     error_code: Optional[str] = None
+    error_details: Optional[str] = None  # Full stacktrace for debugging
     level: Optional[int] = None
     progress: Optional[float] = None  # 0.0 to 1.0
     total_nodes: Optional[int] = None

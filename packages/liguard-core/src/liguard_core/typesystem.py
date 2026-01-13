@@ -17,7 +17,12 @@ FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "ma
 
 @dataclass(frozen=True)
 class TypeDescriptor:
-    """Immutable descriptor for a data type in the node system."""
+    """Immutable descriptor for a data type in the node system.
+    
+    This class uses `element_type` and `key_type` as the canonical field names,
+    but provides `item` and `value` property aliases for compatibility with
+    the backend's type system conventions.
+    """
 
     kind: str = "any"
     element_type: Optional["TypeDescriptor"] = None
@@ -25,6 +30,26 @@ class TypeDescriptor:
     fields: Optional[Dict[str, "TypeDescriptor"]] = None
     nullable: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Optional name field for labeled types
+    name: Optional[str] = None
+
+    # =========================================================================
+    # Compatibility Aliases
+    # =========================================================================
+    
+    @property
+    def item(self) -> Optional["TypeDescriptor"]:
+        """Alias for element_type (for list/option/tuple)."""
+        return self.element_type
+
+    @property
+    def value(self) -> Optional["TypeDescriptor"]:
+        """Alias for element_type when used with maps."""
+        return self.element_type if self.kind == "map" else None
+
+    # =========================================================================
+    # Type Checks
+    # =========================================================================
 
     def is_primitive(self) -> bool:
         return self.kind in PRIMITIVES
@@ -44,13 +69,25 @@ class TypeDescriptor:
             fields=self.fields,
             nullable=nullable,
             metadata=self.metadata,
+            name=self.name,
         )
+
+    # =========================================================================
+    # Serialization
+    # =========================================================================
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
         data: Dict[str, Any] = {"kind": self.kind}
+        if self.name is not None:
+            data["name"] = self.name
         if self.element_type is not None:
-            data["elementType"] = self.element_type.to_dict()
+            # Use both for max compatibility
+            data["item"] = self.element_type.to_dict()
+            if self.kind != "map":
+                data["elementType"] = self.element_type.to_dict()
+            else:
+                data["value"] = self.element_type.to_dict()
         if self.key_type is not None:
             data["keyType"] = self.key_type.to_dict()
         if self.fields is not None:
@@ -60,6 +97,106 @@ class TypeDescriptor:
         if self.metadata:
             data["metadata"] = self.metadata
         return data
+
+    @staticmethod
+    def from_dict(payload: Dict[str, Any]) -> "TypeDescriptor":
+        """Create a TypeDescriptor from a JSON dictionary."""
+        kind = payload.get("kind")
+        if not kind:
+            raise ValueError("TypeDescriptor requires 'kind'")
+        
+        # Handle both naming conventions for element types
+        element_raw = payload.get("item") or payload.get("elementType") or payload.get("element_type")
+        value_raw = payload.get("value")
+        key_raw = payload.get("keyType") or payload.get("key_type")
+        
+        element_type = None
+        if kind == "map" and value_raw:
+            element_type = TypeDescriptor.from_dict(value_raw)
+        elif element_raw:
+            element_type = TypeDescriptor.from_dict(element_raw)
+        
+        key_type = TypeDescriptor.from_dict(key_raw) if key_raw else None
+        
+        fields_raw = payload.get("fields")
+        fields = {k: TypeDescriptor.from_dict(v) for k, v in fields_raw.items()} if fields_raw else None
+        
+        return TypeDescriptor(
+            kind=kind,
+            name=payload.get("name"),
+            element_type=element_type,
+            key_type=key_type,
+            fields=fields,
+            nullable=bool(payload.get("nullable", False)),
+            metadata=payload.get("metadata", {}) or {},
+        )
+
+    # =========================================================================
+    # Type Compatibility
+    # =========================================================================
+
+    def is_assignable_to(self, target: "TypeDescriptor") -> bool:
+        """Check if this type can flow into the target type."""
+        if target.kind == "any":
+            return True
+        if self.kind == "any":
+            return True
+        if target.kind == "unknown":
+            return True
+        if self.kind == "unknown":
+            return True
+        if self.nullable and not target.nullable:
+            return False
+        if self.kind != target.kind:
+            # Allow int -> float widening
+            if self.kind == "int" and target.kind == "float":
+                return True
+            return False
+        if self.kind == "list":
+            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+        if self.kind == "map":
+            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+        if self.kind == "option":
+            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+        if self.kind == "record":
+            if not self.fields or not target.fields:
+                return False
+            for key, val in target.fields.items():
+                if key not in self.fields:
+                    return False
+                if not self.fields[key].is_assignable_to(val):
+                    return False
+            return True
+        if self.kind == "tensor":
+            target_dtype = target.metadata.get("dtype")
+            source_dtype = self.metadata.get("dtype")
+            if target_dtype and source_dtype and target_dtype != source_dtype:
+                return False
+            target_shape = target.metadata.get("shape")
+            source_shape = self.metadata.get("shape")
+            if target_shape and source_shape and target_shape != source_shape:
+                return False
+            return True
+        return True
+
+    def label(self) -> str:
+        """Human-readable label for UI/tooling."""
+        if self.kind == "control":
+            return "Control"
+        if self.kind == "list" and self.element_type:
+            return f"List<{self.element_type.label()}>"
+        if self.kind == "map" and self.element_type:
+            return f"Map<string,{self.element_type.label()}>"
+        if self.kind == "record" and self.fields:
+            return "Record"
+        if self.kind == "option" and self.element_type:
+            return f"Option<{self.element_type.label()}>"
+        if self.kind == "tensor":
+            shape = self.metadata.get("shape")
+            dtype = self.metadata.get("dtype", "float32")
+            shape_str = f"[{', '.join(map(str, shape))}]" if shape else ""
+            return f"Tensor{shape_str}:{dtype}"
+        return self.kind.capitalize()
 
     def __repr__(self) -> str:
         parts = [f"kind={self.kind!r}"]

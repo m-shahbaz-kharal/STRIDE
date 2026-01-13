@@ -22,6 +22,8 @@ interface NodeSummary {
   avgDurationMs: number;
   lastOutputs: Record<string, unknown>;
   lastLogs: string[];
+  lastError?: string;
+  lastErrorDetails?: string;
   status: NodeExecutionStatus;
   isActive: boolean;
   fromCache: boolean;
@@ -154,6 +156,42 @@ const NodeEntry = React.memo(({
           ))}
         </div>
       )}
+
+      {node.hasErrors && node.lastError && (
+        <div style={{
+          marginTop: '8px',
+          padding: '10px',
+          background: 'rgba(248, 81, 73, 0.1)',
+          border: '1px solid rgba(248, 81, 73, 0.3)',
+          borderRadius: '6px',
+        }}>
+          <div style={{ color: 'var(--accent-red, #f85149)', fontWeight: 500, marginBottom: '4px', fontSize: '12px' }}>Error</div>
+          <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary, #c9d1d9)', wordBreak: 'break-word' }}>
+            {node.lastError}
+          </div>
+          {node.lastErrorDetails && (
+            <details style={{ marginTop: '8px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted, #8b949e)', userSelect: 'none' }}>
+                Stack Trace
+              </summary>
+              <pre style={{
+                marginTop: '4px',
+                padding: '8px',
+                background: 'rgba(0,0,0,0.3)',
+                borderRadius: '4px',
+                fontSize: '10px',
+                overflow: 'auto',
+                maxHeight: '200px',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                color: 'var(--text-secondary, #c9d1d9)',
+              }}>
+                {node.lastErrorDetails}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
     </div>
   );
 });
@@ -257,6 +295,36 @@ const LogDialog = React.memo(({
                 </div>
               )}
 
+              {exec.error && (
+                <div style={{ marginTop: '8px', padding: '10px', background: 'rgba(248, 81, 73, 0.1)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--accent-red, #f85149)', fontWeight: 500, marginBottom: '4px' }}>Error:</div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
+                    {exec.error}
+                  </div>
+                  {exec.error_details && (
+                    <details style={{ marginTop: '8px' }}>
+                      <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', userSelect: 'none' }}>
+                        Stack Trace
+                      </summary>
+                      <pre style={{
+                        marginTop: '4px',
+                        padding: '8px',
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        overflow: 'auto',
+                        maxHeight: '300px',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        color: 'var(--text-secondary)',
+                      }}>
+                        {exec.error_details}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+
               {Object.keys(exec.outputs).length > 0 && (
                 <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
                   <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Outputs:</div>
@@ -306,8 +374,10 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
         existing.totalDurationMs += duration;
         existing.lastOutputs = entry.outputs;
         existing.lastLogs = entry.logs;
+        existing.lastError = entry.error ?? existing.lastError;
+        existing.lastErrorDetails = entry.error_details ?? existing.lastErrorDetails;
         existing.fromCache = entry.from_cache ?? false;
-        existing.hasErrors = existing.hasErrors || entry.logs.some(l => l.toLowerCase().includes('error'));
+        existing.hasErrors = existing.hasErrors || !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error'));
         existing.executions.push(entry);
       } else {
         // Calculate fallback display name if backend doesn't provide one
@@ -326,10 +396,12 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
           avgDurationMs: duration,
           lastOutputs: entry.outputs,
           lastLogs: entry.logs,
+          lastError: entry.error,
+          lastErrorDetails: entry.error_details,
           status: nodeStatuses.get(entry.node_id) ?? "completed",
           isActive: entry.node_id === currentNodeId,
           fromCache: entry.from_cache ?? false,
-          hasErrors: entry.logs.some(l => l.toLowerCase().includes('error')),
+          hasErrors: !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error')),
           level: entry.level,
           normalizedWidth: 0,
           executions: [entry],

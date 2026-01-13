@@ -69,9 +69,11 @@ class NodeSpec:
     summary: str = ""
     description: str = ""
     icon: str = ""
+    tags: List[str] = field(default_factory=list)
     inputs: List[PortSpec] = field(default_factory=list)
     outputs: List[PortSpec] = field(default_factory=list)
     params: Dict[str, ParamSpec] = field(default_factory=dict)
+    stability: str = "stable"
     cache_policy: str = "auto"
     
     # Plugin metadata
@@ -85,13 +87,22 @@ class NodeSpec:
             "version": self.version,
             "display_name": self.display_name or self.type,
             "category": self.category,
-            "summary": self.summary,
+            "summary": self.summary or self.description,
             "description": self.description,
             "icon": self.icon,
+            "tags": self.tags,
             "inputs": [p.to_dict() for p in self.inputs],
             "outputs": [p.to_dict() for p in self.outputs],
-            "params": {k: v.to_dict() for k, v in self.params.items()},
+            "params_schema": {k: v.to_dict() for k, v in self.params.items()},
+            "params_defaults": {k: v.default for k, v in self.params.items() if v.default is not None},
+            "stability": self.stability,
             "cache_policy": self.cache_policy,
             "plugin_name": self.plugin_name,
             "api_version": self.api_version,
+            # Legacy/compat fields for the current frontend
+            "input_ports": [p.name for p in self.inputs],
+            "output_ports": [p.name for p in self.outputs],
+            "input_port_types": {p.name: p.type.to_dict() for p in self.inputs},
+            "output_port_types": {p.name: p.type.to_dict() for p in self.outputs},
         }
+

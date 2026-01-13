@@ -247,52 +247,34 @@ class GraphExecutor:
 
     @staticmethod
     def _normalize_type(raw_type: Any) -> Optional[TypeDescriptor]:
-        """Normalize type descriptors from backend/liguard_core into a backend TypeDescriptor."""
+        """Normalize type descriptors from various sources into a TypeDescriptor.
+        
+        Handles:
+        - TypeDescriptor instances (returned as-is)
+        - Dict payloads (parsed via from_dict)
+        - Objects with 'kind' attribute (liguard_core TypeDescriptor)
+        - String type names (wrapped in TypeDescriptor)
+        """
         if raw_type is None:
             return None
         if isinstance(raw_type, TypeDescriptor):
             return raw_type
         if isinstance(raw_type, dict):
-            payload = dict(raw_type)
-            kind = payload.get("kind")
-            if "element_type" in payload and "elementType" not in payload:
-                payload["elementType"] = payload.pop("element_type")
-            if "key_type" in payload and "keyType" not in payload:
-                payload["keyType"] = payload.pop("key_type")
-            element_type = payload.pop("elementType", None)
-            payload.pop("keyType", None)
-            if element_type is not None:
-                if kind == "map":
-                    payload.setdefault("value", element_type)
-                else:
-                    payload.setdefault("item", element_type)
-            if kind == "map" and "value" not in payload and "item" in payload:
-                payload["value"] = payload["item"]
-            return TypeDescriptor.from_dict(payload)
+            return TypeDescriptor.from_dict(raw_type)
+        # Handle liguard_core TypeDescriptor objects
         kind = getattr(raw_type, "kind", None)
         if kind:
-            element_type = getattr(raw_type, "element_type", None)
-            fields = getattr(raw_type, "fields", None)
-            nullable = bool(getattr(raw_type, "nullable", False))
-            metadata = getattr(raw_type, "metadata", {}) or {}
-            item = None
-            value = None
-            if kind == "map":
-                value = GraphExecutor._normalize_type(element_type) if element_type else None
-            else:
-                item = GraphExecutor._normalize_type(element_type) if element_type else None
-            fields_norm = (
-                {k: GraphExecutor._normalize_type(v) for k, v in fields.items()}
-                if fields
-                else None
-            )
+            # Already a compatible TypeDescriptor-like object
+            if hasattr(raw_type, "to_dict"):
+                return TypeDescriptor.from_dict(raw_type.to_dict())
+            # Fallback for objects with kind attribute
             return TypeDescriptor(
                 kind=kind,
-                item=item,
-                value=value,
-                fields=fields_norm,
-                nullable=nullable,
-                metadata=metadata,
+                element_type=GraphExecutor._normalize_type(getattr(raw_type, "element_type", None)),
+                fields=({k: GraphExecutor._normalize_type(v) for k, v in getattr(raw_type, "fields", {}).items()}
+                        if getattr(raw_type, "fields", None) else None),
+                nullable=bool(getattr(raw_type, "nullable", False)),
+                metadata=getattr(raw_type, "metadata", {}) or {},
             )
         if isinstance(raw_type, str):
             return TypeDescriptor(kind=raw_type)
@@ -874,12 +856,16 @@ class GraphExecutor:
         )
 
     def _make_input_error_result(self, node_id: str, exc: Exception) -> NodeExecutionResult:
+        import traceback
+        error_traceback = traceback.format_exc()
         return NodeExecutionResult(
             node_id=node_id,
             node_type=self.nodes[node_id].type,
             status=NodeStatus.ERROR,
             error=str(exc),
             error_code=getattr(exc, "code", None),
+            error_details=error_traceback,
+            logs=[f"ERROR: {str(exc)}"],
             duration_ms=0.0,
             level=self._node_levels.get(node_id, 0),
             from_cache=False,
@@ -944,7 +930,9 @@ class GraphExecutor:
             )
 
         except Exception as e:
+            import traceback
             end_time = time.perf_counter()
+            error_traceback = traceback.format_exc()
             return NodeExecutionResult(
                 node_id=node_id,
                 node_type=node.type,
@@ -954,6 +942,8 @@ class GraphExecutor:
                 duration_ms=(end_time - start_time) * 1000,
                 error=str(e),
                 error_code=getattr(e, "code", None),
+                error_details=error_traceback,
+                logs=[f"ERROR: {str(e)}"],
                 level=level,
                 from_cache=False,
             )
@@ -1504,6 +1494,7 @@ class GraphExecutor:
                                         status=NodeStatus.ERROR,
                                         error=result.error,
                                         error_code=result.error_code,
+                                        error_details=result.error_details,
                                         duration_ms=result.duration_ms,
                                         level=result.level,
                                         progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
@@ -1587,6 +1578,7 @@ class GraphExecutor:
                                     status=NodeStatus.ERROR,
                                     error=result.error,
                                     error_code=result.error_code,
+                                    error_details=result.error_details,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
                                     progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
@@ -1621,6 +1613,7 @@ class GraphExecutor:
                                         status=NodeStatus.ERROR,
                                         error=result.error,
                                         error_code=result.error_code,
+                                        error_details=result.error_details,
                                         duration_ms=result.duration_ms,
                                         level=result.level,
                                         progress=completed_nodes / total_nodes if total_nodes > 0 else 0,
@@ -3100,6 +3093,7 @@ class GraphExecutor:
                                     status=NodeStatus.ERROR,
                                     error=result.error,
                                     error_code=result.error_code,
+                                    error_details=result.error_details,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
                                     progress=completed / total if total > 0 else 0,
@@ -3349,6 +3343,7 @@ class GraphExecutor:
                                     status=NodeStatus.ERROR,
                                     error=result.error,
                                     error_code=result.error_code,
+                                    error_details=result.error_details,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
                                     progress=completed / total if total > 0 else 0,

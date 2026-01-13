@@ -27,6 +27,8 @@ export interface TypeDescriptor {
   fields?: Record<string, TypeDescriptor>;
   nullable?: boolean;
   metadata?: Record<string, unknown>;
+  // Allow additional backend properties
+  [key: string]: unknown;
 }
 
 export interface PortDefinition {
@@ -81,6 +83,8 @@ export interface ExecutionTraceEntry {
   display_name?: string;  // Exact display name from node definition
   outputs: Record<string, unknown>;
   logs: string[];
+  error?: string;
+  error_details?: string;  // Full stacktrace for debugging
   duration_ms?: number;
   level?: number;
   from_cache?: boolean;
@@ -129,6 +133,7 @@ export interface ExecutionEvent {
   duration_ms?: number;
   error?: string;
   error_code?: string;
+  error_details?: string;  // Full stacktrace for debugging
   level?: number;
   progress?: number;
   total_nodes?: number;
