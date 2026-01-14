@@ -2026,6 +2026,7 @@ const App = () => {
                   onConnect={handleConnect}
                   onConnectStart={onConnectStart}
                   onConnectEnd={onConnectEnd}
+                  onMoveStart={closeSmartConnect}
                   onNodeDragStart={() => takeSnapshot()}
                   onSelectionDragStart={() => takeSnapshot()}
                   onSelectionChange={handleSelectionChange}
