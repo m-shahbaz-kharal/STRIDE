@@ -1349,16 +1349,25 @@ const App = () => {
         id: `edge-${Math.random().toString(36).slice(2, 10)}`,
         source,
         target,
-        selected: false,
+        selected: true,
       };
       if (!isDuplicateEdge(newEdge, existingEdges) && !isDuplicateEdge(newEdge, newEdges)) {
         newEdges.push(newEdge);
       }
     });
 
-    setNodes((current) => [...current, ...newNodes]);
+    // Deselect all existing nodes and append new selected nodes
+    setNodes((current) => [
+      ...current.map((n) => ({ ...n, selected: false })),
+      ...newNodes.map((n) => ({ ...n, selected: true })),
+    ]);
+
     if (newEdges.length > 0) {
-      setEdges((current) => [...current, ...newEdges]);
+      // Deselect all existing edges and append new selected edges
+      setEdges((current) => [
+        ...current.map((e) => ({ ...e, selected: false })),
+        ...newEdges,
+      ]);
     }
 
     const newIds = newNodes.map((n) => n.id);
