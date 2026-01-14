@@ -451,8 +451,7 @@ class Fl511TickNode(NodeBase):
             }
 
         _require_cv2()
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        ok, buffer = cv2.imencode(".jpg", frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+        ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ok:
             raise RuntimeError("Failed to encode frame")
         image_data = base64.b64encode(buffer).decode("utf-8")

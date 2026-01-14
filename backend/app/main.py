@@ -147,8 +147,8 @@ async def get_stream_frame(stream_id: str) -> Response:
     except ImportError as exc:
         raise HTTPException(status_code=500, detail="OpenCV not installed for stream encoding") from exc
 
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    ok, buffer = cv2.imencode(".jpg", frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    # cv2.imencode expects BGR input, so we pass the frame directly
+    ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to encode frame")
     return StreamingResponse(
