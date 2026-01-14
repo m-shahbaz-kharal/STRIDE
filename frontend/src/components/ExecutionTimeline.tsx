@@ -1,37 +1,15 @@
-import React, { useMemo, useState, useCallback } from "react";
-import { ExecutionTraceEntry, ExecutionStats, NodeExecutionStatus } from "../types";
+import React, { useCallback } from "react";
+import { ExecutionStats, NodeExecutionStatus, NodeSummary } from "../types";
 
 interface ExecutionTimelineProps {
-  trace: ExecutionTraceEntry[];
+  nodeSummaries: NodeSummary[];
   stats: ExecutionStats | null;
   levels: string[][];
   isRunning: boolean;
   currentNodeId: string | null;
   nodeStatuses: Map<string, NodeExecutionStatus>;
   onHighlightNodes?: (nodeIds: string[]) => void;
-}
-
-// Aggregated node data - one entry per unique node
-interface NodeSummary {
-  nodeId: string;
-  type: string;
-  displayName: string;  // Exact display name from node definition
-  executionCount: number;
-  lastDurationMs: number | undefined;
-  totalDurationMs: number;
-  avgDurationMs: number;
-  lastOutputs: Record<string, unknown>;
-  lastLogs: string[];
-  lastError?: string;
-  lastErrorDetails?: string;
-  status: NodeExecutionStatus;
-  isActive: boolean;
-  fromCache: boolean;
-  hasErrors: boolean;
-  level: number | undefined;
-  normalizedWidth: number;
-  // All executions for the log dialog
-  executions: ExecutionTraceEntry[];
+  onViewLog: (node: NodeSummary) => void;
 }
 
 const getStatusColor = (status: NodeExecutionStatus | undefined): string => {
@@ -81,7 +59,16 @@ const NodeEntry = React.memo(({
           {node.level !== undefined && (
             <span className="entry-level">L{node.level}</span>
           )}
-          {node.executionCount > 1 && (
+        </div>
+        <div className="entry-timing">
+          <div className="entry-badges">
+            {node.fromCache && <span className="entry-badge cached">Cached</span>}
+            {/* Error badge removed as requested */}
+          </div>
+          {node.lastDurationMs !== undefined && (
+            <span className="entry-duration">{formatDuration(node.lastDurationMs)}</span>
+          )}
+          {node.executionCount > 1 ? (
             <span
               style={{
                 backgroundColor: 'rgba(74, 158, 255, 0.2)',
@@ -94,36 +81,17 @@ const NodeEntry = React.memo(({
             >
               ×{node.executionCount}
             </span>
-          )}
-        </div>
-        <div className="entry-timing">
-          <div className="entry-badges">
-            {node.fromCache && <span className="entry-badge cached">Cached</span>}
-            {node.hasErrors && <span className="entry-badge error">Error</span>}
-          </div>
-          {node.lastDurationMs !== undefined && (
-            <span className="entry-duration">{formatDuration(node.lastDurationMs)}</span>
-          )}
-          {node.executionCount > 1 && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onViewLog(node);
-              }}
+          ) : (
+            <span
               style={{
-                marginLeft: '8px',
-                background: 'rgba(139, 148, 158, 0.2)',
-                border: '1px solid rgba(139, 148, 158, 0.3)',
-                borderRadius: '4px',
-                padding: '2px 6px',
-                color: 'var(--text-secondary, #c9d1d9)',
-                cursor: 'pointer',
+                opacity: 0.5,
                 fontSize: '10px',
+                marginLeft: '6px',
+                color: 'var(--text-muted)',
               }}
             >
-              View Log
-            </button>
+              ×1
+            </span>
           )}
         </div>
       </div>
@@ -140,292 +108,68 @@ const NodeEntry = React.memo(({
 
       {node.lastLogs.length > 0 && (
         <div className="entry-logs">
-          {node.lastLogs.map((log, logIndex) => (
-            <div key={logIndex} className="entry-log">{log}</div>
-          ))}
-        </div>
-      )}
+          {(() => {
+            const processedLogs = node.lastLogs.map(log => {
+              if (log.includes('[ERROR]') || log.includes('ERROR:')) {
+                let message = log;
+                if (message.includes('[STACK TRACE]')) {
+                  const parts = message.split('[STACK TRACE]');
+                  message = parts[0];
+                }
+                message = message
+                  .replace(/[\n\r]+/g, ' ')
+                  .replace(/={10,}/g, '')
+                  .replace('[ERROR]', '')
+                  .replace('ERROR:', '')
+                  .trim();
 
-      {Object.keys(node.lastOutputs).length > 0 && (
-        <div className="entry-outputs">
-          {Object.entries(node.lastOutputs).map(([key, value]) => (
-            <div key={key} className="entry-output">
-              <span className="output-key">{key}:</span>
-              <span className="output-value">{JSON.stringify(value)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+                return { message, isError: true, original: log };
+              }
+              return { message: log, isError: false, original: log };
+            });
 
-      {node.hasErrors && node.lastError && (
-        <div style={{
-          marginTop: '8px',
-          padding: '10px',
-          background: 'rgba(248, 81, 73, 0.1)',
-          border: '1px solid rgba(248, 81, 73, 0.3)',
-          borderRadius: '6px',
-        }}>
-          <div style={{ color: 'var(--accent-red, #f85149)', fontWeight: 500, marginBottom: '4px', fontSize: '12px' }}>Error</div>
-          <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary, #c9d1d9)', wordBreak: 'break-word' }}>
-            {node.lastError}
-          </div>
-          {node.lastErrorDetails && (
-            <details style={{ marginTop: '8px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted, #8b949e)', userSelect: 'none' }}>
-                Stack Trace
-              </summary>
-              <pre style={{
-                marginTop: '4px',
-                padding: '8px',
-                background: 'rgba(0,0,0,0.3)',
-                borderRadius: '4px',
-                fontSize: '10px',
-                overflow: 'auto',
-                maxHeight: '200px',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-                color: 'var(--text-secondary, #c9d1d9)',
-              }}>
-                {node.lastErrorDetails}
-              </pre>
-            </details>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-// Log dialog component - shows full execution history
-const LogDialog = React.memo(({
-  node,
-  onClose
-}: {
-  node: NodeSummary | null;
-  onClose: () => void;
-}) => {
-  if (!node) return null;
+            const seen = new Set();
+            const uniqueLogs = processedLogs.filter(item => {
+              if (!item.message) return false;
+              if (seen.has(item.message)) return false;
+              seen.add(item.message);
+              return true;
+            });
 
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'var(--bg-primary, #1a1f2e)',
-          borderRadius: '8px',
-          padding: '16px',
-          width: '90%',
-          maxWidth: '700px',
-          maxHeight: '80vh',
-          overflow: 'auto',
-          border: '1px solid var(--border-color, #30363d)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div>
-            <h3 style={{ margin: 0, color: 'var(--text-primary, #fff)' }}>
-              {node.nodeId}
-            </h3>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted, #8b949e)', marginTop: '4px' }}>
-              {node.executionCount} executions • Total: {formatDuration(node.totalDurationMs)} • Avg: {formatDuration(node.avgDurationMs)}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted, #8b949e)',
-              cursor: 'pointer',
-              fontSize: '24px',
-              lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {node.executions.map((exec, idx) => (
-            <div
-              key={idx}
-              style={{
-                padding: '12px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <span style={{ color: 'var(--text-secondary, #c9d1d9)', fontWeight: 500 }}>
-                  Run #{idx + 1}
-                </span>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {exec.from_cache && (
-                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950' }}>
-                      Cached
-                    </span>
-                  )}
-                  <span style={{ color: 'var(--accent-blue, #4a9eff)', fontFamily: 'monospace' }}>
-                    {exec.duration_ms !== undefined ? formatDuration(exec.duration_ms) : '-'}
+            return uniqueLogs.map((item, index) => (
+              <div key={index} className="entry-log">
+                {item.isError ? (
+                  <span style={{ color: 'var(--accent-red)', fontWeight: 500 }}>
+                    {item.message}
                   </span>
-                </div>
+                ) : (
+                  item.message
+                )}
               </div>
-
-              {exec.logs.length > 0 && (
-                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Logs:</div>
-                  {exec.logs.map((log, logIdx) => (
-                    <div key={logIdx} style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)' }}>{log}</div>
-                  ))}
-                </div>
-              )}
-
-              {exec.error && (
-                <div style={{ marginTop: '8px', padding: '10px', background: 'rgba(248, 81, 73, 0.1)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--accent-red, #f85149)', fontWeight: 500, marginBottom: '4px' }}>Error:</div>
-                  <div style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
-                    {exec.error}
-                  </div>
-                  {exec.error_details && (
-                    <details style={{ marginTop: '8px' }}>
-                      <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', userSelect: 'none' }}>
-                        Stack Trace
-                      </summary>
-                      <pre style={{
-                        marginTop: '4px',
-                        padding: '8px',
-                        background: 'rgba(0,0,0,0.3)',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        overflow: 'auto',
-                        maxHeight: '300px',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-all',
-                        color: 'var(--text-secondary)',
-                      }}>
-                        {exec.error_details}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-              )}
-
-              {Object.keys(exec.outputs).length > 0 && (
-                <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Outputs:</div>
-                  {Object.entries(exec.outputs).map(([key, value]) => (
-                    <div key={key} style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
-                      <span style={{ color: 'var(--accent-blue)' }}>{key}:</span>
-                      <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                        {JSON.stringify(value)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+            ));
+          })()}
         </div>
-      </div>
+      )}
     </div>
   );
 });
 
 const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
-  trace,
+  nodeSummaries,
   stats,
   levels,
   isRunning,
   currentNodeId,
   nodeStatuses,
   onHighlightNodes,
+  onViewLog
 }) => {
-  const [logDialogNode, setLogDialogNode] = useState<NodeSummary | null>(null);
-
-  // PERF: Aggregate trace entries by node - one entry per unique node
-  const nodeSummaries = useMemo(() => {
-    const nodeMap = new Map<string, NodeSummary>();
-    let maxDuration = 1;
-
-    // First pass: aggregate data
-    for (const entry of trace) {
-      const duration = entry.duration_ms ?? 0;
-      if (duration > maxDuration) maxDuration = duration;
-
-      const existing = nodeMap.get(entry.node_id);
-      if (existing) {
-        existing.executionCount++;
-        existing.lastDurationMs = entry.duration_ms;
-        existing.totalDurationMs += duration;
-        existing.lastOutputs = entry.outputs;
-        existing.lastLogs = entry.logs;
-        existing.lastError = entry.error ?? existing.lastError;
-        existing.lastErrorDetails = entry.error_details ?? existing.lastErrorDetails;
-        existing.fromCache = entry.from_cache ?? false;
-        existing.hasErrors = existing.hasErrors || !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error'));
-        existing.executions.push(entry);
-      } else {
-        // Calculate fallback display name if backend doesn't provide one
-        const rawName = entry.type.split('.').pop()?.replace(/_/g, ' ') ?? entry.type;
-        const fallbackName = rawName.split(' ').map(word =>
-          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-        ).join(' ');
-
-        nodeMap.set(entry.node_id, {
-          nodeId: entry.node_id,
-          type: entry.type,
-          displayName: entry.display_name ?? fallbackName,
-          executionCount: 1,
-          lastDurationMs: entry.duration_ms,
-          totalDurationMs: duration,
-          avgDurationMs: duration,
-          lastOutputs: entry.outputs,
-          lastLogs: entry.logs,
-          lastError: entry.error,
-          lastErrorDetails: entry.error_details,
-          status: nodeStatuses.get(entry.node_id) ?? "completed",
-          isActive: entry.node_id === currentNodeId,
-          fromCache: entry.from_cache ?? false,
-          hasErrors: !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error')),
-          level: entry.level,
-          normalizedWidth: 0,
-          executions: [entry],
-        });
-      }
-    }
-
-    // Second pass: normalize widths and calculate averages
-    for (const summary of nodeMap.values()) {
-      summary.status = nodeStatuses.get(summary.nodeId) ?? "completed";
-      summary.isActive = summary.nodeId === currentNodeId;
-      summary.avgDurationMs = summary.totalDurationMs / summary.executionCount;
-      summary.normalizedWidth = Math.max(0.1, (summary.lastDurationMs ?? 0) / maxDuration);
-    }
-
-    return Array.from(nodeMap.values());
-  }, [trace, currentNodeId, nodeStatuses]);
-
-  const cacheRate = useMemo(() => {
+  const cacheRate = React.useMemo(() => {
     if (!stats || stats.total_nodes === 0) return null;
     return (stats.cached_nodes / stats.total_nodes) * 100;
   }, [stats]);
 
-  const levelStats = useMemo(() => {
+  const levelStats = React.useMemo(() => {
     return levels.map((level, idx) => ({
       level: idx,
       nodeCount: level.length,
@@ -433,7 +177,7 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
     }));
   }, [levels]);
 
-  const hasData = trace.length > 0 || stats !== null;
+  const hasData = nodeSummaries.length > 0 || stats !== null;
 
   const handleNodeHover = useCallback((nodeId: string | null) => {
     if (onHighlightNodes) {
@@ -447,14 +191,6 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
     }
   }, [onHighlightNodes]);
 
-  const handleViewLog = useCallback((node: NodeSummary) => {
-    setLogDialogNode(node);
-  }, []);
-
-  const handleCloseLog = useCallback(() => {
-    setLogDialogNode(null);
-  }, []);
-
   return (
     <div className="execution-timeline">
       <div className="timeline-header">
@@ -465,9 +201,9 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
             Running
           </div>
         )}
-        {trace.length > 0 && (
+        {nodeSummaries.length > 0 && (
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
-            {nodeSummaries.length} nodes • {trace.length} total runs
+            {nodeSummaries.length} nodes
           </span>
         )}
       </div>
@@ -557,18 +293,15 @@ const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({
             key={node.nodeId}
             node={node}
             onHover={handleNodeHover}
-            onViewLog={handleViewLog}
+            onViewLog={onViewLog}
           />
         ))}
       </div>
 
       {stats && stats.error_nodes > 0 && (
-        <div className="timeline-errors">
-          <span className="error-count">{stats.error_nodes} error(s)</span>
-        </div>
+        // Error summary is now handled in LogPanel
+        null
       )}
-
-      <LogDialog node={logDialogNode} onClose={handleCloseLog} />
     </div>
   );
 };

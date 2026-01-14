@@ -103,6 +103,26 @@ export interface ExecutionStats {
   levels_executed: number;
 }
 
+export interface NodeSummary {
+  nodeId: string;
+  type: string;
+  displayName: string;  // Exact display name from node definition
+  executionCount: number;
+  lastDurationMs: number | undefined;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastOutputs: Record<string, unknown>;
+  lastLogs: string[];
+  lastError?: string;
+  lastErrorDetails?: string;
+  status: NodeExecutionStatus;
+  isActive: boolean;
+  fromCache: boolean;
+  hasErrors: boolean;
+  level: number | undefined;
+  normalizedWidth: number;
+}
+
 export interface ExecutionPlanNode {
   node_id: string;
   node_type: string;

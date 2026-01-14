@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { ExecutionStats, ExecutionTraceEntry, NodeExecutionStatus } from "../types";
+import React, { useState, useMemo, useCallback } from "react";
+import { ExecutionStats, ExecutionTraceEntry, NodeExecutionStatus, NodeSummary } from "../types";
 import ExecutionTimeline from "./ExecutionTimeline";
 import PerformanceDashboard from "./PerformanceDashboard";
 
@@ -19,9 +19,15 @@ type LogPanelProps = {
 
 type TabType = "timeline" | "performance";
 
+const formatDuration = (ms: number): string => {
+  if (ms < 1) return "<1ms";
+  if (ms < 1000) return `${ms.toFixed(1)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+};
+
 const LogPanel = ({
   trace,
-  outputs: _outputs, // Still accepted for API compatibility but not displayed
+  outputs: _outputs,
   error,
   errorCode,
   stats = null,
@@ -33,6 +39,67 @@ const LogPanel = ({
   onHighlightNodes,
 }: LogPanelProps) => {
   const [activeTab, setActiveTab] = useState<TabType>("timeline");
+
+  // Calculate Node Summaries (Lifted from ExecutionTimeline)
+  const nodeSummaries = useMemo(() => {
+    const nodeMap = new Map<string, NodeSummary>();
+    let maxDuration = 1;
+
+    // First pass: aggregate data
+    for (const entry of trace) {
+      const duration = entry.duration_ms ?? 0;
+      if (duration > maxDuration) maxDuration = duration;
+
+      const existing = nodeMap.get(entry.node_id);
+      if (existing) {
+        existing.executionCount++;
+        existing.lastDurationMs = entry.duration_ms;
+        existing.totalDurationMs += duration;
+        existing.lastOutputs = entry.outputs;
+        existing.lastLogs = entry.logs;
+        existing.lastError = entry.error ?? existing.lastError;
+        existing.lastErrorDetails = entry.error_details ?? existing.lastErrorDetails;
+        existing.fromCache = entry.from_cache ?? false;
+        existing.hasErrors = existing.hasErrors || !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error'));
+      } else {
+        // Calculate fallback display name if backend doesn't provide one
+        const rawName = entry.type.split('.').pop()?.replace(/_/g, ' ') ?? entry.type;
+        const fallbackName = rawName.split(' ').map(word =>
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ');
+
+        nodeMap.set(entry.node_id, {
+          nodeId: entry.node_id,
+          type: entry.type,
+          displayName: entry.display_name ?? fallbackName,
+          executionCount: 1,
+          lastDurationMs: entry.duration_ms,
+          totalDurationMs: duration,
+          avgDurationMs: duration,
+          lastOutputs: entry.outputs,
+          lastLogs: entry.logs,
+          lastError: entry.error,
+          lastErrorDetails: entry.error_details,
+          status: nodeStatuses.get(entry.node_id) ?? "completed",
+          isActive: entry.node_id === currentNodeId,
+          fromCache: entry.from_cache ?? false,
+          hasErrors: !!entry.error || entry.logs.some(l => l.toLowerCase().includes('error')),
+          level: entry.level,
+          normalizedWidth: 0,
+        });
+      }
+    }
+
+    // Second pass: normalize widths and calculate averages
+    for (const summary of nodeMap.values()) {
+      summary.status = nodeStatuses.get(summary.nodeId) ?? "completed";
+      summary.isActive = summary.nodeId === currentNodeId;
+      summary.avgDurationMs = summary.totalDurationMs / summary.executionCount;
+      summary.normalizedWidth = Math.max(0.1, (summary.lastDurationMs ?? 0) / maxDuration);
+    }
+
+    return Array.from(nodeMap.values());
+  }, [trace, currentNodeId, nodeStatuses]); // Re-calculate when trace or status changes
 
   const hasTrace = trace.length > 0;
 
@@ -88,13 +155,14 @@ const LogPanel = ({
       <div className="log-content">
         {activeTab === "timeline" && (
           <ExecutionTimeline
-            trace={trace}
+            nodeSummaries={nodeSummaries}
             stats={stats}
             levels={levels}
             isRunning={isRunning}
             currentNodeId={currentNodeId}
             nodeStatuses={nodeStatuses}
             onHighlightNodes={onHighlightNodes}
+            onViewLog={() => { }} // No-op as requested
           />
         )}
 
@@ -108,18 +176,7 @@ const LogPanel = ({
           />
         )}
 
-        {error && (
-          <div className="log-section">
-            <div className="log-section-header">
-              <h4>Error</h4>
-            </div>
-            <div className="trace-item" style={{ borderColor: "rgba(248, 81, 73, 0.4)" }}>
-              <div className="trace-log" style={{ color: "#f85149", borderColor: "#f85149" }}>
-                {errorCode ? `[${errorCode}] ` : ""}{error}
-              </div>
-            </div>
-          </div>
-        )}
+
       </div>
     </div>
   );

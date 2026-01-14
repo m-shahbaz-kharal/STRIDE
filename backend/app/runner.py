@@ -829,6 +829,14 @@ class GraphExecutor:
         allow_cache: bool = True,
     ) -> None:
         """Persist a node result back into executor state."""
+        # In case of error, append details to logs for better visibility
+        if result.status == NodeStatus.ERROR and result.error:
+            separator = "=" * 40
+            log_entry = f"\n{separator}\n[ERROR] {result.error}"
+            if result.error_details:
+                log_entry += f"\n\n[STACK TRACE]\n{result.error_details}\n{separator}"
+            result.logs.append(log_entry)
+
         if result.status == NodeStatus.COMPLETED:
             if not cached and allow_cache:
                 self._cache_outputs(node_id, inputs, result.outputs)

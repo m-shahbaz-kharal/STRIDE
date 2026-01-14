@@ -88,12 +88,33 @@ const LogsPopup = ({ nodeId, nodeName, logs, onClose }: LogsPopupProps) => {
           {logs.length === 0 ? (
             <div className="logs-empty">No logs available for this node.</div>
           ) : (
-            logs.map((log, i) => (
-              <div key={`${nodeId}-${i}`} className="log-line">
-                <span className="log-line-number">{i + 1}</span>
-                <span className="log-line-content">{log}</span>
-              </div>
-            ))
+            logs.map((log, i) => {
+              const isError = log.includes("[ERROR]") || log.includes("[STACK TRACE]") || log.toLowerCase().includes("error:");
+              return (
+                <div
+                  key={`${nodeId}-${i}`}
+                  className="log-line"
+                  style={{ alignItems: 'flex-start' }}
+                >
+                  <span
+                    className="log-line-number"
+                    style={{ marginTop: '3px' }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span
+                    className="log-line-content"
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      color: isError ? 'var(--accent-red, #f85149)' : 'inherit',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    {log}
+                  </span>
+                </div>
+              );
+            })
           )}
         </div>
         <div className="value-popup-resize" onMouseDown={handleResizeStart}>
