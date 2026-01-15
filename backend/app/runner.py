@@ -241,9 +241,7 @@ class GraphExecutor:
         return bool(getattr(node, "cache_enabled", False))
 
     def _cache_params(self, node_id: str) -> Dict[str, Any]:
-        node = self.nodes[node_id]
-        params = node.params or {}
-        return {**params, "__cache_node_id": node_id}
+        return {"__cache_node_id": node_id}
 
     @staticmethod
     def _normalize_type(raw_type: Any) -> Optional[TypeDescriptor]:
@@ -778,18 +776,22 @@ class GraphExecutor:
         ]
 
     def _gather_inputs(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Gather inputs for a node from computed values."""
+        """Gather inputs for a node from computed values, user values, or defaults."""
         node = self.nodes[node_id]
         if not node.input_ports:
             return {}
         inputs: Dict[str, Any] = {}
+        # Get input specs to access default values
         port_specs = {p.name: p for p in (node.spec.inputs if getattr(node, "spec", None) else [])}
         input_values = node.input_values or {}
+        
         for port in node.input_ports:
             port_type = self._normalize_type(node.input_port_types.get(port))
             if isinstance(port_type, TypeDescriptor) and port_type.kind == "control":
                 # Control ports are sequencing only; no data value needed.
                 continue
+            
+            # 1. Check for connected link
             link = self.input_map.get(node_id, {}).get(port)
             if link:
                 if link.from_node not in self._computed_values:
@@ -797,20 +799,18 @@ class GraphExecutor:
                 value = self._computed_values[link.from_node].get(link.from_port)
                 inputs[port] = value
                 continue
+            
+            # 2. Check for user-provided value (e.g. from UI input box)
             if port in input_values:
                 inputs[port] = input_values[port]
                 continue
-            if port in node.params:
-                inputs[port] = node.params.get(port)
-                continue
-            port_spec = port_specs.get(port)
-            if port_spec and port_spec.default is not None:
-                inputs[port] = port_spec.default
-                continue
-            if port_spec and not port_spec.required:
-                inputs[port] = None
-                continue
-            raise GraphExecutionError(f"Node '{node_id}' is missing link for port '{port}'", code="missing_link")
+
+            # 3. Use Default value from Spec
+            spec = port_specs.get(port)
+            if spec and spec.default is not None:
+                inputs[port] = spec.default
+        
+        return inputs
         return inputs
 
     def _prepare_inputs(self, node_id: str) -> Dict[str, Any]:

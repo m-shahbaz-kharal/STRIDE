@@ -8,11 +8,9 @@ All spec definitions are now consolidated in liguard-core.
 from liguard_core.node_spec import (
     NodeSpec,
     PortSpec,
-    ParamSpec,
 )
 
 __all__ = [
     "NodeSpec",
     "PortSpec",
-    "ParamSpec",
 ]

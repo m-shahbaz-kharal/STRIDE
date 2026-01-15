@@ -33,32 +33,6 @@ class PortSpec:
 
 
 @dataclass
-class ParamSpec:
-    """Specification for a node parameter (shown in UI)."""
-    
-    name: str
-    type: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    default: Any = None
-    options: Optional[List[Any]] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        data = {
-            "type": self.type,
-        }
-        if self.label:
-            data["label"] = self.label
-        if self.description:
-            data["description"] = self.description
-        if self.default is not None:
-            data["default"] = self.default
-        if self.options:
-            data["options"] = self.options
-        return data
-
-
-@dataclass
 class NodeSpec:
     """Complete specification for a node type."""
     
@@ -72,7 +46,6 @@ class NodeSpec:
     tags: List[str] = field(default_factory=list)
     inputs: List[PortSpec] = field(default_factory=list)
     outputs: List[PortSpec] = field(default_factory=list)
-    params: Dict[str, ParamSpec] = field(default_factory=dict)
     stability: str = "stable"
     cache_policy: str = "auto"
     
@@ -93,8 +66,6 @@ class NodeSpec:
             "tags": self.tags,
             "inputs": [p.to_dict() for p in self.inputs],
             "outputs": [p.to_dict() for p in self.outputs],
-            "params_schema": {k: v.to_dict() for k, v in self.params.items()},
-            "params_defaults": {k: v.default for k, v in self.params.items() if v.default is not None},
             "stability": self.stability,
             "cache_policy": self.cache_policy,
             "plugin_name": self.plugin_name,

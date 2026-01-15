@@ -56,7 +56,7 @@ CAST_TO_INT_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_int()),
     ],
-    params={},
+
 )
 
 
@@ -84,7 +84,7 @@ CAST_TO_FLOAT_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_float()),
     ],
-    params={},
+
 )
 
 
@@ -112,7 +112,7 @@ CAST_TO_STRING_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_string()),
     ],
-    params={},
+
 )
 
 
@@ -140,7 +140,7 @@ CAST_TO_BOOLEAN_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_boolean()),
     ],
-    params={},
+
 )
 
 

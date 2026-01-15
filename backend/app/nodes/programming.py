@@ -38,7 +38,7 @@ VAR_DECLARE_SPEC = NodeSpec(
 @register_node(VAR_DECLARE_SPEC)
 class VariableDeclareNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(inputs.get("name") or self.params.get("name", "var"))
+        name = str(inputs.get("name", "var"))
         value = inputs.get("value")
         ctx.set_var(name, value)
         ctx.log(f"Declared variable '{name}' = {value}")
@@ -68,7 +68,7 @@ VAR_SET_SPEC = NodeSpec(
 @register_node(VAR_SET_SPEC)
 class VariableSetNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(inputs.get("name") or self.params.get("name", "var"))
+        name = str(inputs.get("name", "var"))
         value = inputs.get("value")
         ctx.set_var(name, value)
         ctx.log(f"Set variable '{name}' = {value}")
@@ -98,8 +98,8 @@ VAR_GET_SPEC = NodeSpec(
 @register_node(VAR_GET_SPEC)
 class VariableGetNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        name = str(inputs.get("name") or self.params.get("name", "var"))
-        default = inputs.get("default") if "default" in inputs else self.params.get("default", "")
+        name = str(inputs.get("name", "var"))
+        default = inputs.get("default", "")
         value = ctx.get_var(name, default)
         ctx.log(f"Get variable '{name}' -> {value}")
         return {"control_out": None, "value": value}
@@ -137,7 +137,7 @@ class CompareNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         a = inputs.get("a")
         b = inputs.get("b")
-        op = inputs.get("op") or self.params.get("op", "==")
+        op = inputs.get("op", "==")
         result = False
         if op == "==":
             result = a == b

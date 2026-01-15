@@ -149,10 +149,9 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const inputPortTypes = data.input_port_types || data.metadata?.input_port_types || {};
   const outputPortTypes = data.output_port_types || data.metadata?.output_port_types || {};
   const isCoreControlNode = data.nodeType.startsWith("core.control");
-  const paramEntries = useMemo(() => Object.entries(data.metadata?.params_schema ?? {}), [data.metadata?.params_schema]);
   const extraInputRows = data.nodeType === "core.container.make_array" ? 1 : 0;
   const maxPorts = Math.max(data.input_ports.length + extraInputRows, data.output_ports.length);
-  const MIN_HEIGHT = computeNodeDimensions(maxPorts, { paramCount: paramEntries.length }).height;
+  const MIN_HEIGHT = computeNodeDimensions(maxPorts, { paramCount: 0 }).height;
   const inputSpecMap = useMemo(() => {
     const specs = data.metadata?.inputs ?? [];
     return new Map(specs.map((spec) => [spec.name, spec]));
@@ -236,17 +235,15 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     const estimateTextWidth = (value: string) => value.length * 7;
     const inputLabels = data.input_ports ?? [];
     const outputLabels = data.output_ports ?? [];
-    const paramLabels = paramEntries.map(([_, field]) => field.label ?? "");
+
     const maxInput = Math.max(0, ...inputLabels.map((label) => estimateTextWidth(label)));
     const maxOutput = Math.max(0, ...outputLabels.map((label) => estimateTextWidth(label)));
-    const maxParam = Math.max(0, ...paramLabels.map((label) => estimateTextWidth(label)));
     const headerWidth = estimateTextWidth(data.displayName ?? "") + 120;
     const portRowWidth = maxInput + maxOutput + 84 + 120;
-    const paramRowWidth = maxParam > 0 ? maxParam + 84 + 24 : 0;
-    const width = Math.max(MIN_NODE_WIDTH, headerWidth, portRowWidth, paramRowWidth);
-    const { height } = computeNodeDimensions(maxPorts, { paramCount: paramEntries.length, minWidth: width });
+    const width = Math.max(MIN_NODE_WIDTH, headerWidth, portRowWidth);
+    const { height } = computeNodeDimensions(maxPorts, { paramCount: 0, minWidth: width });
     return { width, height };
-  }, [data.displayName, data.input_ports, data.output_ports, maxPorts, paramEntries]);
+  }, [data.displayName, data.input_ports, data.output_ports, maxPorts]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -469,71 +466,6 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         </div>
       </div>
 
-      {paramEntries.length > 0 && (
-        <div className="node-params">
-          {paramEntries.map(([param, field]) => {
-            const value =
-              data.params[param] ??
-              field.default ??
-              data.metadata?.params_defaults?.[param] ??
-              "";
-            const label = field.label ?? param;
-            if (field.type === "select" && field.options) {
-              return (
-                <label key={param} className="node-param-field">
-                  <span className="node-param-label">{label}</span>
-                  <select
-                    className="node-param-select nodrag"
-                    value={`${value}`}
-                    onChange={(event) => data.onParamChange?.(id, param, event.target.value)}
-                  >
-                    {field.options.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            }
-            if (field.type === "boolean") {
-              return (
-                <label key={param} className="node-param-field node-param-boolean">
-                  <span className="node-param-label">{label}</span>
-                  <input
-                    type="checkbox"
-                    className="node-input-checkbox nodrag"
-                    checked={Boolean(value)}
-                    onChange={(event) => data.onParamChange?.(id, param, event.target.checked)}
-                  />
-                </label>
-              );
-            }
-            const inputType = field.type === "number" || field.type === "float" || field.type === "int" ? "number" : "text";
-            return (
-              <label key={param} className="node-param-field">
-                <span className="node-param-label">{label}</span>
-                <input
-                  type={inputType}
-                  step={field.type === "int" ? 1 : "any"}
-                  className="node-input-field nodrag"
-                  value={`${value}`}
-                  onChange={(event) => {
-                    const raw = event.target.value;
-                    if (inputType === "number") {
-                      const numeric = raw === "" ? null : field.type === "int" ? parseInt(raw, 10) : Number(raw);
-                      data.onParamChange?.(id, param, Number.isNaN(numeric) ? null : numeric);
-                      return;
-                    }
-                    data.onParamChange?.(id, param, raw);
-                  }}
-                />
-              </label>
-            );
-          })}
-        </div>
-      )}
-
       <div className="node-ports">
         <div className="node-port-column">
           {data.input_ports.map((port, index) => {
@@ -601,55 +533,72 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 )}
                 {!isControl && (
                   <div className="node-port-input-control">
-                    {inputUi?.control === "select" && inputUi.options ? (
-                      <select
-                        className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
-                        value={`${displayValue ?? ""}`}
-                        disabled={isConnected}
-                        onChange={(event) => data.onInputValueChange?.(id, port, event.target.value)}
-                      >
-                        {isEmptyConnected && (
-                          <option value="">No cached value</option>
-                        )}
-                        {inputUi.options.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : portKind === "boolean" ? (
-                      <input
-                        type="checkbox"
-                        className={`node-input-checkbox nodrag${isEmptyConnected ? " empty" : ""}`}
-                        checked={isConnected ? (hasCachedValue ? Boolean(displayValue) : false) : Boolean(displayValue)}
-                        disabled={isConnected}
-                        onChange={(event) =>
-                          data.onInputValueChange?.(id, port, event.target.checked)
-                        }
-                      />
-                    ) : (
-                      <input
-                        type={portKind === "int" || portKind === "float" || portKind === "number" ? "number" : "text"}
-                        step={portKind === "int" ? 1 : "any"}
-                        className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
-                        value={`${displayValue ?? ""}`}
-                        placeholder={placeholderValue}
-                        disabled={isConnected}
-                        onChange={(event) => {
-                          const raw = event.target.value;
-                          if (portKind === "int" || portKind === "float" || portKind === "number") {
-                            const numeric = raw === ""
-                              ? null
-                              : portKind === "int"
-                                ? parseInt(raw, 10)
-                                : Number(raw);
-                            data.onInputValueChange?.(id, port, Number.isNaN(numeric) ? null : numeric);
-                            return;
-                          }
-                          data.onInputValueChange?.(id, port, raw);
-                        }}
-                      />
-                    )}
+                    {(() => {
+                      const isSelect = inputUi?.control === "select";
+                      const options = inputUi?.options || (typeof portType === "object" ? portType.metadata?.options : undefined);
+
+                      if (isSelect && options && Array.isArray(options)) {
+                        return (
+                          <select
+                            className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
+                            value={`${displayValue ?? ""}`}
+                            disabled={isConnected}
+                            onChange={(event) => data.onInputValueChange?.(id, port, event.target.value)}
+                          >
+                            {isEmptyConnected && (
+                              <option value="">No cached value</option>
+                            )}
+                            {(options as any[]).map((option: any) => {
+                              const value = typeof option === "object" && option !== null ? option.value : option;
+                              const label = typeof option === "object" && option !== null ? (option.label || option.value) : option;
+                              return (
+                                <option key={String(value)} value={String(value)}>
+                                  {label}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        );
+                      }
+
+                      if (portKind === "boolean") {
+                        return (
+                          <input
+                            type="checkbox"
+                            className={`node-input-checkbox nodrag${isEmptyConnected ? " empty" : ""}`}
+                            checked={isConnected ? (hasCachedValue ? Boolean(displayValue) : false) : Boolean(displayValue)}
+                            disabled={isConnected}
+                            onChange={(event) =>
+                              data.onInputValueChange?.(id, port, event.target.checked)
+                            }
+                          />
+                        );
+                      }
+
+                      return (
+                        <input
+                          type={portKind === "int" || portKind === "float" || portKind === "number" ? "number" : "text"}
+                          step={portKind === "int" ? 1 : "any"}
+                          className={`node-input-field nodrag${isEmptyConnected ? " empty" : ""}`}
+                          value={`${displayValue ?? ""}`}
+                          placeholder={placeholderValue}
+                          disabled={isConnected}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            if (portKind === "int" || portKind === "float" || portKind === "number") {
+                              const numeric = raw === ""
+                                ? null
+                                : portKind === "int"
+                                  ? parseInt(raw, 10)
+                                  : Number(raw);
+                              data.onInputValueChange?.(id, port, Number.isNaN(numeric) ? null : numeric);
+                              return;
+                            }
+                            data.onInputValueChange?.(id, port, raw);
+                          }}
+                        />
+                      );
+                    })()}
                     {isEmptyConnected && (
                       <span className="node-input-empty-label">no cache</span>
                     )}

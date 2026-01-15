@@ -289,8 +289,9 @@ def t_boolean() -> TypeDescriptor:
     return TypeDescriptor(kind="boolean")
 
 
-def t_list(element_type: TypeDescriptor = None) -> TypeDescriptor:
-    return TypeDescriptor(kind="list", element_type=element_type or t_any())
+def t_list(element_type: TypeDescriptor) -> TypeDescriptor:
+    """Create a list type descriptor."""
+    return TypeDescriptor(kind="list", element_type=element_type)
 
 
 def t_map(key_type: TypeDescriptor = None, value_type: TypeDescriptor = None) -> TypeDescriptor:

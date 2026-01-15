@@ -4,24 +4,19 @@ from typing import Any, Dict
 
 from .base import ExecutionContext, NodeBase
 from . import register_node
-from ..node_spec import NodeSpec, ParamSpec, PortSpec
+from ..node_spec import NodeSpec, PortSpec
 from ..typesystem import t_boolean, t_float, t_int, t_string
 
 
 class BaseLiteralNode(NodeBase):
     """Share logic between literal nodes that emit a scalar value."""
 
-    def __init__(self, config: Dict[str, Any], spec: NodeSpec) -> None:
-        super().__init__(config, spec=spec)
-        self._value = config.get(
-            "params", {}
-        ).get("value", spec.params.get("value").default if spec and spec.params.get("value") else None)
-
     def forward(
         self, inputs: Dict[str, Any], ctx: ExecutionContext
     ) -> Dict[str, Any]:
-        ctx.log(f"{self.id} emits constant {self._value}")
-        return {"value": self._value}
+        val = inputs.get("value")
+        ctx.log(f"{self.id} emits constant {val}")
+        return {"value": val}
 
 
 LITERAL_INT_SPEC = NodeSpec(
@@ -32,17 +27,11 @@ LITERAL_INT_SPEC = NodeSpec(
     summary="Emit a fixed integer.",
     description="Always produces the configured integer.",
     icon="math",
-    inputs=[],
+    inputs=[
+        PortSpec(name="value", type=t_int(), required=False, default=0, ui={"control": "number"}),
+    ],
     outputs=[PortSpec(name="value", type=t_int())],
-    params={
-        "value": ParamSpec(
-            name="value",
-            type="int",
-            label="Value",
-            description="Integer payload emitted every run.",
-            default=0,
-        )
-    },
+
 )
 
 
@@ -59,17 +48,11 @@ LITERAL_FLOAT_SPEC = NodeSpec(
     summary="Emit a fixed float.",
     description="Always produces the configured float.",
     icon="math",
-    inputs=[],
+    inputs=[
+        PortSpec(name="value", type=t_float(), required=False, default=0.0, ui={"control": "number"}),
+    ],
     outputs=[PortSpec(name="value", type=t_float())],
-    params={
-        "value": ParamSpec(
-            name="value",
-            type="float",
-            label="Value",
-            description="Float payload emitted every run.",
-            default=0.0,
-        )
-    },
+
 )
 
 
@@ -86,17 +69,11 @@ LITERAL_STRING_SPEC = NodeSpec(
     summary="Emit a fixed string.",
     description="Always produces the configured string.",
     icon="text",
-    inputs=[],
+    inputs=[
+        PortSpec(name="value", type=t_string(), required=False, default="", ui={"control": "text"}),
+    ],
     outputs=[PortSpec(name="value", type=t_string())],
-    params={
-        "value": ParamSpec(
-            name="value",
-            type="string",
-            label="Value",
-            description="String payload emitted every run.",
-            default="",
-        )
-    },
+
 )
 
 
@@ -113,17 +90,11 @@ LITERAL_BOOL_SPEC = NodeSpec(
     summary="Emit a fixed boolean.",
     description="Always produces the configured boolean.",
     icon="check",
-    inputs=[],
+    inputs=[
+        PortSpec(name="value", type=t_boolean(), required=False, default=False, ui={"control": "checkbox"}),
+    ],
     outputs=[PortSpec(name="value", type=t_boolean())],
-    params={
-        "value": ParamSpec(
-            name="value",
-            type="boolean",
-            label="Value",
-            description="Boolean payload emitted every run.",
-            default=False,
-        )
-    },
+
 )
 
 

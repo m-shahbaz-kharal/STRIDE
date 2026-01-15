@@ -312,9 +312,7 @@ FL511_RESOLVE_SPEC = NodeSpec(
 @register_node(FL511_RESOLVE_SPEC)
 class Fl511ResolveNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        camera_id = inputs.get("camera")
-        if camera_id is None:
-            camera_id = self.params.get("camera", 2130)
+        camera_id = inputs.get("camera", 2130)
         camera_id = int(camera_id)
         ctx.log(f"Resolving FL511 stream for camera {camera_id}")
         hls_url = _resolve_fl511_hls_url(camera_id)
@@ -362,15 +360,14 @@ class Fl511StartNode(NodeBase):
         hls_url = inputs.get("url")
         camera_id = inputs.get("camera")
         if not hls_url:
-            if camera_id is None:
-                camera_id = self.params.get("camera", 2130)
+            camera_id = inputs.get("camera", 2130)
             camera_id = int(camera_id)
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
-        fps_value = inputs.get("fps")
-        buffer_seconds_value = inputs.get("buffer_seconds")
-        target_fps = int(fps_value if fps_value is not None else self.params.get("fps", 15))
-        buffer_seconds = int(buffer_seconds_value if buffer_seconds_value is not None else self.params.get("buffer_seconds", 4))
+        fps_value = inputs.get("fps", 15)
+        buffer_seconds_value = inputs.get("buffer_seconds", 4)
+        target_fps = int(fps_value)
+        buffer_seconds = int(buffer_seconds_value)
 
         stream_id = str(uuid.uuid4())[:8]
         stream = StreamResource(stream_id, str(hls_url), target_fps, buffer_seconds)
@@ -425,14 +422,10 @@ class Fl511TickNode(NodeBase):
         if not stream or not isinstance(stream, StreamResource):
             raise ValueError("Invalid or missing input: stream")
         
-        timeout_value = inputs.get("timeout")
-        quality_value = inputs.get("quality")
-        require_frame_value = inputs.get("require_frame")
-        pace_value = inputs.get("pace")
-        timeout = float(timeout_value if timeout_value is not None else self.params.get("timeout", 1.0))
-        jpeg_quality = int(quality_value if quality_value is not None else self.params.get("quality", 85))
-        require_frame = bool(require_frame_value) if require_frame_value is not None else bool(self.params.get("require_frame", True))
-        pace = bool(pace_value) if pace_value is not None else bool(self.params.get("pace", True))
+        timeout = float(inputs.get("timeout", 1.0))
+        jpeg_quality = int(inputs.get("quality", 85))
+        require_frame = bool(inputs.get("require_frame", True))
+        pace = bool(inputs.get("pace", True))
 
         frame = stream.latest_frame(timeout=timeout, pace=pace)
         if frame is None:
@@ -483,7 +476,6 @@ FL511_STOP_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="stopped", type=t_boolean()),
     ],
-    params={},
     cache_policy="disabled",
 )
 

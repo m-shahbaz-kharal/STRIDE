@@ -19,7 +19,7 @@ CONTROL_START_SPEC = NodeSpec(
     tags=["control", "start"],
     inputs=[],
     outputs=[PortSpec(name="control_out", type=t_control(), required=False, default=None)],
-    params={},
+
 )
 
 

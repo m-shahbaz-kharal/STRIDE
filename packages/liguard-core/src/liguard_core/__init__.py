@@ -6,7 +6,7 @@ LiGuard-Web node plugins.
 """
 
 from .node_base import NodeBase, ExecutionContext
-from .node_spec import NodeSpec, PortSpec, ParamSpec
+from .node_spec import NodeSpec, PortSpec
 from .registry import register_node, NODE_REGISTRY, get_node, list_node_types, list_node_definitions
 from .typesystem import TypeDescriptor
 from .plugin import discover_plugins, PluginInfo
@@ -30,6 +30,9 @@ __all__ = [
     "list_node_definitions",
     # Types
     "TypeDescriptor",
+    "t_control",
+    "t_float",
+    "t_int",
     # Plugins
     "discover_plugins",
     "PluginInfo",

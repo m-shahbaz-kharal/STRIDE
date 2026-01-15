@@ -1,4 +1,4 @@
-export type ParamSchemaType = "number" | "float" | "int" | "string" | "select" | "boolean";
+
 
 export type TypeKind =
   | "int"
@@ -40,13 +40,7 @@ export interface PortDefinition {
   ui?: Record<string, unknown>;
 }
 
-export interface ParamSchemaField {
-  type: ParamSchemaType;
-  label?: string;
-  description?: string;
-  default?: string | number | boolean;
-  options?: string[];
-}
+
 
 export interface NodeTypeDefinition {
   node_type: string;
@@ -65,8 +59,7 @@ export interface NodeTypeDefinition {
   output_ports: string[];
   input_port_types?: Record<string, TypeDescriptor | string>;
   output_port_types?: Record<string, TypeDescriptor | string>;
-  params_schema: Record<string, ParamSchemaField>;
-  params_defaults?: Record<string, string | number | boolean>;
+
 }
 
 export type NodeExecutionStatus =
@@ -187,7 +180,7 @@ export interface BlueprintNodeData {
   output_ports: string[];
   input_port_types?: Record<string, TypeDescriptor | string>;
   output_port_types?: Record<string, TypeDescriptor | string>;
-  params: Record<string, unknown>;
+
   inputValues?: Record<string, unknown>;
   breakpoint: boolean;
   metadata?: NodeTypeDefinition;
@@ -198,7 +191,7 @@ export interface BlueprintNodeData {
   onRunSelection?: (nodeId: string) => void;
   onClearCache?: (nodeId: string) => void;
   onInterrupt?: (nodeId: string) => void;
-  onParamChange?: (nodeId: string, param: string, value: string | number | boolean | null) => void;
+
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
   onInputValueChange?: (nodeId: string, port: string, value: string | number | boolean | null) => void;
   onAddInputPort?: (nodeId: string) => void;

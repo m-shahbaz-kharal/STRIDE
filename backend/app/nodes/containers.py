@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from . import register_node
 from .base import ExecutionContext, NodeBase
 from ..node_spec import NodeSpec, PortSpec
-from ..typesystem import t_any, t_control, t_int, t_list
+from ..typesystem import t_any, t_control, t_int, t_list, t_string
 
 
 MAKE_ARRAY_SPEC = NodeSpec(
@@ -21,7 +21,7 @@ MAKE_ARRAY_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="array", type=t_list(t_any())),
     ],
-    params={},
+
 )
 
 
@@ -52,7 +52,7 @@ APPEND_ARRAY_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="array", type=t_list(t_any())),
     ],
-    params={},
+
 )
 
 
@@ -85,7 +85,7 @@ GET_INDEX_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="value", type=t_any()),
     ],
-    params={},
+
 )
 
 
@@ -119,7 +119,7 @@ RANGE_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="array", type=t_list(t_int())),
     ],
-    params={},
+
 )
 
 

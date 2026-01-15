@@ -26,7 +26,7 @@ MULTIPLY_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="product", type=t_float()),
     ],
-    params={},
+
 )
 
 
@@ -60,7 +60,7 @@ SUBTRACT_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="difference", type=t_float()),
     ],
-    params={},
+
 )
 
 
@@ -94,7 +94,7 @@ DIVIDE_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="quotient", type=t_float()),
     ],
-    params={},
+
 )
 
 
@@ -131,7 +131,7 @@ POWER_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="result", type=t_float()),
     ],
-    params={},
+
 )
 
 
@@ -164,7 +164,7 @@ ABS_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="result", type=t_float()),
     ],
-    params={},
+
 )
 
 

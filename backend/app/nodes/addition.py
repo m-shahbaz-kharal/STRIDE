@@ -26,7 +26,7 @@ ADDITION_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="sum", type=t_any()),
     ],
-    params={},
+
 )
 
 

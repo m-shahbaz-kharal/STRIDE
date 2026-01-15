@@ -27,7 +27,7 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from liguard_core import register_node, NodeBase, ExecutionContext
-from liguard_core.node_spec import NodeSpec, ParamSpec, PortSpec
+from liguard_core.node_spec import NodeSpec, PortSpec
 from liguard_core.typesystem import (
     t_any, t_boolean, t_control, t_float, t_int, 
     t_list, t_string,
@@ -90,19 +90,16 @@ SAM3_CONNECT_SPEC = NodeSpec(
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="server_url", type=t_string(), required=False, default="http://localhost:8765"),
-        PortSpec(name="model_type", type=t_string(), required=False, default="image"),
+        PortSpec(name="model_type", type=t_string(), required=False, default="image", ui={
+            "control": "select",
+            "options": [{"label": "Image", "value": "image"}, {"label": "Video", "value": "video"}]
+        }),
         PortSpec(name="timeout", type=t_int(), required=False, default=30),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="session_id", type=t_string()),
     ],
-    params={
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-        "model_type": ParamSpec(name="model_type", type="string", label="Model Type", default="image", 
-                                options=[{"label": "Image", "value": "image"}, {"label": "Video", "value": "video"}]),
-        "timeout": ParamSpec(name="timeout", type="int", label="Timeout (s)", default=30),
-    },
     cache_policy="disabled",
 )
 
@@ -112,12 +109,9 @@ class SAM3ConnectNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         _require_requests()
         
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
-        model_type = inputs.get("model_type") or self.params.get("model_type", "image")
-        timeout = inputs.get("timeout")
-        if timeout is None:
-            timeout = self.params.get("timeout", 30)
-        timeout = int(timeout)
+        server_url = inputs.get("server_url", "http://localhost:8765")
+        model_type = inputs.get("model_type", "image")
+        timeout = int(inputs.get("timeout", 30))
         
         ctx.log(f"Connecting to SAM3 server at {server_url}")
         
@@ -171,9 +165,6 @@ SAM3_IS_ALIVE_SPEC = NodeSpec(
         PortSpec(name="session_id", type=t_string()),
         PortSpec(name="alive", type=t_boolean()),
     ],
-    params={
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -182,7 +173,7 @@ SAM3_IS_ALIVE_SPEC = NodeSpec(
 class SAM3IsAliveNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             return {"control_out": None, "session_id": "", "alive": False}
@@ -199,6 +190,10 @@ class SAM3IsAliveNode(NodeBase):
         except Exception:
             return {"control_out": None, "session_id": session_id, "alive": False}
 
+
+# =============================================================================
+# SAM3 - Set Prompt
+# =============================================================================
 
 # =============================================================================
 # SAM3 - Set Prompt
@@ -222,10 +217,6 @@ SAM3_SET_PROMPT_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="session_id", type=t_string()),
     ],
-    params={
-        "prompt": ParamSpec(name="prompt", type="string", label="Prompt", default=""),
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -234,8 +225,8 @@ SAM3_SET_PROMPT_SPEC = NodeSpec(
 class SAM3SetPromptNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        prompt = inputs.get("prompt") or self.params.get("prompt", "")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
+        prompt = inputs.get("prompt", "")
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -283,10 +274,6 @@ SAM3_ADD_IMAGE_SPEC = NodeSpec(
         PortSpec(name="added", type=t_boolean()),
         PortSpec(name="frame_idx", type=t_int()),
     ],
-    params={
-        "batch": ParamSpec(name="batch", type="int", label="Batch Size", default=1),
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -296,12 +283,8 @@ class SAM3AddImageNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
         image = inputs.get("image")
-        batch = inputs.get("batch")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
-        
-        if batch is None:
-            batch = self.params.get("batch", 1)
-        batch = int(batch)
+        batch = int(inputs.get("batch", 1))
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -357,10 +340,6 @@ SAM3_GET_OUTPUT_SPEC = NodeSpec(
         PortSpec(name="scores", type=t_list(t_float())),
         PortSpec(name="count", type=t_int()),
     ],
-    params={
-        "frame_idx": ParamSpec(name="frame_idx", type="int", label="Frame Index", default=0),
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -369,12 +348,8 @@ SAM3_GET_OUTPUT_SPEC = NodeSpec(
 class SAM3GetOutputNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        frame_idx = inputs.get("frame_idx")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
-        
-        if frame_idx is None:
-            frame_idx = self.params.get("frame_idx", 0)
-        frame_idx = int(frame_idx)
+        frame_idx = int(inputs.get("frame_idx", 0))
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -422,11 +397,6 @@ SAM3_VISUALIZE_SPEC = NodeSpec(
         PortSpec(name="session_id", type=t_string()),
         PortSpec(name="image", type=t_string()),  # base64
     ],
-    params={
-        "frame_idx": ParamSpec(name="frame_idx", type="int", label="Frame Index", default=0),
-        "alpha": ParamSpec(name="alpha", type="float", label="Overlay Alpha", default=0.5),
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -435,14 +405,9 @@ SAM3_VISUALIZE_SPEC = NodeSpec(
 class SAM3VisualizeNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        frame_idx = inputs.get("frame_idx")
-        alpha = inputs.get("alpha")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
-        
-        if frame_idx is None:
-            frame_idx = self.params.get("frame_idx", 0)
-        if alpha is None:
-            alpha = self.params.get("alpha", 0.5)
+        frame_idx = int(inputs.get("frame_idx", 0))
+        alpha = float(inputs.get("alpha", 0.5))
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -484,9 +449,6 @@ SAM3_DISCONNECT_SPEC = NodeSpec(
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
         PortSpec(name="disconnected", type=t_boolean()),
     ],
-    params={
-        "server_url": ParamSpec(name="server_url", type="string", label="Server URL", default="http://localhost:8765"),
-    },
     cache_policy="disabled",
 )
 
@@ -495,7 +457,7 @@ SAM3_DISCONNECT_SPEC = NodeSpec(
 class SAM3DisconnectNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        server_url = inputs.get("server_url") or self.params.get("server_url", "http://localhost:8765")
+        server_url = inputs.get("server_url", "http://localhost:8765")
         
         if not session_id:
             return {"control_out": None, "disconnected": False}
