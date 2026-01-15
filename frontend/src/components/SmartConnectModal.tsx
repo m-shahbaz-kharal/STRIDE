@@ -57,7 +57,9 @@ const SmartConnectModal = ({
         if (normalizedQuery) {
             nodes = nodes.filter((node) =>
                 node.display_name.toLowerCase().includes(normalizedQuery) ||
-                node.node_type.toLowerCase().includes(normalizedQuery)
+                node.node_type.toLowerCase().includes(normalizedQuery) ||
+                node.category?.toLowerCase().includes(normalizedQuery) ||
+                node.description?.toLowerCase().includes(normalizedQuery)
             );
 
             const scoreMatch = (text: string) => {
@@ -76,8 +78,17 @@ const SmartConnectModal = ({
             const scoreNode = (node: NodeTypeDefinition) => {
                 const displayScore = scoreMatch(node.display_name);
                 if (displayScore < 6) return displayScore;
+
                 const typeScore = scoreMatch(node.node_type);
-                return typeScore < 6 ? typeScore + 10 : 20;
+                if (typeScore < 6) return typeScore + 10;
+
+                const categoryScore = node.category ? scoreMatch(node.category) : 6;
+                if (categoryScore < 6) return categoryScore + 20;
+
+                const descScore = node.description ? scoreMatch(node.description) : 6;
+                if (descScore < 6) return descScore + 30;
+
+                return 40;
             };
 
             nodes = [...nodes].sort((a, b) => {
