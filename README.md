@@ -43,24 +43,32 @@ The frontend proxies API calls to `http://127.0.0.1:8000` automatically.
 LiGuard-Web/
 ├── backend/
 │   ├── app/
-│   │   ├── executor/           # Modular execution engine
-│   │   │   ├── __init__.py     # GraphExecutor facade
-│   │   │   └── cancellation.py # Thread-safe cancellation control
-│   │   ├── nodes/              # Node implementations by category
-│   │   ├── runner.py           # Core graph executor
-│   │   ├── execution.py        # Execution primitives & events
-│   │   ├── node_spec.py        # Node specification types
-│   │   └── main.py             # FastAPI application
-│   └── tests/                  # Pytest test suite
+│   │   ├── engine/              # Graph analysis utilities
+│   │   │   ├── graph_builder.py # Node/link construction, topological sort
+│   │   │   └── control_flow.py  # Loop/branch detection
+│   │   ├── executor/            # Modular execution engine
+│   │   │   └── cancellation.py  # Thread-safe cancellation control
+│   │   ├── nodes/               # Node implementations by category
+│   │   ├── routers/             # FastAPI route handlers
+│   │   ├── runner.py            # Core graph executor
+│   │   ├── execution.py         # Execution primitives & events
+│   │   └── main.py              # FastAPI application
+│   └── tests/                   # Pytest test suite
 ├── frontend/
 │   ├── src/
-│   │   ├── components/         # React components
-│   │   ├── hooks/              # Custom React hooks
-│   │   ├── graph/              # Graph utilities
-│   │   └── App.tsx             # Main application
+│   │   ├── components/          # React components
+│   │   ├── hooks/               # Custom React hooks
+│   │   │   ├── useGraphExecution.ts     # WebSocket execution
+│   │   │   ├── useGraphDependencies.ts  # Dependency tracking
+│   │   │   ├── useConnectionValidation.ts
+│   │   │   └── ...              # Additional hooks
+│   │   ├── graph/               # Graph utilities
+│   │   └── App.tsx              # Main application
 │   └── public/
-└── liguard-core/               # Shared node definitions package
+└── packages/
+    └── liguard-core/            # Shared node definitions package
 ```
+
 
 ## API Endpoints
 

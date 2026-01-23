@@ -15,13 +15,13 @@ def simple_graph() -> Dict[str, Any]:
         "nodes": [
             {
                 "id": "const-a",
-                "type": "core.constant.number",
-                "params": {"value": 5},
+                "type": "core.literal.int",
+                "input_values": {"value": 5},
             },
             {
                 "id": "const-b",
-                "type": "core.constant.number",
-                "params": {"value": 3},
+                "type": "core.literal.int",
+                "input_values": {"value": 3},
             },
             {
                 "id": "add",
@@ -43,7 +43,7 @@ def simple_graph() -> Dict[str, Any]:
             },
         ],
         "output_nodes": [
-            {"node_id": "add", "port": "result", "alias": "sum"},
+            {"node_id": "add", "port": "sum", "alias": "sum"},
         ],
     }
 
@@ -55,8 +55,8 @@ def loop_graph() -> Dict[str, Any]:
         "nodes": [
             {
                 "id": "count",
-                "type": "core.constant.number",
-                "params": {"value": 3},
+                "type": "core.literal.int",
+                "input_values": {"value": 3},
             },
             {
                 "id": "loop",
@@ -92,8 +92,8 @@ def ifelse_graph() -> Dict[str, Any]:
         "nodes": [
             {
                 "id": "condition",
-                "type": "core.constant.boolean",
-                "params": {"value": True},
+                "type": "core.literal.boolean",
+                "input_values": {"value": True},
             },
             {
                 "id": "branch",
