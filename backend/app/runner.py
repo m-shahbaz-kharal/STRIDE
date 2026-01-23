@@ -20,55 +20,7 @@ from .execution import (
 )
 from .nodes import ExecutionContext, NodeBase, get_node
 from .typesystem import TypeDescriptor
-
-
-class _CancellationController:
-    def __init__(self, state_lock: threading.Lock) -> None:
-        self._state_lock = state_lock
-        self._cancel_all = threading.Event()
-        self._cancelled_nodes: Set[str] = set()
-        self._running_tasks: Dict[str, asyncio.Future] = {}
-
-    def reset(self) -> None:
-        self._cancel_all.clear()
-        self._cancelled_nodes.clear()
-        with self._state_lock:
-            self._running_tasks = {}
-
-    def cancel_all(self) -> None:
-        self._cancel_all.set()
-        self.cancel_running_tasks()
-
-    def cancel_node(self, node_id: str) -> None:
-        self._cancelled_nodes.add(node_id)
-        self.cancel_running_tasks(target=node_id)
-
-    def should_stop(self) -> bool:
-        return self._cancel_all.is_set()
-
-    def is_cancelled(self, node_id: Optional[str] = None) -> bool:
-        if self._cancel_all.is_set():
-            return True
-        if node_id is not None and node_id in self._cancelled_nodes:
-            return True
-        return False
-
-    def register_running(self, node_id: str, fut: asyncio.Future) -> None:
-        with self._state_lock:
-            self._running_tasks[node_id] = fut
-
-    def clear_running(self, node_id: str) -> None:
-        with self._state_lock:
-            self._running_tasks.pop(node_id, None)
-
-    def cancel_running_tasks(self, target: Optional[str] = None) -> None:
-        with self._state_lock:
-            items = list(self._running_tasks.items())
-        for node_id, fut in items:
-            if target and node_id != target:
-                continue
-            if not fut.done():
-                fut.cancel()
+from .executor.cancellation import CancellationController as _CancellationController
 
 
 class GraphExecutor:
@@ -810,7 +762,6 @@ class GraphExecutor:
             if spec and spec.default is not None:
                 inputs[port] = spec.default
         
-        return inputs
         return inputs
 
     def _prepare_inputs(self, node_id: str) -> Dict[str, Any]:
@@ -3114,10 +3065,7 @@ class GraphExecutor:
                                     f"Dependency '{node_id}' failed",
                                     status=NodeStatus.ERROR,
                                 )
-                                if self._fail_fast:
-                                    stop_scheduling = True
-                                    ready.clear()
-                                    break
+                                # Continue execution for other independent branches
                                 continue
 
                             true_nodes = self._ifelse_true_branch.get(node_id, set())
@@ -3222,10 +3170,7 @@ class GraphExecutor:
                                 f"Dependency '{node_id}' failed",
                                 status=NodeStatus.ERROR,
                             )
-                            if self._fail_fast:
-                                stop_scheduling = True
-                                ready.clear()
-                                break
+                            # Continue execution for other independent branches
                             continue
 
                         cached_outputs = self._try_get_cached(node_id, inputs)
@@ -3368,11 +3313,7 @@ class GraphExecutor:
                                 else f"Dependency '{node_id}' was interrupted"
                             )
                             await _propagate_failure(node_id, reason, status=status_to_use)
-                            if status_to_use == NodeStatus.ERROR and self._fail_fast:
-                                for pending in tasks.keys():
-                                    pending.cancel()
-                                tasks.clear()
-                                stop_scheduling = True
+                            # Continue execution for other independent branches
                         _enqueue_dependents(node_id)
                         _enqueue_loop_body_dependents(node_id)
                         continue
@@ -3404,11 +3345,7 @@ class GraphExecutor:
                             completed_nodes=completed,
                             from_cache=result.from_cache,
                         ))
-                        if self._fail_fast:
-                            for pending in tasks.keys():
-                                pending.cancel()
-                            tasks.clear()
-                            stop_scheduling = True
+                        # Continue execution for other independent branches - _propagate_failure handles dependents below
                     else:
                         await event_queue.put(ExecutionEvent(
                             event_type="node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped",

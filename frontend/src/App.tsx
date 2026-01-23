@@ -217,6 +217,7 @@ const App = () => {
   const {
     isConnected,
     isRunning,
+    hasRunningNodes,
     error,
     trace,
     outputs,
@@ -1440,7 +1441,7 @@ const App = () => {
     canCopy: selectedNodeIds.length > 0,
     canRunGraph: nodes.length > 0 && !isRunning && !jsonViewEnabled,
     canRunSelection: selectedNodeIds.length > 0 && !isRunning && !jsonViewEnabled,
-    canInterrupt: isRunning && Boolean(executionId),
+    canInterrupt: (isRunning || hasRunningNodes) && Boolean(executionId),
   });
 
   // ========== Node adding ==========

@@ -34,6 +34,7 @@ interface GraphPayload {
 interface UseGraphExecutionReturn {
   isConnected: boolean;
   isRunning: boolean;
+  hasRunningNodes: boolean; // True if any nodes are running/queued - for interrupt button
   error: string | null;
   errorCode?: string | null;
   trace: ExecutionTraceEntry[];
@@ -219,6 +220,16 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "complete":
           // Flush any pending updates before marking as complete
           flushPendingUpdates();
+          // Clear any remaining running/queued statuses
+          setNodeStatuses((prev) => {
+            const updated = new Map(prev);
+            for (const [nodeId, status] of updated) {
+              if (status === "running" || status === "queued") {
+                updated.set(nodeId, "skipped");
+              }
+            }
+            return updated;
+          });
           setCurrentNodeId(null);
           setProgress(1);
           setExecutionId(null);
@@ -233,6 +244,16 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           if (data.outputs) setOutputs(data.outputs as Record<string, unknown>);
           if (data.stats) setStats(data.stats);
           if (data.levels) setLevels(data.levels as string[][]);
+          // Clear any remaining running/queued statuses
+          setNodeStatuses((prev) => {
+            const updated = new Map(prev);
+            for (const [nodeId, status] of updated) {
+              if (status === "running" || status === "queued") {
+                updated.set(nodeId, "skipped");
+              }
+            }
+            return updated;
+          });
           setCurrentNodeId(null);
           setProgress(1);
           setExecutionId(null);
@@ -243,6 +264,16 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "error":
           setError(data.error ?? "Unknown error");
           setErrorCode(data.error_code ?? null);
+          // Clear any remaining running/queued statuses
+          setNodeStatuses((prev) => {
+            const updated = new Map(prev);
+            for (const [nodeId, status] of updated) {
+              if (status === "running" || status === "queued") {
+                updated.set(nodeId, "skipped");
+              }
+            }
+            return updated;
+          });
           setCurrentNodeId(null);
           setExecutionId(null);
           activeRunRef.current = false;
@@ -415,9 +446,16 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setActiveRuns(0);
   }, []);
 
+  // Compute hasRunningNodes: true if any node has running/queued status
+  // This is used for the interrupt button when executionId might already be cleared
+  const hasRunningNodes = Array.from(nodeStatuses.values()).some(
+    (status) => status === "running" || status === "queued"
+  );
+
   return {
     isConnected,
     isRunning: activeRuns > 0,
+    hasRunningNodes,
     error,
     errorCode,
     trace,
