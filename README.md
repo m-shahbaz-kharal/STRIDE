@@ -1,91 +1,132 @@
-# LiGuard DT
+# LiGuard-Web
 
-This repository contains the minimal prototype for a node-graph runtime inspired
-by Unreal Blueprints / ComfyUI + a GPU/CPU scheduler that fits into the
-conceptual architecture described in the project brief.
+A visual node-graph runtime for creating data processing pipelines, inspired by
+Unreal Blueprints and ComfyUI. Features a React-based canvas editor, FastAPI backend,
+and modular execution engine.
 
-## What is in this prototype
+## Features
 
-- **Backend** (`backend/app`): FastAPI service that exposes a `/api/run-graph`
-  endpoint, a `GraphExecutor` that compiles a JSON graph into execution units,
-  and the minimal node family described in the requirements:
-  `BaseNumberNode` → `ConstantNumberNode` & `MirrorNumberNode`, plus `AdditionNode`.
-- **Front-end** (`frontend/public/index.html`): Static page that pushes the sample
-  graph to the Python server, showing the output values and the execution trace.
-- **Test graph** (`backend/app/test_graph.py`): A runnable script that exercises the
-  same a+b=c graph so you can verify the scheduler outside of the UI.
+- **Visual Graph Editor**: React Flow-powered canvas with draggable nodes, typed ports, and real-time execution feedback
+- **Streaming Execution**: WebSocket-based streaming for live progress updates during graph runs
+- **Parallel Branch Execution**: Independent branches execute concurrently with proper error isolation
+- **Caching System**: Node-level caching with intelligent cache invalidation
+- **Extensible Node System**: Plugin-based node registration from `liguard-core` package
 
-## Getting started
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+ with [uv](https://github.com/astral-sh/uv) package manager
+- Node.js 18+ with npm
 
 ### Backend Setup
 
-Install Python dependencies using [uv](https://github.com/astral-sh/uv) and start the server:
-
 ```bash
 cd backend
-uv sync
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv sync                                          # Install dependencies
+uv run uvicorn app.main:app --reload --port 8000 # Start dev server
 ```
 
 ### Frontend Setup
 
-Install JavaScript dependencies and run the development server:
-
 ```bash
 cd frontend
-npm install
-npm run dev
+npm install      # Install dependencies
+npm run dev      # Start dev server on http://localhost:5173
 ```
 
-The dev server proxies API calls to `http://127.0.0.1:8000` by default so you can iterate on the editor while the backend is running.
+The frontend proxies API calls to `http://127.0.0.1:8000` automatically.
 
-### Production Deployment
+## Project Structure
 
-For production, you can deploy frontend and backend to separate servers:
+```
+LiGuard-Web/
+├── backend/
+│   ├── app/
+│   │   ├── executor/           # Modular execution engine
+│   │   │   ├── __init__.py     # GraphExecutor facade
+│   │   │   └── cancellation.py # Thread-safe cancellation control
+│   │   ├── nodes/              # Node implementations by category
+│   │   ├── runner.py           # Core graph executor
+│   │   ├── execution.py        # Execution primitives & events
+│   │   ├── node_spec.py        # Node specification types
+│   │   └── main.py             # FastAPI application
+│   └── tests/                  # Pytest test suite
+├── frontend/
+│   ├── src/
+│   │   ├── components/         # React components
+│   │   ├── hooks/              # Custom React hooks
+│   │   ├── graph/              # Graph utilities
+│   │   └── App.tsx             # Main application
+│   └── public/
+└── liguard-core/               # Shared node definitions package
+```
 
-1. **Backend**: Deploy the `backend/` directory to a powerful compute server
-2. **Frontend**: Build the static bundle and deploy to any web server:
-   ```bash
-   cd frontend
-   VITE_API_URL=https://your-backend-server.com npm run build
-   ```
-   Then serve the `dist/` folder with nginx, Caddy, or any static file server.
+## API Endpoints
 
-You can also validate the runner directly:
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/node-definitions` | Get all available node types and specs |
+| `POST` | `/api/run-graph` | Execute a graph synchronously |
+| `WS` | `/ws/run-graph` | Execute graph with streaming events |
+| `POST` | `/api/executions/{id}/cancel` | Cancel a running execution |
+| `POST` | `/api/executions/{id}/cancel/{node}` | Cancel a specific node |
+| `POST` | `/api/cache/clear` | Clear all cached results |
+| `GET` | `/api/graphs` | List saved graphs |
+| `POST` | `/api/graphs` | Create a new graph |
+
+## Development
+
+### Running Tests
 
 ```bash
 cd backend
-uv run python -m app.test_graph
+uv run pytest tests/ -v
 ```
 
-## Frontend experience
+### Building for Production
 
-- React + React Flow powers a Blueprint-style canvas with draggable nodes, typed ports, and an inspector panel that exposes device preference, params, and breakpoints.
-- Execution controls support Run Graph, Run Selection, and Step while capturing live logs, execution units, and tensor-like output summaries returned from the backend.
-- The palette is populated directly from the backend registry (`/api/node-types`) so the UI always reflects the nodes available to the scheduler, and every node highlights the last device/resolution it ran on for quick debugging.
+```bash
+# Frontend build
+cd frontend
+npm run build  # Outputs to dist/
 
-## Backend APIs
+# Backend can be deployed with uvicorn
+cd backend
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-- `GET /api/node-types` exposes every registered node’s metadata (ports, descriptions, param schema, defaults) so the frontend can render a consistent palette.
-- `POST /api/run-graph` still accepts a graph definition, but it also looks for two optional helpers: an embedded `options` object (`mode`, `target_nodes`, `breakpoints`, `max_steps`) and a `graph` wrapper. The executor now respects selection-only runs, breakpoints, and stepping hints from the UI.
+### Environment Variables
 
-## Architecture notes
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | (proxy) | Backend API URL for production builds |
 
-- **Execution plan**: The backend still topologically sorts nodes, but the planner can now restrict execution to a selection, honor breakpoints, and stop after a fixed number of steps thanks to the new executor options.
-- **Node metadata**: Each node class declares ports, documentation, and a parameter schema that feeds the frontend inspector (the node registry also returns schema defaults so the React Flow nodes are initialized sensibly).
-- **Device placement**: Explicit `device_hint` values (`cpu`, `gpu`) are honored while math nodes default to GPU. Nodes can be tagged with breakpoints from the UI, and the executor halts before hitting them.
-- **Frontend / backend surface**: The React UI POSTs `{"graph": {...}, "options": {...}}` to `/api/run-graph`, then displays the returned `outputs`, `trace`, and `units` (which describe the device-aligned execution chunks).
+## Architecture
 
-## Roadmap ideas
+### Execution Engine
 
-- Plug in NVIDIA fVDB-backed nodes (VDB grids, sparse convolutions, mesh/export).
-- Improve scheduler with CUDA streams, tensor streaming via WebSocket, and
-  pinned-memory H2D/D2H transfers.
-- Add debug hooks: breakpoints, step-by-step execution, tensor inspector
-  previews (images/3D).
-- Package the backend into a Docker container with pinned compute resources; the
-  front-end can stay static and talk to the local container via HTTP/WebSocket.
+The `GraphExecutor` in `runner.py` handles:
+- **Topological Sorting**: Determines execution order respecting dependencies
+- **Parallel Execution**: Runs independent branches concurrently
+- **Error Isolation**: Errors in one branch don't stop independent branches
+- **Caching**: Node-level result caching with hash-based invalidation
 
-This prototype is deliberately minimal but structured so it can scale into the
-full node-rich, GPU-first application described in the brief.
+### Node System
 
+Nodes are defined using `NodeSpec` with:
+- Input/output port definitions with type information
+- Parameter schemas for runtime configuration
+- Execution method (`forward`) that processes inputs
+
+### Frontend State
+
+Key React hooks:
+- `useGraphExecution`: WebSocket-based execution with streaming events
+- `useNodeLibrary`: Manages available node types from backend
+- `useConnectionValidation`: Type-safe port connection validation
+- `useUndoRedo`: Graph state history management
+
+## License
+
+See LICENSE file for details.
