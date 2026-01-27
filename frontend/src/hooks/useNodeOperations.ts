@@ -25,12 +25,20 @@ interface UseNodeOperationsOptions {
     setNodes: React.Dispatch<React.SetStateAction<Node<BlueprintNodeData>[]>>;
     setEdges: React.Dispatch<React.SetStateAction<any[]>>;
     takeSnapshot: () => void;
+    dashboardLayout: { widgets: { id: string; nodeId?: string; portName?: string }[] };
+    setDashboardLayout: (layout: any) => void;
+    onShowWarning: (message: string, onConfirm: () => void) => void;
+    nodes: Node<BlueprintNodeData>[];
 }
 
 export const useNodeOperations = ({
     setNodes,
     setEdges,
     takeSnapshot,
+    dashboardLayout,
+    setDashboardLayout,
+    onShowWarning,
+    nodes,
 }: UseNodeOperationsOptions) => {
     const nodeIdRef = useRef(1);
 
@@ -157,26 +165,58 @@ export const useNodeOperations = ({
     );
 
     const handleTogglePublish = useCallback(
-        (nodeId: string, portId: string, direction: "input" | "output", kind: any) => { // Using any for kind temporarily to match usage, ideally TypeKind
-            updateNodeData(nodeId, (data) => {
-                const published = { ...(data.published_ports ?? {}) };
-                const key = `${direction}_${portId}`;
+        (nodeId: string, portId: string, direction: "input" | "output", kind: any) => {
+            const performToggle = () => {
+                updateNodeData(nodeId, (data) => {
+                    const published = { ...(data.published_ports ?? {}) };
+                    const key = `${direction}_${portId}`;
 
-                if (published[key]) {
-                    delete published[key];
-                } else {
-                    published[key] = {
-                        alias: `${data.displayName} - ${portId}`,
-                        portId,
-                        kind: kind?.kind || "any",
-                        direction
-                    };
+                    if (published[key]) {
+                        delete published[key];
+                    } else {
+                        published[key] = {
+                            alias: `${data.displayName} - ${portId}`,
+                            portId,
+                            kind: kind?.kind || "any",
+                            direction
+                        };
+                    }
+
+                    return { ...data, published_ports: published };
+                });
+            };
+
+            // Check if unpublishing
+            const node = nodes.find(n => n.id === nodeId);
+            const key = `${direction}_${portId}`;
+            const isUnpublishing = node?.data.published_ports?.[key];
+
+            if (isUnpublishing) {
+                // Check for dependent widgets
+                // Note: The widget binding uses "portName" which corresponds to "portId" in "published_ports"
+                const dependentWidgets = dashboardLayout.widgets.filter(
+                    w => w.nodeId === nodeId && w.portName === portId
+                );
+
+                if (dependentWidgets.length > 0) {
+                    onShowWarning(
+                        `Unpublishing this port will remove ${dependentWidgets.length} dependent UI element(s) from the dashboard. Proceed?`,
+                        () => {
+                            // Remove widgets
+                            setDashboardLayout((prev: any) => ({
+                                ...prev,
+                                widgets: prev.widgets.filter((w: any) => !(w.nodeId === nodeId && w.portName === portId))
+                            }));
+                            performToggle();
+                        }
+                    );
+                    return;
                 }
+            }
 
-                return { ...data, published_ports: published };
-            });
+            performToggle();
         },
-        [updateNodeData]
+        [updateNodeData, nodes, dashboardLayout, onShowWarning, setDashboardLayout]
     );
 
     const handleAddInputPort = useCallback(
@@ -207,11 +247,30 @@ export const useNodeOperations = ({
     );
 
     const handleDeleteNode = useCallback((nodeId: string) => {
-        setNodes((current) => current.filter((node) => node.id !== nodeId));
-        setEdges((current) =>
-            current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
-        );
-    }, [setEdges, setNodes]);
+        const performDelete = () => {
+            setNodes((current) => current.filter((node) => node.id !== nodeId));
+            setEdges((current) =>
+                current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+            );
+        };
+
+        const dependentWidgets = dashboardLayout.widgets.filter(w => w.nodeId === nodeId);
+
+        if (dependentWidgets.length > 0) {
+            onShowWarning(
+                `Deleting this node will remove ${dependentWidgets.length} dependent UI element(s) from the dashboard. Proceed?`,
+                () => {
+                    setDashboardLayout((prev: any) => ({
+                        ...prev,
+                        widgets: prev.widgets.filter((w: any) => w.nodeId !== nodeId)
+                    }));
+                    performDelete();
+                }
+            );
+        } else {
+            performDelete();
+        }
+    }, [setEdges, setNodes, dashboardLayout, onShowWarning, setDashboardLayout]);
 
     const clearNodeCache = useCallback((nodeId: string) => {
         setNodes((existing) =>

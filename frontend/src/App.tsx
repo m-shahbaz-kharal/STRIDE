@@ -189,6 +189,20 @@ const App = () => {
     setNodes,
     setEdges,
     takeSnapshot,
+    dashboardLayout,
+    setDashboardLayout,
+    onShowWarning: (message, onConfirm) => {
+      setAppDialog({
+        variant: "confirm",
+        title: "Dependency Warning",
+        message,
+        onConfirm: () => {
+          onConfirm();
+          setAppDialog(null);
+        }
+      });
+    },
+    nodes,
   });
 
   // Connection validation hook
