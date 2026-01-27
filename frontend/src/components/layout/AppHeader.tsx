@@ -208,6 +208,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                             onClick={onSaveGraph}
                             disabled={!isGraphDirty}
                             title="Save graph"
+                            style={{ color: isGraphDirty ? "var(--accent-orange)" : undefined }}
                         >
                             <SaveIcon />
                         </button>
