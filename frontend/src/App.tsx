@@ -444,6 +444,7 @@ const App = () => {
     handleParamChangeWithCache,
     markCacheDirtyForNodes,
     setNodes,
+    handleTogglePublish,
   ]);
 
   // ========== Computed values ==========
@@ -761,6 +762,18 @@ const App = () => {
       refreshGraphs();
     }
   }, [refreshGraphs, session]);
+
+  useEffect(() => {
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          ...nodeHandlers,
+        },
+      }))
+    );
+  }, [nodeHandlers, setNodes]);
 
   // Update node execution states when nodeStatuses change
   // PERF: Add early bailouts to avoid creating new objects when data hasn't changed
