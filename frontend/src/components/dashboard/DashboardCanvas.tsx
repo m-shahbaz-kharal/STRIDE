@@ -160,6 +160,8 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
     };
 
     const handlePointerDown = (e: React.PointerEvent, widget: DashboardWidget | null = null, handle: string = "move") => {
+        if (mode === "view") return;
+
         if (editingWidgetId) {
             // If clicking outside while editing, stop editing
             if (widget?.id !== editingWidgetId) {
@@ -175,11 +177,12 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
         e.preventDefault(); // Prevent text selection etc
         e.stopPropagation();
 
-        if (mode === "view") return; // Disable canvas interaction in view mode
 
-        // Right Click or Middle Click -> Pan
-        if (e.button === 1 || e.button === 2) {
-            e.currentTarget.setPointerCapture(e.pointerId);
+
+        // Right Click (2) or Middle Click (1) -> Pan
+        if (e.button !== 0) {
+            // Capture on canvas, not the widget, for smooth panning
+            canvasRef.current?.setPointerCapture(e.pointerId);
             setDragState({
                 isDragging: true,
                 type: 'pan',
@@ -193,7 +196,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
             return;
         }
 
-        // Left Click -> Widget Interaction
+        // Left Click (0) -> Widget Interaction
         if (mode === "design" && widget) {
             e.currentTarget.setPointerCapture(e.pointerId);
             onSelectWidget(widget.id);
@@ -356,7 +359,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                 cursor: mode === "design" && dragState?.type === 'pan' ? 'grabbing' : 'default',
                 userSelect: 'none'
             }}
-            onContextMenu={e => e.preventDefault()}
+            onContextMenu={e => mode === "design" ? e.preventDefault() : undefined}
             onPointerDown={e => handlePointerDown(e, null)}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -506,6 +509,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                 zIndex: 0
                             }}
                             onPointerDown={(e) => {
+                                if (e.button !== 0) return;
                                 e.currentTarget.setPointerCapture(e.pointerId);
                                 setDragState({
                                     isDragging: true,
@@ -535,6 +539,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                     pointerEvents: 'auto'
                                 }}
                                 onPointerDown={(e) => {
+                                    if (e.button !== 0) return;
                                     e.currentTarget.setPointerCapture(e.pointerId);
                                     setDragState({
                                         isDragging: true,
@@ -619,7 +624,10 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                             display: 'flex', alignItems: 'end', justifyContent: 'end', padding: '2px',
                                             opacity: isSelected ? 1 : 0, transition: 'opacity 0.2s'
                                         }}
-                                        onPointerDown={(e) => handlePointerDown(e, widget, 'se')}
+                                        onPointerDown={(e) => {
+                                            if (e.button !== 0) return;
+                                            handlePointerDown(e, widget, 'se');
+                                        }}
                                     >
                                         <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--text-muted)">
                                             <path d="M10 10 L10 2 L2 10 Z" />
@@ -636,7 +644,11 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                             color: 'white', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                                             boxShadow: '0 2px 5px rgba(0,0,0,0.3)', zIndex: 20
                                         }}
-                                        onPointerDown={(e) => { e.stopPropagation(); onDeleteWidget(widget.id); }}
+                                        onPointerDown={(e) => {
+                                            if (e.button !== 0) return;
+                                            e.stopPropagation();
+                                            onDeleteWidget(widget.id);
+                                        }}
                                         title="Remove Widget"
                                     >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
