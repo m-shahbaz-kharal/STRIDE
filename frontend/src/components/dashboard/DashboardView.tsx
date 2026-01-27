@@ -242,8 +242,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         }
     }, [isRunning]);
 
+    const rootRef = useRef<HTMLDivElement>(null);
+    const handleFitToScreen = () => {
+        if (rootRef.current) {
+            const { clientWidth, clientHeight } = rootRef.current;
+            handleUpdateViewBounds({
+                ...currentViewport,
+                x: 0,
+                y: 0,
+                w: clientWidth,
+                h: clientHeight
+            });
+        }
+    };
+
     return (
         <div
+            ref={rootRef}
             className="dashboard-view"
             style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}
             onMouseMove={onMouseMove}
@@ -428,7 +443,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                         outputs={outputs}
                         nodes={nodes}
                         onInputChange={onInputChange}
-                        viewBounds={layout.viewport}
+                        viewBounds={currentViewport}
                         onUpdateViewBounds={handleUpdateViewBounds}
                     />
                 </div>
@@ -460,6 +475,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                                     <DashboardViewportProperties
                                         viewport={currentViewport}
                                         onUpdate={(updates) => handleUpdateViewBounds({ ...currentViewport, ...updates })}
+                                        onFitToScreen={handleFitToScreen}
                                     />
                                 ) : selectedWidget ? (
                                     <DashboardProperties

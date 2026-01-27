@@ -3,9 +3,10 @@ import React from "react";
 interface DashboardViewportPropertiesProps {
     viewport: { x: number; y: number; w: number; h: number; style?: Record<string, any> };
     onUpdate: (updates: { x?: number; y?: number; w?: number; h?: number; style?: Record<string, any> }) => void;
+    onFitToScreen?: () => void;
 }
 
-const DashboardViewportProperties: React.FC<DashboardViewportPropertiesProps> = ({ viewport, onUpdate }) => {
+const DashboardViewportProperties: React.FC<DashboardViewportPropertiesProps> = ({ viewport, onUpdate, onFitToScreen }) => {
 
     const handleStyleChange = (key: string, value: any) => {
         onUpdate({
@@ -34,7 +35,26 @@ const DashboardViewportProperties: React.FC<DashboardViewportPropertiesProps> = 
 
             {/* --- Layout --- */}
             <div className="props-section" style={{ marginBottom: '20px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-                <h4 style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '10px' }}>Layout</h4>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <h4 style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Layout</h4>
+                    {onFitToScreen && (
+                        <button
+                            onClick={onFitToScreen}
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                padding: '2px 6px',
+                                cursor: 'pointer',
+                                color: 'var(--text-primary)'
+                            }}
+                            title="Resize to fit current screen size"
+                        >
+                            Fit to Screen
+                        </button>
+                    )}
+                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
                     <div>
