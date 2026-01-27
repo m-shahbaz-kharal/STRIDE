@@ -156,6 +156,29 @@ export const useNodeOperations = ({
         [updateNodeData]
     );
 
+    const handleTogglePublish = useCallback(
+        (nodeId: string, portId: string, direction: "input" | "output", kind: any) => { // Using any for kind temporarily to match usage, ideally TypeKind
+            updateNodeData(nodeId, (data) => {
+                const published = { ...(data.published_ports ?? {}) };
+                const key = `${direction}_${portId}`;
+
+                if (published[key]) {
+                    delete published[key];
+                } else {
+                    published[key] = {
+                        alias: `${data.displayName} - ${portId}`,
+                        portId,
+                        kind: kind?.kind || "any",
+                        direction
+                    };
+                }
+
+                return { ...data, published_ports: published };
+            });
+        },
+        [updateNodeData]
+    );
+
     const handleAddInputPort = useCallback(
         (nodeId: string) =>
             updateNodeData(nodeId, (data) => {
@@ -245,5 +268,6 @@ export const useNodeOperations = ({
         buildDefaultInputValues,
         getInitialPorts,
         getPortYOffset,
+        handleTogglePublish,
     };
 };

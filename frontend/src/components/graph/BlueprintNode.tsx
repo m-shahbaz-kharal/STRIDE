@@ -604,6 +604,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                     )}
                   </div>
                 )}
+                {portKind !== "control" && (
+                  <button
+                    className={`node-port-publish-btn nodrag ${data.published_ports?.[`input_${port}`] ? "published" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      data.onTogglePublish?.(id, port, "input", portType);
+                    }}
+                    title={data.published_ports?.[`input_${port}`] ? "Unpublish port" : "Publish to Dashboard"}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+                      <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"></path>
+                    </svg>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -645,6 +659,20 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "output" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
+                {portKind !== "control" && (
+                  <button
+                    className={`node-port-publish-btn nodrag ${data.published_ports?.[`output_${port}`] ? "published" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      data.onTogglePublish?.(id, port, "output", portType);
+                    }}
+                    title={data.published_ports?.[`output_${port}`] ? "Unpublish port" : "Publish to Dashboard"}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+                      <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"></path>
+                    </svg>
+                  </button>
+                )}
                 {!isControl && (
                   <div className="node-port-label-group">
                     <span className="node-port-label">{port}</span>

@@ -19,16 +19,16 @@ interface GraphSummary {
     selectedCount: number;
 }
 
-interface DisplaySummary {
+interface DashboardSummary {
     sections: number;
     totalItems: number;
 }
 
 interface AppHeaderProps {
-    headerTab: "home" | "graph-editor" | "display";
-    onTabChange: (tab: "home" | "graph-editor" | "display") => void;
+    headerTab: "home" | "graph-editor" | "dashboard";
+    onTabChange: (tab: "home" | "graph-editor" | "dashboard") => void;
     graphSummary: GraphSummary;
-    displaySummary: DisplaySummary;
+    displaySummary: DashboardSummary;
     graphName: string | null;
     isGraphDirty: boolean;
     isRunning: boolean;
@@ -124,10 +124,10 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         </button>
                         <button
                             type="button"
-                            className={`header-tab ${headerTab === "display" ? "active" : ""}`}
-                            onClick={() => onTabChange("display")}
+                            className={`header-tab ${headerTab === "dashboard" ? "active" : ""}`}
+                            onClick={() => onTabChange("dashboard")}
                         >
-                            Display
+                            Dashboard
                         </button>
                     </div>
                 )}
@@ -144,7 +144,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                     </div>
                 )}
 
-                {headerTab === "display" && (
+                {headerTab === "dashboard" && (
                     <div className="outputs-pills header-pills">
                         <span className="pill">
                             {displaySummary.sections} section{displaySummary.sections === 1 ? "" : "s"}
@@ -171,14 +171,6 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         <button type="button" className="graph-title-btn" onClick={onRenameGraph}>
                             {graphName}
                         </button>
-                        <button
-                            className="save-icon-btn"
-                            onClick={onSaveGraph}
-                            disabled={!isGraphDirty}
-                            title="Save graph"
-                        >
-                            <SaveIcon />
-                        </button>
                         <span className={`graph-save-indicator ${isGraphDirty ? "dirty" : "clean"}`}>
                             {isGraphDirty ? "Unsaved" : "Saved"}
                         </span>
@@ -187,7 +179,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
             </div>
 
             <div className="header-controls">
-                {headerTab === "graph-editor" && (
+                {(headerTab === "graph-editor" || headerTab === "dashboard") && (
                     <>
                         <ConnectionIcon connected={isConnected} />
                         <button
@@ -207,19 +199,32 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         >
                             <StopIcon />
                         </button>
-                        <button
-                            className="icon-btn clear-cache-btn"
-                            onClick={onClearCache}
-                            disabled={isRunning}
-                            title="Clear Backend Cache"
-                        >
-                            <ClearCacheIcon />
-                        </button>
+                        {headerTab !== "dashboard" && (
+                            <button
+                                className="icon-btn clear-cache-btn"
+                                onClick={onClearCache}
+                                disabled={isRunning}
+                                title="Clear Backend Cache"
+                            >
+                                <ClearCacheIcon />
+                            </button>
+                        )}
                         {error && (
                             <span className="error-indicator" title={error}>
                                 !
                             </span>
                         )}
+
+                        <span className="header-divider" />
+
+                        <button
+                            className="icon-btn"
+                            onClick={onSaveGraph}
+                            disabled={!isGraphDirty}
+                            title="Save graph"
+                        >
+                            <SaveIcon />
+                        </button>
                     </>
                 )}
                 <span className="header-divider" />

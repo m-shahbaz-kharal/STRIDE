@@ -211,7 +211,47 @@ export interface BlueprintNodeData {
   isMergePoint?: boolean;  // Whether this node receives inputs from multiple branches
   onToggleControlPorts?: (nodeId: string) => void;  // Toggle control port visibility
   onToggleCache?: (nodeId: string) => void;  // Toggle node caching
+  onTogglePublish?: (nodeId: string, portId: string, direction: "input" | "output", kind: any) => void; // Toggle port publication
   hoverControlPorts?: boolean;  // Temporary control port reveal during connection hover
+
+  // Dashboard //
+  published_ports?: Record<string, PublishedPortData>;
+}
+
+export interface PublishedPortData {
+  alias: string;
+  portId: string; // The internal port name (e.g. "camera", "input_1")
+  kind: TypeKind;
+  direction: "input" | "output";
+}
+
+export type WidgetType = "label" | "container" | "bound-input" | "bound-output";
+
+export interface DashboardWidget {
+  id: string;
+  type: WidgetType;
+  label?: string; // User-defined label
+
+  // Position & Size (grid units)
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  zIndex?: number;
+
+  // Binding info (if bound)
+  nodeId?: string;
+  portName?: string; // The original port name (e.g. "camera")
+
+  // Style/Config
+  style?: Record<string, unknown>;
+  parentId?: string; // For nesting in containers
+}
+
+
+export interface DashboardLayout {
+  widgets: DashboardWidget[];
+  rootContainerId?: string; // If we want a specific root
 }
 
 export interface ExecutionResult {

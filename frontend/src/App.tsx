@@ -22,7 +22,7 @@ import TypeAwareConnectionLine from "./components/graph/TypeAwareConnectionLine"
 import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
-import DisplayView from "./components/DisplayView";
+import DashboardView from "./components/dashboard/DashboardView";
 import SmartConnectModal from "./components/SmartConnectModal";
 import AppHeader from "./components/layout/AppHeader";
 import ConnectionToast from "./components/ConnectionToast";
@@ -45,6 +45,7 @@ import { useSmartConnect } from "./hooks/useSmartConnect";
 import {
   BlueprintNodeData,
   NodeTypeDefinition,
+  PublishedPortData,
 } from "./types";
 import { CloseIcon } from "./components/Icons";
 import {
@@ -82,6 +83,7 @@ const App = () => {
   const [graphsLoading, setGraphsLoading] = useState(false);
   const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
   const [isGraphDirty, setIsGraphDirty] = useState(false);
+  const [isDashboardDirty, setIsDashboardDirty] = useState(false);
   const [unsavedDialog, setUnsavedDialog] = useState<null | { mode: "home" | "switch"; targetGraphId?: string }>(null);
   const [appDialog, setAppDialog] = useState<{
     variant: "alert" | "confirm" | "prompt";
@@ -115,7 +117,7 @@ const App = () => {
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("inspector");
 
   // Header tab state
-  const [headerTab, setHeaderTab] = useState<"home" | "graph-editor" | "display">("home");
+  const [headerTab, setHeaderTab] = useState<"home" | "graph-editor" | "dashboard">("home");
 
   // Clipboard state for copy/paste (nodes only, no edges)
   const [clipboard, setClipboard] = useState<Node<BlueprintNodeData>[] | null>(null);
@@ -138,6 +140,8 @@ const App = () => {
 
   // Node library hook
   const { nodeLibrary } = useNodeLibrary();
+
+
 
   // Panel resize hook
   const {
@@ -178,6 +182,7 @@ const App = () => {
     getPortYOffset,
     buildDefaultInputValues,
     getInitialPorts,
+    handleTogglePublish,
   } = useNodeOperations({
     setNodes,
     setEdges,
@@ -411,6 +416,7 @@ const App = () => {
         void clearBackendCacheForNodes([nodeId]);
       }
     },
+    onTogglePublish: handleTogglePublish,
     // PERF: Removed executionId and nodeMap from deps - accessed via refs now
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
@@ -426,7 +432,7 @@ const App = () => {
 
   // ========== Computed values ==========
 
-  const displaySummary = useMemo(() => {
+  const dashboardSummary = useMemo(() => {
     let sections = new Set<string>();
     let totalItems = 0;
 
@@ -445,6 +451,25 @@ const App = () => {
 
     return { sections: sections.size, totalItems };
   }, [nodes, outputs]);
+
+  // Collect published ports from all nodes
+  const publishedItems = useMemo(() => {
+    const items: { nodeId: string; nodeName: string; port: PublishedPortData }[] = [];
+    
+    for (const node of nodes) {
+      const publishedPorts = node.data.published_ports || {};
+      
+      for (const [key, portData] of Object.entries(publishedPorts)) {
+        items.push({
+          nodeId: node.id,
+          nodeName: node.data.displayName,
+          port: portData,
+        });
+      }
+    }
+    
+    return items;
+  }, [nodes]);
 
   const handleJumpToNode = useCallback((nodeId: string) => {
     setHeaderTab("graph-editor");
@@ -647,6 +672,7 @@ const App = () => {
     setSelectedEdgeIds([]);
     setSelectedNodeId(null);
     setHighlightedNodeIds([]);
+    setIsDashboardDirty(false); // Reset dashboard dirty state when loading a graph
 
     if (data.ui) {
       if (typeof data.ui.leftPanelCollapsed === "boolean") {
@@ -679,6 +705,7 @@ const App = () => {
     setNodes([]);
     setEdges([]);
     setIsGraphDirty(false);
+    setIsDashboardDirty(false);
     lastSavedSnapshotRef.current = null;
     setHeaderTab("home");
   }, [setEdges, setHeaderTab, setNodes]);
@@ -692,9 +719,9 @@ const App = () => {
     });
   }, []);
 
-  const handleHeaderTabChange = useCallback((nextTab: "home" | "graph-editor" | "display") => {
+  const handleHeaderTabChange = useCallback((nextTab: "home" | "graph-editor" | "dashboard") => {
     if (nextTab === "home") {
-      if (isGraphDirty) {
+      if (isGraphDirty || isDashboardDirty) {
         setUnsavedDialog({ mode: "home" });
         return;
       }
@@ -706,7 +733,7 @@ const App = () => {
       return;
     }
     setHeaderTab(nextTab);
-  }, [currentGraphId, isGraphDirty, setHeaderTab]);
+  }, [currentGraphId, isGraphDirty, isDashboardDirty, setHeaderTab]);
 
   const refreshGraphs = useCallback(async () => {
     if (!session) return;
@@ -1009,6 +1036,7 @@ const App = () => {
     hydrateGraph(created.data);
     lastSavedSnapshotRef.current = JSON.stringify(created.data);
     setIsGraphDirty(false);
+    setIsDashboardDirty(false);
     setHeaderTab("graph-editor");
   }, [hydrateGraph, leftPanelCollapsed, leftPanelWidth, rightPanelCollapsed, rightPanelWidth, session, setHeaderTab]);
 
@@ -1056,6 +1084,7 @@ const App = () => {
     setGraphs((prev) => prev.map((graph) => (graph.id === updated.id ? updated : graph)));
     lastSavedSnapshotRef.current = JSON.stringify(updated.data);
     setIsGraphDirty(false);
+    setIsDashboardDirty(false); // Also clear dashboard dirty state when saving
   }, [currentGraphId, serializeGraph, session]);
 
   const handleUnsavedSaveContinue = useCallback(async () => {
@@ -1098,6 +1127,7 @@ const App = () => {
       setNodes([]);
       setEdges([]);
       setIsGraphDirty(false);
+      setIsDashboardDirty(false);
       lastSavedSnapshotRef.current = null;
       setHeaderTab("home");
     }
@@ -2086,13 +2116,31 @@ const App = () => {
             )}
           </div>
           <div
-            className="outputs-fullpage"
-            style={{ display: headerTab === "display" ? "block" : "none" }}
+            style={{
+              display: headerTab === "dashboard" ? "block" : "none",
+              position: "absolute",
+              top: "44px",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "var(--bg-canvas)",
+              overflow: "hidden",
+              margin: 0,
+              padding: 0,
+              zIndex: 5
+            }}
           >
-            <DisplayView
+            <DashboardView
               nodes={nodes}
               outputs={outputs}
+              onRunGraph={handleRunGraphRef.current?.bind(null, "full")}
+              isRunning={isRunning}
+              onInputChange={handleInputValueChange}
+              onSave={handleSaveGraph}
+              publishedItems={publishedItems}
               onJumpToNode={handleJumpToNode}
+              onTogglePublish={handleTogglePublish}
+              onDirtyChange={setIsDashboardDirty}
             />
           </div>
 
@@ -2100,9 +2148,9 @@ const App = () => {
             headerTab={headerTab}
             onTabChange={handleHeaderTabChange}
             graphSummary={graphSummary}
-            displaySummary={displaySummary}
+            displaySummary={dashboardSummary}
             graphName={currentGraph?.name ?? null}
-            isGraphDirty={isGraphDirty}
+            isGraphDirty={isGraphDirty || isDashboardDirty}
             isRunning={isRunning}
             isConnected={isConnected}
             progress={progress}
@@ -2287,6 +2335,7 @@ const App = () => {
                             }}
                             hoveredPort={hoveredPort}
                             onPortHover={(info) => setHoveredPort(info)}
+                            onTogglePublish={handleTogglePublish}
                           />
                         )}
                         {rightPanelTab === "execution" && (

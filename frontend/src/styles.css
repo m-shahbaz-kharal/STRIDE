@@ -1652,13 +1652,70 @@ body {
   font-size: 14px;
   font-weight: 400;
   color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: all 0.12s ease;
 }
 
 .palette-item:hover .palette-item-add {
   opacity: 1;
-  color: var(--accent-green);
+}
+
+.palette-item-add:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.palette-item.palette-item-with-actions {
+  position: relative;
+}
+
+.palette-item-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.palette-item.palette-item-with-actions:hover .palette-item-actions,
+.palette-item-with-actions:hover .palette-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.palette-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.palette-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.palette-action-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .palette-empty {
@@ -3755,6 +3812,42 @@ body {
   background: var(--bg-hover);
 }
 
+.node-port-publish-btn {
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  opacity: 0.3;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.node-port:hover .node-port-publish-btn,
+.node-port-publish-btn.published {
+  opacity: 1;
+}
+
+.node-port-publish-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.node-port-publish-btn.published {
+  opacity: 1;
+  color: var(--accent-blue);
+}
+
+.node-port-publish-btn.published:hover {
+  opacity: 1;
+  color: var(--accent-blue);
+}
+
 .control-port-label {
   font-size: 9px;
   text-transform: uppercase;
@@ -4841,4 +4934,18 @@ body {
   max-height: 300px;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.2);
+}
+
+
+/* Dashboard Hover Resize Handle */
+.dashboard-widget-wrapper:hover .hover-resize-handle:not(.selected) {
+  opacity: 1 !important;
+}
+
+.hover-resize-handle.selected {
+  opacity: 1 !important;
+}
+
+.hover-resize-handle:hover svg {
+  fill: var(--accent-primary) !important;
 }

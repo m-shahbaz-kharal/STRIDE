@@ -15,6 +15,7 @@ type InspectorProps = {
   onDuplicate?: (nodeId: string) => void;
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  onTogglePublish: (nodeId: string, portId: string, direction: "input" | "output", kind: any) => void;
 };
 
 // Value display component with expand button
@@ -83,9 +84,12 @@ const PortRow = React.memo(({
   direction,
   value,
   isHighlighted,
+  isPublished,
   onHover,
+  onTogglePublish,
   valueElement,
   actionElement,
+  rawKind,
 }: {
   nodeId: string;
   portName: string;
@@ -93,9 +97,12 @@ const PortRow = React.memo(({
   direction: "input" | "output";
   value: unknown;
   isHighlighted: boolean;
+  isPublished?: boolean;
   onHover: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  onTogglePublish: (nodeId: string, portId: string, direction: "input" | "output", kind: any) => void;
   valueElement?: React.ReactNode;
   actionElement?: React.ReactNode;
+  rawKind?: any;
 }) => (
   <div
     className={`inspector-port-row ${isHighlighted ? "highlighted" : ""}`}
@@ -113,16 +120,39 @@ const PortRow = React.memo(({
     onMouseLeave={() => onHover(null)}
   >
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: '80px', flexShrink: 0 }}>
-      <span style={{
-        color: isHighlighted ? 'var(--accent-blue)' : 'var(--text-primary)',
-        fontSize: '12px',
-        fontWeight: 500,
-      }}>
-        {portName}
-      </span>
+      {/* Publish Toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+        <button
+          className={`icon-btn ${isPublished ? 'active' : ''}`}
+          style={{
+            padding: 0,
+            width: '16px',
+            height: '16px',
+            opacity: isPublished ? 1 : 0.3,
+            color: isPublished ? 'var(--accent-blue)' : 'inherit',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer'
+          }}
+          title={isPublished ? "Unpublish" : "Publish to Dashboard"}
+          onClick={(e) => { e.stopPropagation(); onTogglePublish(nodeId, portName, direction, rawKind); }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+            <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+          </svg>
+        </button>
+        <span style={{
+          color: isHighlighted ? 'var(--accent-blue)' : 'var(--text-primary)',
+          fontSize: '12px',
+          fontWeight: 500,
+        }}>
+          {portName}
+        </span>
+      </div>
       <span style={{
         color: 'var(--text-muted)',
         fontSize: '10px',
+        paddingLeft: '22px'
       }}>
         {portType}
       </span>
@@ -152,6 +182,7 @@ const NodeCard = ({
   isSingleNode,
   hoveredPort,
   onPortHover,
+  onTogglePublish,
 }: {
   node: Node<BlueprintNodeData>;
   edges: Edge[];
@@ -167,8 +198,10 @@ const NodeCard = ({
   isSingleNode: boolean;
   hoveredPort?: { nodeId: string; port: string; direction: "input" | "output" } | null;
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
+  onTogglePublish: (nodeId: string, portId: string, direction: "input" | "output", kind: any) => void;
 }) => {
   const hasOutputs = node.data.last_outputs && Object.keys(node.data.last_outputs).length > 0;
+  const published = node.data.published_ports || {};
 
   // Build input ports with values
   const inputPorts = useMemo(() => {
@@ -189,9 +222,11 @@ const NodeCard = ({
     return outputs.map((output) => ({
       name: output.name,
       type: formatPortTypeLabel(output.type),
+      rawType: output.type,
       value: lastOutputs[output.name],
     }));
   }, [node.data.metadata?.outputs, node.data.last_outputs]);
+
 
   const inputConnections = useMemo(() => {
     const connections = new Map<string, string>();
@@ -332,6 +367,7 @@ const NodeCard = ({
                   const sourceName = sourceNodeId ? nodeNameById.get(sourceNodeId) ?? "Source node" : null;
                   const isConnected = Boolean(sourceNodeId);
                   const inputValue = port.value === undefined || port.value === null ? "" : String(port.value);
+                  const isPublished = Boolean(published[`input_${port.name}`]);
                   return (
                     <PortRow
                       key={port.name}
@@ -341,7 +377,10 @@ const NodeCard = ({
                       direction="input"
                       value={port.value}
                       isHighlighted={isHighlighted}
+                      isPublished={isPublished}
                       onHover={handlePortHover}
+                      onTogglePublish={onTogglePublish}
+                      rawKind={port.rawType}
                       valueElement={
                         isConnected ? (
                           <span className="inspector-connected-tag">Connected</span>
@@ -384,6 +423,7 @@ const NodeCard = ({
                     hoveredPort?.port === port.name &&
                     hoveredPort?.direction === "output";
                   const targets = outputConnections.get(port.name) ?? [];
+                  const isPublished = Boolean(published[`output_${port.name}`]);
                   return (
                     <PortRow
                       key={port.name}
@@ -393,7 +433,10 @@ const NodeCard = ({
                       direction="output"
                       value={port.value}
                       isHighlighted={isHighlighted}
+                      isPublished={isPublished}
                       onHover={handlePortHover}
+                      onTogglePublish={onTogglePublish}
+                      rawKind={port.rawType}
                       actionElement={
                         targets.length > 0 ? (
                           <div className="inspector-targets">
@@ -442,6 +485,7 @@ const NodeInspector = ({
   onDuplicate,
   hoveredPort,
   onPortHover,
+  onTogglePublish,
 }: InspectorProps) => {
   // Track expanded nodes in multi-select mode
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -499,6 +543,7 @@ const NodeInspector = ({
             readOnly={isPreviewMode}
             hoveredPort={hoveredPort}
             onPortHover={onPortHover}
+            onTogglePublish={onTogglePublish}
           />
         ))}
       </div>
