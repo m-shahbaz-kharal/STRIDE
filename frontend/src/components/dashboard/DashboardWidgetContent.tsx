@@ -117,10 +117,10 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                                 onPointerDown={e => e.stopPropagation()}
                                 style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
                             />
-                            <span style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--text-primary)' }}>{value ? 'True' : 'False'}</span>
                         </div>
                     ) : (widget.inputType === 'int' || widget.inputType === 'float') ? (
                         <input
+                            className="no-spinners"
                             type="number"
                             value={value ?? ""}
                             step={widget.inputType === 'float' ? "any" : "1"}

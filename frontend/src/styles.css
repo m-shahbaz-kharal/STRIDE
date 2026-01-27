@@ -4994,3 +4994,15 @@ body {
 .hover-resize-handle:hover svg {
   fill: var(--accent-primary) !important;
 }
+
+/* Hide number input spinners */
+.no-spinners::-webkit-outer-spin-button,
+.no-spinners::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinners[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
