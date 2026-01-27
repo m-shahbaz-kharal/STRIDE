@@ -15,8 +15,8 @@ interface DashboardCanvasProps {
     outputs: Record<string, unknown>;
     nodes: Node<BlueprintNodeData>[];
     onInputChange?: (nodeId: string, portName: string, value: any) => void;
-    viewBounds?: { x: number; y: number; w: number; h: number };
-    onUpdateViewBounds?: (bounds: { x: number; y: number; w: number; h: number }) => void;
+    viewBounds?: { x: number; y: number; w: number; h: number; style?: Record<string, any> };
+    onUpdateViewBounds?: (bounds: { x: number; y: number; w: number; h: number; style?: Record<string, any> }) => void;
 }
 
 const GRID_SIZE = 20;
@@ -302,7 +302,8 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                 x: dragState.initialX,
                 y: dragState.initialY,
                 w: dragState.initialW,
-                h: dragState.initialH
+                h: dragState.initialH,
+                style: viewBounds?.style
             };
 
             if (dragState.handle === "move") {
@@ -419,6 +420,8 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                         width: viewModeMetrics.width,
                         height: viewModeMetrics.height,
                         position: 'relative',
+                        backgroundColor: '#ffffff', // Default background
+                        ...(viewBounds?.style || {})
                     }}
                 >
                     <div className="transform-layer" style={{
@@ -505,14 +508,21 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                 top: viewBounds.y,
                                 width: viewBounds.w,
                                 height: viewBounds.h,
-                                border: '2px dashed #666',
-                                pointerEvents: 'auto',
+                                border: mode === 'design' ? '2px dashed #666' : 'none',
+                                ...((viewBounds as any).style || {}),
+                                pointerEvents: mode === 'design' ? 'auto' : 'none', // Allow clicking through if needed, or keep auto if background clicks are relevant? 
+                                // Actually user wants it to be the background, so maybe it should block clicks to grid?
+                                // User said "base/parent/root".
+                                // If I make pointerEvents: none in view mode, interactivity passes to grid.
+                                // If I make it auto, it blocks grid panning if we aren't careful.
+                                // But standard behavior for a "page" is usually static.
+                                // Let's keep it auto for now but remove border.
                                 zIndex: 0
                             }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
-                                // Deselect widgets when interacting with view bounds
-                                onSelectWidget(null);
+                                // Select view bounds for customization
+                                onSelectWidget("view-bounds");
                                 setEditingWidgetId(null);
                                 e.currentTarget.setPointerCapture(e.pointerId);
                                 setDragState({

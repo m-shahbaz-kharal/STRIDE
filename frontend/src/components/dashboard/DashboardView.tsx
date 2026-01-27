@@ -4,6 +4,7 @@ import { BlueprintNodeData, DashboardLayout, DashboardWidget, PublishedPortData 
 import DashboardCanvas from "./DashboardCanvas";
 import DashboardPalette from "./DashboardPalette";
 import DashboardProperties from "./DashboardProperties";
+import DashboardViewportProperties from "./DashboardViewportProperties";
 
 interface DashboardViewProps {
     nodes: Node<BlueprintNodeData>[];
@@ -220,7 +221,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         onDirtyChange?.(true);
     };
 
-    const handleUpdateViewBounds = (bounds: { x: number; y: number; w: number; h: number }) => {
+    const handleUpdateViewBounds = (bounds: { x: number; y: number; w: number; h: number; style?: Record<string, unknown> }) => {
         // Optimization: Debounce this or separate commit as with widgets if needed
         onLayoutChange({
             ...layout,
@@ -231,6 +232,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
     };
 
     const selectedWidget = layout.widgets.find(w => w.id === selectedWidgetId) || null;
+    const currentViewport = layout.viewport || { x: 0, y: 0, w: 800, h: 600, style: {} };
 
     // Auto-switch to view mode when running
     useEffect(() => {
@@ -454,7 +456,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                                     className="resize-handle left"
                                     onMouseDown={startResizingRight}
                                 />
-                                {selectedWidget ? (
+                                {selectedWidgetId === "view-bounds" ? (
+                                    <DashboardViewportProperties
+                                        viewport={currentViewport}
+                                        onUpdate={(updates) => handleUpdateViewBounds({ ...currentViewport, ...updates })}
+                                    />
+                                ) : selectedWidget ? (
                                     <DashboardProperties
                                         widget={selectedWidget}
                                         onUpdate={handleUpdateWidget}

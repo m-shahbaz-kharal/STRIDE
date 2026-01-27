@@ -252,7 +252,7 @@ export interface DashboardWidget {
 export interface DashboardLayout {
   widgets: DashboardWidget[];
   rootContainerId?: string; // If we want a specific root
-  viewport?: { x: number; y: number; w: number; h: number };
+  viewport?: { x: number; y: number; w: number; h: number; style?: Record<string, unknown> };
 }
 
 export interface ExecutionResult {
