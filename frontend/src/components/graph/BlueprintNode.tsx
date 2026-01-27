@@ -478,6 +478,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               return null;
             }
 
+            const isPublished = !!data.published_ports?.[`input_${port}`];
+
             const color = getPortTypeColor(portType);
             const handleStyle: React.CSSProperties = { ["--handle-color" as string]: color };
 
@@ -499,7 +501,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             return (
               <div
                 key={`in-${port}-${index}`}
-                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""}`}
+                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${isPublished ? "port-published-blocked" : ""}`}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
@@ -507,7 +509,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   type="target"
                   position={Position.Left}
                   id={port}
-                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""}`}
+                  isConnectable={!isPublished}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${isPublished ? "handle-blocked" : ""}`}
                   style={handleStyle}
                 >
                   {isControl && (

@@ -69,6 +69,29 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ========== Global Scrollbar ========== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ========== Main Layout ========== */
 
 .app-shell {
@@ -137,7 +160,8 @@ body {
   align-items: center;
   gap: 8px;
   box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
   pointer-events: none;
   z-index: 120;
 }
@@ -4050,6 +4074,23 @@ body {
 .port-highlighted .node-port-label,
 .port-highlighted .port-type-text {
   color: inherit;
+}
+
+/* Blocked/Published Port Styles */
+.node-handle.handle-blocked {
+  background: var(--bg-deep) !important;
+  border-color: var(--border-subtle) !important;
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.node-port.port-published-blocked {
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.node-port.port-published-blocked:hover {
+  opacity: 1;
 }
 
 /* Node State Classes */

@@ -1,3 +1,6 @@
+import { Node, Edge } from "reactflow";
+import { BlueprintNodeData, DashboardLayout } from "./types";
+
 export interface User {
   id: string;
   email: string;
@@ -25,14 +28,15 @@ export interface GraphRecord {
 }
 
 export interface GraphData {
-  nodes: any[];
-  edges: any[];
+  nodes: Node<BlueprintNodeData>[];
+  edges: Edge[];
   ui?: {
     leftPanelCollapsed?: boolean;
     rightPanelCollapsed?: boolean;
     leftPanelWidth?: number;
     rightPanelWidth?: number;
   };
+  dashboard?: DashboardLayout;
 }
 
 const SESSION_KEY = "liguard_session";

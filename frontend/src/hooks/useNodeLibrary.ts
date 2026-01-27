@@ -72,7 +72,7 @@ export const useNodeLibrary = () => {
                     const response = await fetch(url);
                     if (!response.ok) continue;
                     const data: any[] = await response.json();
-                    setNodeLibrary(data.map((d) => normalizeDefinition(d)));
+                    setNodeLibrary(data.filter((d) => d.node_type !== "general.to_display").map((d) => normalizeDefinition(d)));
                     setIsLoading(false);
                     return;
                 } catch (err) {

@@ -19,16 +19,12 @@ interface GraphSummary {
     selectedCount: number;
 }
 
-interface DashboardSummary {
-    sections: number;
-    totalItems: number;
-}
+
 
 interface AppHeaderProps {
     headerTab: "home" | "graph-editor" | "dashboard";
     onTabChange: (tab: "home" | "graph-editor" | "dashboard") => void;
     graphSummary: GraphSummary;
-    displaySummary: DashboardSummary;
     graphName: string | null;
     isGraphDirty: boolean;
     isRunning: boolean;
@@ -52,7 +48,6 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     headerTab,
     onTabChange,
     graphSummary,
-    displaySummary,
     graphName,
     isGraphDirty,
     isRunning,
@@ -144,16 +139,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                     </div>
                 )}
 
-                {headerTab === "dashboard" && (
-                    <div className="outputs-pills header-pills">
-                        <span className="pill">
-                            {displaySummary.sections} section{displaySummary.sections === 1 ? "" : "s"}
-                        </span>
-                        <span className="pill">
-                            {displaySummary.totalItems} item{displaySummary.totalItems === 1 ? "" : "s"}
-                        </span>
-                    </div>
-                )}
+
 
                 {headerTab === "graph-editor" && isRunning && (
                     <div className="header-stats">

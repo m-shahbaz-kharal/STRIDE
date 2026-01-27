@@ -16,11 +16,13 @@ interface DashboardViewProps {
     onJumpToNode?: (nodeId: string) => void;
     onTogglePublish?: (nodeId: string, portId: string, direction: "input" | "output", kind: any) => void;
     onDirtyChange?: (isDirty: boolean) => void;
+    layout: DashboardLayout;
+    onLayoutChange: (layout: DashboardLayout) => void;
 }
 
-const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGraph, isRunning, onInputChange, onSave, publishedItems = [], onJumpToNode, onTogglePublish, onDirtyChange }) => {
+const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGraph, isRunning, onInputChange, onSave, publishedItems = [], onJumpToNode, onTogglePublish, onDirtyChange, layout, onLayoutChange }) => {
     const [mode, setMode] = useState<"design" | "view">("design");
-    const [layout, setLayout] = useState<DashboardLayout>({ widgets: [] });
+    // Layout state lifted to parent
     const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
     const [snapToGrid, setSnapToGrid] = useState(true);
 
@@ -65,7 +67,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
             past: [...prev.past, layout],
             future: []
         }));
-        setLayout(newLayout);
+        onLayoutChange(newLayout);
         setIsDirty(true);
         onDirtyChange?.(true);
     };
@@ -79,7 +81,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
             past: newPast,
             future: [layout, ...history.future]
         });
-        setLayout(previous);
+        onLayoutChange(previous);
         setIsDirty(true);
         onDirtyChange?.(true);
     };
@@ -93,7 +95,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
             past: [...history.past, layout],
             future: newFuture
         });
-        setLayout(next);
+        onLayoutChange(next);
         setIsDirty(true);
         onDirtyChange?.(true);
     };
@@ -148,10 +150,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         // For now, I will modify this to just update layout directly, 
         // and add a new prop to DashboardCanvas: onWidgetChangeComplete
 
-        setLayout(prev => ({
-            ...prev,
-            widgets: prev.widgets.map(w => w.id === id ? { ...w, ...updates } : w)
-        }));
+        onLayoutChange({
+            ...layout,
+            widgets: layout.widgets.map(w => w.id === id ? { ...w, ...updates } : w)
+        });
         setIsDirty(true);
         onDirtyChange?.(true);
     };
@@ -209,11 +211,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
     const handleDeleteWidget = (id: string) => {
         if (id === "root-container") return;
         pushToHistory(layout); // Save current state before delete
-        setLayout(prev => ({
-            ...prev,
-            widgets: prev.widgets.filter(w => w.id !== id)
-        }));
+        onLayoutChange({
+            ...layout,
+            widgets: layout.widgets.filter(w => w.id !== id)
+        });
         if (selectedWidgetId === id) setSelectedWidgetId(null);
+        setIsDirty(true);
+        onDirtyChange?.(true);
+    };
+
+    const handleUpdateViewBounds = (bounds: { x: number; y: number; w: number; h: number }) => {
+        // Optimization: Debounce this or separate commit as with widgets if needed
+        onLayoutChange({
+            ...layout,
+            viewport: bounds
+        });
         setIsDirty(true);
         onDirtyChange?.(true);
     };
@@ -253,7 +265,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                                         // Find the port kind from the node
                                         const node = nodes.find(n => n.id === nodeId);
                                         if (node) {
-                                            const portType = direction === "input" 
+                                            const portType = direction === "input"
                                                 ? node.data.input_port_types?.[portId]
                                                 : node.data.output_port_types?.[portId];
                                             onTogglePublish(nodeId, portId, direction, portType);
@@ -329,8 +341,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                         </button>
                     </div>
 
-                    {/* Undo/Redo/Save Controls - Design Mode Only */}
-                    {mode === "design" && (
+
+                </div>
+
+                {/* Snap to Grid Icon & Undo/Redo - Design Mode Only */}
+                {mode === "design" && (
+                    <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 50, display: 'flex', gap: '10px' }}>
+                        {/* Undo/Redo */}
                         <div style={{
                             background: 'var(--bg-elevated)',
                             padding: '4px',
@@ -339,16 +356,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                             gap: '4px',
                             boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                             border: '1px solid var(--border-subtle)',
-                            alignItems: 'center'
+                            alignItems: 'center',
+                            height: '36px', // Match Snap Button Height
+                            boxSizing: 'border-box'
                         }}>
                             <button
                                 onClick={handleUndo}
                                 disabled={history.past.length === 0}
                                 title="Undo (Ctrl+Z)"
                                 className="icon-btn"
-                                style={{ width: 32, height: 32, border: 'none', background: 'transparent' }} // use opacity for disabled
+                                style={{ width: 28, height: 28, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: history.past.length === 0 ? 0.3 : 1 }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: history.past.length === 0 ? 0.3 : 1 }}>
                                     <path d="M3 7v6h6"></path>
                                     <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
                                 </svg>
@@ -358,21 +377,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                                 disabled={history.future.length === 0}
                                 title="Redo (Ctrl+Y)"
                                 className="icon-btn"
-                                style={{ width: 32, height: 32, border: 'none', background: 'transparent' }}
+                                style={{ width: 28, height: 28, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: history.future.length === 0 ? 0.3 : 1 }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: history.future.length === 0 ? 0.3 : 1 }}>
                                     <path d="M21 7v6h-6"></path>
                                     <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
                                 </svg>
                             </button>
-
                         </div>
-                    )}
-                </div>
 
-                {/* Snap to Grid Icon - Design Mode Only */}
-                {mode === "design" && (
-                    <div style={{ position: 'absolute', top: 20, right: 20, zIndex: 50 }}>
+                        {/* Snap Button */}
                         <button
                             onClick={() => setSnapToGrid(!snapToGrid)}
                             title={`Snap to Grid: ${snapToGrid ? "On" : "Off"}`}
@@ -412,6 +426,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                         outputs={outputs}
                         nodes={nodes}
                         onInputChange={onInputChange}
+                        viewBounds={layout.viewport}
+                        onUpdateViewBounds={handleUpdateViewBounds}
                     />
                 </div>
             </div>

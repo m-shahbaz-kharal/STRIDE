@@ -46,6 +46,7 @@ import {
   BlueprintNodeData,
   NodeTypeDefinition,
   PublishedPortData,
+  DashboardLayout,
 } from "./types";
 import { CloseIcon } from "./components/Icons";
 import {
@@ -84,6 +85,7 @@ const App = () => {
   const [currentGraphId, setCurrentGraphId] = useState<string | null>(null);
   const [isGraphDirty, setIsGraphDirty] = useState(false);
   const [isDashboardDirty, setIsDashboardDirty] = useState(false);
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>({ widgets: [], viewport: { x: 0, y: 0, w: 1920, h: 1080 } });
   const [unsavedDialog, setUnsavedDialog] = useState<null | { mode: "home" | "switch"; targetGraphId?: string }>(null);
   const [appDialog, setAppDialog] = useState<{
     variant: "alert" | "confirm" | "prompt";
@@ -432,33 +434,15 @@ const App = () => {
 
   // ========== Computed values ==========
 
-  const dashboardSummary = useMemo(() => {
-    let sections = new Set<string>();
-    let totalItems = 0;
 
-    for (const node of nodes) {
-      if (node.data.nodeType !== "general.to_display") continue;
-
-      const nodeOutputs = (outputs[node.id] || node.data.last_outputs) as any;
-      if (!nodeOutputs) continue;
-
-      // Check if this node actually produced display output (has a value)
-      if (nodeOutputs.value !== undefined) {
-        sections.add(nodeOutputs.section || "Main");
-        totalItems++;
-      }
-    }
-
-    return { sections: sections.size, totalItems };
-  }, [nodes, outputs]);
 
   // Collect published ports from all nodes
   const publishedItems = useMemo(() => {
     const items: { nodeId: string; nodeName: string; port: PublishedPortData }[] = [];
-    
+
     for (const node of nodes) {
       const publishedPorts = node.data.published_ports || {};
-      
+
       for (const [key, portData] of Object.entries(publishedPorts)) {
         items.push({
           nodeId: node.id,
@@ -467,7 +451,7 @@ const App = () => {
         });
       }
     }
-    
+
     return items;
   }, [nodes]);
 
@@ -518,8 +502,6 @@ const App = () => {
         return "#d29922";
       case "control":
         return "#a371f7";
-      case "display":
-        return "#39d3e8";
       case "container":
         return "#4a9eff";
       default:
@@ -548,10 +530,8 @@ const App = () => {
         input_port_types: node.data.input_port_types,
         output_port_types: node.data.output_port_types,
         params: node.data.params,
-        inputValues: node.data.inputValues,
-        breakpoint: node.data.breakpoint,
-        showControlPorts: node.data.showControlPorts,
         cacheEnabled: node.data.cacheEnabled,
+        published_ports: node.data.published_ports,
       },
     }));
 
@@ -574,8 +554,9 @@ const App = () => {
         leftPanelWidth,
         rightPanelWidth,
       },
+      dashboard: dashboardLayout,
     };
-  }, [edges, leftPanelCollapsed, leftPanelWidth, nodes, rightPanelCollapsed, rightPanelWidth]);
+  }, [dashboardLayout, edges, leftPanelCollapsed, leftPanelWidth, nodes, rightPanelCollapsed, rightPanelWidth]);
 
   const hydrateGraph = useCallback((data: GraphData) => {
     skipDirtyRef.current = true;
@@ -619,6 +600,7 @@ const App = () => {
           height: node.height ?? fallbackSize.height,
           showControlPorts: node.data?.showControlPorts ?? false,
           cacheEnabled: node.data?.cacheEnabled ?? false,
+          published_ports: node.data?.published_ports,
           executionLogs: [],
         },
       };
@@ -688,6 +670,12 @@ const App = () => {
         setRightPanelWidth(data.ui.rightPanelWidth);
       }
     }
+
+    if (data.dashboard) {
+      setDashboardLayout(data.dashboard);
+    } else {
+      setDashboardLayout({ widgets: [], viewport: { x: 0, y: 0, w: 1920, h: 1080 } });
+    }
   }, [buildDefaultInputValues, getInitialPorts, nodeIdRef, nodeLibrary, setEdges, setLeftPanelCollapsed, setLeftPanelWidth, setNodes, setRightPanelCollapsed, setRightPanelWidth]);
 
   // ========== Effects ==========
@@ -704,6 +692,7 @@ const App = () => {
     setCurrentGraphId(null);
     setNodes([]);
     setEdges([]);
+    setDashboardLayout({ widgets: [], viewport: { x: 0, y: 0, w: 1920, h: 1080 } });
     setIsGraphDirty(false);
     setIsDashboardDirty(false);
     lastSavedSnapshotRef.current = null;
@@ -2141,6 +2130,11 @@ const App = () => {
               onJumpToNode={handleJumpToNode}
               onTogglePublish={handleTogglePublish}
               onDirtyChange={setIsDashboardDirty}
+              layout={dashboardLayout}
+              onLayoutChange={(newLayout) => {
+                setDashboardLayout(newLayout);
+                setIsDashboardDirty(true);
+              }}
             />
           </div>
 
@@ -2148,7 +2142,7 @@ const App = () => {
             headerTab={headerTab}
             onTabChange={handleHeaderTabChange}
             graphSummary={graphSummary}
-            displaySummary={dashboardSummary}
+
             graphName={currentGraph?.name ?? null}
             isGraphDirty={isGraphDirty || isDashboardDirty}
             isRunning={isRunning}
