@@ -41,6 +41,10 @@
   --status-error: #f85149;
   --status-warning: #d29922;
   --status-queued: #d29922;
+
+  /* Aliases */
+  --accent-primary: var(--accent-blue);
+  --accent-secondary: var(--accent-purple);
 }
 
 * {

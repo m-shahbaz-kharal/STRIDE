@@ -511,6 +511,9 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                             }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
+                                // Deselect widgets when interacting with view bounds
+                                onSelectWidget(null);
+                                setEditingWidgetId(null);
                                 e.currentTarget.setPointerCapture(e.pointerId);
                                 setDragState({
                                     isDragging: true,
@@ -587,16 +590,12 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                     width: widget.w,
                                     height: widget.h,
                                     boxSizing: 'border-box',
-                                    top: widget.y,
-                                    width: widget.w,
-                                    height: widget.h,
-                                    boxSizing: 'border-box',
-                                    outline: isSelected && !isRoot
-                                        ? '2px solid var(--accent-primary)'
-                                        : (hoveredWidgetId === widget.id && !isRoot ? '1px solid var(--accent-primary)' : 'none'),
+                                    outline: 'none',
                                     background: 'transparent',
                                     borderRadius: '4px',
-                                    boxShadow: 'none',
+                                    boxShadow: isSelected && !isRoot
+                                        ? '0 0 0 2px var(--selection-yellow), 0 4px 16px rgba(0, 0, 0, 0.4)'
+                                        : (hoveredWidgetId === widget.id && !isRoot ? '0 0 0 1px var(--selection-yellow-light), 0 4px 12px rgba(0, 0, 0, 0.3)' : 'none'),
                                     ...customStyle,
                                     zIndex: zIndex,
                                     pointerEvents: 'auto'
