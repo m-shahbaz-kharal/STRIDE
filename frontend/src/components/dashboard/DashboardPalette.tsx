@@ -46,6 +46,7 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
         // Define Core Items
         const coreItems = [
             { type: 'label', label: 'Text Label', description: 'Simple text label' },
+            { type: 'panel', label: 'Panel', description: 'Background container' },
             { type: 'container', label: 'Container', description: 'Group other widgets' },
         ];
 
@@ -170,9 +171,9 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                                     const publishedItem = isPublishedItem ? publishedItems.find(
                                         p => p.nodeId === item.nodeId && p.port.portId === item.portName
                                     ) : null;
-                                    
+
                                     return (
-                                        <div 
+                                        <div
                                             key={item.id}
                                             className="palette-item palette-item-with-actions"
                                             draggable
@@ -193,18 +194,18 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                                             title={item.desc}
                                             style={{ position: 'relative' }}
                                         >
-                                            <div 
-                                                className="palette-item-content" 
-                                                onClick={item.onClick} 
+                                            <div
+                                                className="palette-item-content"
+                                                onClick={item.onClick}
                                                 style={{ flex: 1, display: 'flex', alignItems: 'center', cursor: 'pointer', paddingRight: isPublishedItem ? '60px' : '8px' }}
                                             >
                                                 <span className="palette-item-name">{item.label}</span>
                                             </div>
 
                                             {isPublishedItem && (
-                                                <div 
-                                                    className="palette-item-actions" 
-                                                    style={{ 
+                                                <div
+                                                    className="palette-item-actions"
+                                                    style={{
                                                         position: 'absolute',
                                                         right: '4px',
                                                         top: '50%',
@@ -223,11 +224,11 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                                                                 e.stopPropagation();
                                                                 onJumpToNode(item.nodeId!);
                                                             }}
-                                                            style={{ 
-                                                                background: 'transparent', 
-                                                                border: 'none', 
-                                                                cursor: 'pointer', 
-                                                                color: 'var(--text-muted)', 
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                cursor: 'pointer',
+                                                                color: 'var(--text-muted)',
                                                                 padding: '4px',
                                                                 display: 'flex',
                                                                 alignItems: 'center',
@@ -250,11 +251,11 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                                                                 e.stopPropagation();
                                                                 onUnpublish(item.nodeId!, item.portName!, publishedItem.port.direction);
                                                             }}
-                                                            style={{ 
-                                                                background: 'transparent', 
-                                                                border: 'none', 
-                                                                cursor: 'pointer', 
-                                                                color: 'var(--text-muted)', 
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                cursor: 'pointer',
+                                                                color: 'var(--text-muted)',
                                                                 padding: '4px',
                                                                 display: 'flex',
                                                                 alignItems: 'center',

@@ -39,6 +39,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
     const canvasRef = useRef<HTMLDivElement>(null);
     const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
     const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
+    const [hoveredWidgetId, setHoveredWidgetId] = useState<string | null>(null);
     const [dragState, setDragState] = useState<{
         isDragging: boolean;
         type: 'widget' | 'pan' | 'viewBounds';
@@ -443,9 +444,9 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                         width: widget.w,
                                         height: widget.h,
                                         boxSizing: 'border-box',
-                                        background: widget.id === "root-container" ? 'transparent' : 'var(--bg-surface)',
+                                        background: 'transparent',
                                         borderRadius: '4px',
-                                        boxShadow: widget.id === "root-container" ? 'none' : '0 2px 4px rgba(0,0,0,0.2)',
+                                        boxShadow: 'none',
                                         ...customStyle,
                                         zIndex: widget.id === "root-container" ? 0 : (widget.zIndex ?? 1),
                                         pointerEvents: 'auto'
@@ -586,15 +587,23 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                     width: widget.w,
                                     height: widget.h,
                                     boxSizing: 'border-box',
-                                    outline: isSelected && !isRoot ? '2px solid var(--accent-primary)' : 'none',
-                                    background: isRoot ? 'transparent' : 'var(--bg-surface)',
+                                    top: widget.y,
+                                    width: widget.w,
+                                    height: widget.h,
+                                    boxSizing: 'border-box',
+                                    outline: isSelected && !isRoot
+                                        ? '2px solid var(--accent-primary)'
+                                        : (hoveredWidgetId === widget.id && !isRoot ? '1px solid var(--accent-primary)' : 'none'),
+                                    background: 'transparent',
                                     borderRadius: '4px',
-                                    boxShadow: isRoot ? 'none' : '0 2px 4px rgba(0,0,0,0.2)',
+                                    boxShadow: 'none',
                                     ...customStyle,
                                     zIndex: zIndex,
                                     pointerEvents: 'auto'
                                 }}
                                 onPointerDown={(e) => !isRoot && handlePointerDown(e, widget)}
+                                onPointerEnter={() => !isRoot && setHoveredWidgetId(widget.id)}
+                                onPointerLeave={() => !isRoot && setHoveredWidgetId(null)}
                                 onDoubleClick={(e) => handleDoubleClick(e, widget)}
                             >
                                 <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: isRoot ? 0 : '8px', position: 'relative' }}>

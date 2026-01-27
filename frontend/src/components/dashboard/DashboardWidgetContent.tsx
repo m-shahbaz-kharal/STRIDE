@@ -83,6 +83,8 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
             return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center' }}>{widget.label || "Label"}</div>;
         case "container":
             return <div style={{ width: '100%', height: '100%', border: '1px dashed var(--border-subtle)', borderRadius: '4px' }}></div>;
+        case "panel":
+            return <div style={{ width: '100%', height: '100%', background: 'var(--bg-surface)', borderRadius: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}></div>;
         case "bound-output":
             if (typeof value === "string" && (value.startsWith("data:image") || value.startsWith("http"))) {
                 return <img src={value} alt="output" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />;

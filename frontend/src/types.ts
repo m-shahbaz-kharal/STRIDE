@@ -225,7 +225,7 @@ export interface PublishedPortData {
   direction: "input" | "output";
 }
 
-export type WidgetType = "label" | "container" | "bound-input" | "bound-output";
+export type WidgetType = "label" | "container" | "bound-input" | "bound-output" | "panel";
 
 export interface DashboardWidget {
   id: string;
