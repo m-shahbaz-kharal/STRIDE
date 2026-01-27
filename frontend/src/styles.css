@@ -3868,12 +3868,12 @@ body {
 
 .node-port-publish-btn.published {
   opacity: 1;
-  color: var(--accent-blue);
+  color: var(--accent-orange);
 }
 
 .node-port-publish-btn.published:hover {
   opacity: 1;
-  color: var(--accent-blue);
+  color: var(--accent-orange);
 }
 
 .control-port-label {

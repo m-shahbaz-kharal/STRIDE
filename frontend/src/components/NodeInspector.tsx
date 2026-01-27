@@ -129,7 +129,7 @@ const PortRow = React.memo(({
             width: '16px',
             height: '16px',
             opacity: isPublished ? 1 : 0.3,
-            color: isPublished ? 'var(--accent-blue)' : 'inherit',
+            color: isPublished ? 'var(--accent-orange)' : 'inherit',
             background: 'none',
             border: 'none',
             cursor: 'pointer'
