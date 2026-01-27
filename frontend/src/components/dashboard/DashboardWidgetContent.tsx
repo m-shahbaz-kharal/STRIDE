@@ -108,16 +108,46 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
             return (
                 <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                     {widget.label && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{widget.label}</div>}
-                    <input
-                        type="text"
-                        value={value ?? ""}
-                        // readOnly={mode === "view"} // Inputs should be editable in view mode
-                        onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.value)}
-                        onPointerDown={e => e.stopPropagation()} // Allow interaction without drag
-                        style={{
-                            width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-input)', borderRadius: '4px', color: 'var(--text-primary)'
-                        }}
-                    />
+                    {widget.inputType === 'boolean' ? (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                            <input
+                                type="checkbox"
+                                checked={!!value}
+                                onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.checked)}
+                                onPointerDown={e => e.stopPropagation()}
+                                style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
+                            />
+                            <span style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--text-primary)' }}>{value ? 'True' : 'False'}</span>
+                        </div>
+                    ) : (widget.inputType === 'int' || widget.inputType === 'float') ? (
+                        <input
+                            type="number"
+                            value={value ?? ""}
+                            step={widget.inputType === 'float' ? "any" : "1"}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "") {
+                                    onInputChange?.(widget.nodeId!, widget.portName!, null);
+                                } else {
+                                    onInputChange?.(widget.nodeId!, widget.portName!, widget.inputType === 'int' ? parseInt(val) : parseFloat(val));
+                                }
+                            }}
+                            onPointerDown={e => e.stopPropagation()}
+                            style={{
+                                width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-input)', borderRadius: '4px', color: 'var(--text-primary)'
+                            }}
+                        />
+                    ) : (
+                        <input
+                            type="text"
+                            value={value ?? ""}
+                            onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.value)}
+                            onPointerDown={e => e.stopPropagation()}
+                            style={{
+                                width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-input)', borderRadius: '4px', color: 'var(--text-primary)'
+                            }}
+                        />
+                    )}
                 </div>
             );
         default:

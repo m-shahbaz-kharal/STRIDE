@@ -404,6 +404,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                             h: widgetData.h,
                             nodeId: widgetData.nodeId,
                             portName: widgetData.portName,
+                            inputType: widgetData.inputType,
                             style: widgetData.style || {}
                         });
                     } catch (err) {

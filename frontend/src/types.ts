@@ -246,6 +246,7 @@ export interface DashboardWidget {
   // Style/Config
   style?: Record<string, unknown>;
   parentId?: string; // For nesting in containers
+  inputType?: TypeKind; // For bound inputs, the expected type
 }
 
 

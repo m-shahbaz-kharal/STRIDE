@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { DashboardWidget, PublishedPortData } from "../../types";
+import { DashboardWidget, PublishedPortData, TypeKind } from "../../types";
 
 // Category icon component (reused from NodePalette style)
 const ChevronIcon = ({ collapsed }: { collapsed: boolean }) => (
@@ -64,7 +64,8 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
             w: number,
             h: number,
             nodeId?: string,
-            portName?: string
+            portName?: string,
+            inputType?: TypeKind
         }[]> = {
             "Core Widgets": [],
             "Inputs": [],
@@ -112,6 +113,7 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                     h: item.port.direction === "input" ? 80 : 200,
                     nodeId: item.nodeId,
                     portName: item.port.portId,
+                    inputType: item.port.kind,
                     onClick: () => {
                         onAddWidget({
                             id: `widget-${Date.now()}`,
@@ -122,6 +124,7 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                             h: item.port.direction === "input" ? 80 : 200,
                             nodeId: item.nodeId,
                             portName: item.port.portId,
+                            inputType: item.port.kind,
                             style: {}
                         });
                     }
@@ -186,6 +189,7 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
                                                     h: item.h,
                                                     nodeId: item.nodeId,
                                                     portName: item.portName,
+                                                    inputType: item.inputType,
                                                     style: {}
                                                 };
                                                 e.dataTransfer.setData("application/reactflow-widget", JSON.stringify(widgetData));
