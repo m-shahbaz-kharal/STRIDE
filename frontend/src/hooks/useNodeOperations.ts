@@ -166,7 +166,21 @@ export const useNodeOperations = ({
 
     const handleTogglePublish = useCallback(
         (nodeId: string, portId: string, direction: "input" | "output", kind: any) => {
+            // Check if unpublishing
+            const node = nodes.find(n => n.id === nodeId);
+            const key = `${direction}_${portId}`;
+            const isUnpublishing = !!node?.data.published_ports?.[key];
+
             const performToggle = () => {
+                // If publishing an input port, remove any existing connections to it
+                if (!isUnpublishing && direction === "input") {
+                    setEdges((currentEdges) =>
+                        currentEdges.filter(
+                            (edge) => !(edge.target === nodeId && edge.targetHandle === portId)
+                        )
+                    );
+                }
+
                 updateNodeData(nodeId, (data) => {
                     const published = { ...(data.published_ports ?? {}) };
                     const key = `${direction}_${portId}`;
@@ -185,11 +199,6 @@ export const useNodeOperations = ({
                     return { ...data, published_ports: published };
                 });
             };
-
-            // Check if unpublishing
-            const node = nodes.find(n => n.id === nodeId);
-            const key = `${direction}_${portId}`;
-            const isUnpublishing = node?.data.published_ports?.[key];
 
             if (isUnpublishing) {
                 // Check for dependent widgets
@@ -216,7 +225,7 @@ export const useNodeOperations = ({
 
             performToggle();
         },
-        [updateNodeData, nodes, dashboardLayout, onShowWarning, setDashboardLayout]
+        [updateNodeData, nodes, dashboardLayout, onShowWarning, setDashboardLayout, setEdges]
     );
 
     const handleAddInputPort = useCallback(
