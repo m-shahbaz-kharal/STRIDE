@@ -47,7 +47,6 @@ const DashboardPalette: React.FC<DashboardPaletteProps> = ({ publishedItems, onA
         const coreItems = [
             { type: 'label', label: 'Text Label', description: 'Simple text label' },
             { type: 'panel', label: 'Panel', description: 'Background container' },
-            { type: 'container', label: 'Container', description: 'Group other widgets' },
         ];
 
         // Filter Function

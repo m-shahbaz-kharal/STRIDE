@@ -24,6 +24,15 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
     onInputChange
 }) => {
     const isEditing = editingWidgetId === widget.id;
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    React.useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            // Optionally select all text? User didn't ask, but it's common.
+            // inputRef.current.select(); 
+        }
+    }, [isEditing]);
 
     const handleLabelChange = (newLabel: string) => {
         onUpdateWidget(widget.id, { label: newLabel });
@@ -64,7 +73,7 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
             if (isEditing) {
                 return (
                     <input
-                        autoFocus
+                        ref={inputRef}
                         type="text"
                         value={widget.label || ""}
                         onChange={(e) => handleLabelChange(e.target.value)}
@@ -81,8 +90,6 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                 );
             }
             return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center' }}>{widget.label || "Label"}</div>;
-        case "container":
-            return <div style={{ width: '100%', height: '100%', border: '1px dashed var(--border-subtle)', borderRadius: '4px' }}></div>;
         case "panel":
             return <div style={{ width: '100%', height: '100%', background: 'var(--bg-surface)', borderRadius: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}></div>;
         case "bound-output":
@@ -105,6 +112,79 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                 </div>
             );
         case "bound-input":
+            if (!widget.label) {
+                // Flat rendering for clean UI
+                const commonStyle: React.CSSProperties = {
+                    width: '100%', height: '100%',
+                    padding: '8px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-input)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    boxSizing: 'border-box',
+                    fontSize: '14px', // Default explicit size
+                    ...widget.style // Override with custom styles
+                };
+
+                if (widget.inputType === 'boolean') {
+                    return (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <input
+                                type="checkbox"
+                                checked={!!value}
+                                onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.checked)}
+                                style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
+                            />
+                        </div>
+                    );
+                }
+
+                if (widget.inputType === 'int' || widget.inputType === 'float') {
+                    return (
+                        <input
+                            ref={inputRef}
+                            className="no-spinners"
+                            type="number"
+                            // autoFocus={isEditing} // Handled by useEffect now
+                            value={value ?? ""}
+                            step={widget.inputType === 'float' ? "any" : "1"}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "") {
+                                    onInputChange?.(widget.nodeId!, widget.portName!, null);
+                                } else {
+                                    onInputChange?.(widget.nodeId!, widget.portName!, widget.inputType === 'int' ? parseInt(val) : parseFloat(val));
+                                }
+                            }}
+                            onBlur={() => {
+                                if (isEditing && setEditingWidgetId) setEditingWidgetId(null);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && isEditing && setEditingWidgetId) setEditingWidgetId(null);
+                            }}
+                            style={commonStyle}
+                        />
+                    );
+                }
+
+                return (
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        // autoFocus={isEditing} // Handled by useEffect now
+                        value={value ?? ""}
+                        onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.value)}
+                        onBlur={() => {
+                            if (isEditing && setEditingWidgetId) setEditingWidgetId(null);
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && isEditing && setEditingWidgetId) setEditingWidgetId(null);
+                        }}
+                        style={commonStyle}
+                    />
+                );
+            }
+
             return (
                 <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                     {widget.label && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{widget.label}</div>}
@@ -114,7 +194,6 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                                 type="checkbox"
                                 checked={!!value}
                                 onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.checked)}
-                                onPointerDown={e => e.stopPropagation()}
                                 style={{ width: '20px', height: '20px', accentColor: 'var(--primary-color)' }}
                             />
                         </div>
@@ -132,7 +211,6 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                                     onInputChange?.(widget.nodeId!, widget.portName!, widget.inputType === 'int' ? parseInt(val) : parseFloat(val));
                                 }
                             }}
-                            onPointerDown={e => e.stopPropagation()}
                             style={{
                                 width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-input)', borderRadius: '4px', color: 'var(--text-primary)'
                             }}
@@ -142,7 +220,6 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                             type="text"
                             value={value ?? ""}
                             onChange={(e) => onInputChange?.(widget.nodeId!, widget.portName!, e.target.value)}
-                            onPointerDown={e => e.stopPropagation()}
                             style={{
                                 width: '100%', padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-input)', borderRadius: '4px', color: 'var(--text-primary)'
                             }}

@@ -12,6 +12,7 @@ interface DashboardCanvasProps {
     onUpdateWidget: (id: string, updates: Partial<DashboardWidget>) => void;
     onDeleteWidget: (id: string) => void;
     onAddWidget?: (widget: DashboardWidget) => void;
+    onAddWidgets?: (widgets: DashboardWidget[]) => void;
     outputs: Record<string, unknown>;
     nodes: Node<BlueprintNodeData>[];
     onInputChange?: (nodeId: string, portName: string, value: any) => void;
@@ -30,6 +31,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
     onUpdateWidget,
     onDeleteWidget,
     onAddWidget,
+    onAddWidgets,
     outputs,
     nodes,
     onInputChange,
@@ -334,6 +336,21 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
     const handlePointerUp = (e: React.PointerEvent) => {
         if (dragState) {
             e.currentTarget.releasePointerCapture(e.pointerId);
+
+            // Check if it was a click (not a drag)
+            // A drag is considered if movement exceeds a small threshold (e.g., 3px)
+            const dx = Math.abs(e.clientX - dragState.startX);
+            const dy = Math.abs(e.clientY - dragState.startY);
+            const isClick = dx < 5 && dy < 5;
+
+            if (isClick && mode === "design" && dragState.type === 'widget' && dragState.widgetId) {
+                // If clicked on an editable widget, enter edit mode
+                const widget = widgets.find(w => w.id === dragState.widgetId);
+                if (widget && (widget.type === 'label' || widget.type === 'bound-input')) {
+                    setEditingWidgetId(widget.id);
+                }
+            }
+
             setDragState(null);
         }
     };
@@ -377,7 +394,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                 // ... (Keep existing drop logic, maybe guard with mode==="design" inside)
                 if (mode === "view") return;
                 const data = e.dataTransfer.getData("application/reactflow-widget");
-                if (data && onAddWidget) {
+                if (data && (onAddWidget || onAddWidgets)) {
                     try {
                         const widgetData = JSON.parse(data);
 
@@ -394,19 +411,52 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                         const x = snapToGrid ? Math.round(worldX / GRID_SIZE) * GRID_SIZE : worldX;
                         const y = snapToGrid ? Math.round(worldY / GRID_SIZE) * GRID_SIZE : worldY;
 
-                        onAddWidget({
-                            id: `widget-${Date.now()}`,
-                            type: widgetData.type,
-                            label: widgetData.label,
-                            x: x,
-                            y: y,
-                            w: widgetData.w,
-                            h: widgetData.h,
-                            nodeId: widgetData.nodeId,
-                            portName: widgetData.portName,
-                            inputType: widgetData.inputType,
-                            style: widgetData.style || {}
-                        });
+                        // Split Logic for Published Ports
+                        if (onAddWidgets && (widgetData.type === 'bound-input' || widgetData.type === 'bound-output')) {
+                            const labelHeight = 40; // Height for the label widget
+                            const valueHeight = Math.max(40, widgetData.h - labelHeight); // Remaining height for value
+
+                            const labelWidget: DashboardWidget = {
+                                id: `widget-${Date.now()}-label`,
+                                type: 'label',
+                                label: widgetData.label || "Label",
+                                x: x,
+                                y: y,
+                                w: widgetData.w,
+                                h: labelHeight,
+                                style: {}
+                            };
+
+                            const valueWidget: DashboardWidget = {
+                                id: `widget-${Date.now()}-val`,
+                                type: widgetData.type,
+                                // label: undefined, // Explicitly no label
+                                x: x,
+                                y: y + labelHeight,
+                                w: widgetData.w,
+                                h: valueHeight,
+                                nodeId: widgetData.nodeId,
+                                portName: widgetData.portName,
+                                inputType: widgetData.inputType,
+                                style: {}
+                            };
+
+                            onAddWidgets([labelWidget, valueWidget]);
+                        } else if (onAddWidget) {
+                            onAddWidget({
+                                id: `widget-${Date.now()}`,
+                                type: widgetData.type,
+                                label: widgetData.label,
+                                x: x,
+                                y: y,
+                                w: widgetData.w,
+                                h: widgetData.h,
+                                nodeId: widgetData.nodeId,
+                                portName: widgetData.portName,
+                                inputType: widgetData.inputType,
+                                style: widgetData.style || {}
+                            });
+                        }
                     } catch (err) {
                         console.error("Failed to parse widget drop data", err);
                     }
@@ -456,23 +506,43 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                         pointerEvents: 'auto'
                                     }}
                                 >
-                                    <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: widget.id === "root-container" ? 0 : '8px', position: 'relative' }}>
-                                        <DashboardWidgetContent
-                                            widget={widget}
-                                            mode={mode}
-                                            nodes={nodes}
-                                            outputs={outputs}
-                                            editingWidgetId={editingWidgetId}
-                                            setEditingWidgetId={setEditingWidgetId}
-                                            onUpdateWidget={onUpdateWidget}
-                                            onInputChange={onInputChange}
-                                        />
-                                        {isComputing && (
-                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                                <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                            </div>
-                                        )}
-                                    </div>
+                                    {(widget.id === "root-container" || widget.type === 'bound-input' || widget.type === 'bound-output' || widget.type === 'label' || widget.type === 'panel') ? (
+                                        <>
+                                            <DashboardWidgetContent
+                                                widget={widget}
+                                                mode={mode}
+                                                nodes={nodes}
+                                                outputs={outputs}
+                                                editingWidgetId={editingWidgetId}
+                                                setEditingWidgetId={setEditingWidgetId}
+                                                onUpdateWidget={onUpdateWidget}
+                                                onInputChange={onInputChange}
+                                            />
+                                            {isComputing && (
+                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
+                                                    <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: '8px', position: 'relative' }}>
+                                            <DashboardWidgetContent
+                                                widget={widget}
+                                                mode={mode}
+                                                nodes={nodes}
+                                                outputs={outputs}
+                                                editingWidgetId={editingWidgetId}
+                                                setEditingWidgetId={setEditingWidgetId}
+                                                onUpdateWidget={onUpdateWidget}
+                                                onInputChange={onInputChange}
+                                            />
+                                            {isComputing && (
+                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
+                                                    <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -614,25 +684,50 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                 onPointerDown={(e) => !isRoot && handlePointerDown(e, widget)}
                                 onPointerEnter={() => !isRoot && setHoveredWidgetId(widget.id)}
                                 onPointerLeave={() => !isRoot && setHoveredWidgetId(null)}
-                                onDoubleClick={(e) => handleDoubleClick(e, widget)}
+                                onDoubleClick={(e) => {
+                                    if (mode === "design" && (widget.type === 'label' || widget.type === 'bound-input')) {
+                                        e.stopPropagation();
+                                        setEditingWidgetId(widget.id);
+                                    }
+                                }}
                             >
-                                <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: isRoot ? 0 : '8px', position: 'relative' }}>
-                                    <DashboardWidgetContent
-                                        widget={widget}
-                                        mode={mode}
-                                        nodes={nodes}
-                                        outputs={outputs}
-                                        editingWidgetId={editingWidgetId}
-                                        setEditingWidgetId={setEditingWidgetId}
-                                        onUpdateWidget={onUpdateWidget}
-                                        onInputChange={onInputChange}
-                                    />
-                                    {isComputing && (
-                                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                            <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                        </div>
-                                    )}
-                                </div>
+                                {(isRoot || widget.type === 'bound-input' || widget.type === 'bound-output' || widget.type === 'label' || widget.type === 'panel') ? (
+                                    <>
+                                        <DashboardWidgetContent
+                                            widget={widget}
+                                            mode={mode}
+                                            nodes={nodes}
+                                            outputs={outputs}
+                                            editingWidgetId={editingWidgetId}
+                                            setEditingWidgetId={setEditingWidgetId}
+                                            onUpdateWidget={onUpdateWidget}
+                                            onInputChange={onInputChange}
+                                        />
+                                        {isComputing && (
+                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
+                                                <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: '8px', position: 'relative' }}>
+                                        <DashboardWidgetContent
+                                            widget={widget}
+                                            mode={mode}
+                                            nodes={nodes}
+                                            outputs={outputs}
+                                            editingWidgetId={editingWidgetId}
+                                            setEditingWidgetId={setEditingWidgetId}
+                                            onUpdateWidget={onUpdateWidget}
+                                            onInputChange={onInputChange}
+                                        />
+                                        {isComputing && (
+                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
+                                                <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Resize Handle (Bottom Right) */}
                                 {!isRoot && (

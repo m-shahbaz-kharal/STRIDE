@@ -125,6 +125,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         setSelectedWidgetId(widget.id);
     };
 
+    const handleAddWidgets = (newWidgets: DashboardWidget[]) => {
+        const newLayout = { ...layout, widgets: [...layout.widgets, ...newWidgets] };
+        pushToHistory(newLayout);
+        if (newWidgets.length > 0) {
+            setSelectedWidgetId(newWidgets[newWidgets.length - 1].id);
+        }
+    };
+
     const handleUpdateWidget = (id: string, updates: Partial<DashboardWidget>) => {
         // We only want to push to history on "committed" changes (like drag end), 
         // but for simplicity we might push on every update. 
@@ -440,6 +448,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                         onUpdateWidget={handleUpdateWidget}
                         onDeleteWidget={handleDeleteWidget}
                         onAddWidget={handleAddWidget}
+                        onAddWidgets={handleAddWidgets}
                         outputs={outputs}
                         nodes={nodes}
                         onInputChange={onInputChange}
@@ -482,6 +491,26 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
                                         widget={selectedWidget}
                                         onUpdate={handleUpdateWidget}
                                         publishedItems={publishedItems}
+                                        onInputChange={onInputChange}
+                                        value={(() => {
+                                            if (selectedWidget && selectedWidget.nodeId && selectedWidget.portName) {
+                                                // Resolution logic similar to WidgetContent
+                                                // 1. Outputs
+                                                if (outputs[selectedWidget.nodeId] && (outputs[selectedWidget.nodeId] as any)[selectedWidget.portName] !== undefined) {
+                                                    return (outputs[selectedWidget.nodeId] as any)[selectedWidget.portName];
+                                                }
+                                                // 2. Node Last Outputs
+                                                const node = nodes.find(n => n.id === selectedWidget.nodeId);
+                                                if (node?.data.last_outputs) {
+                                                    return node.data.last_outputs[selectedWidget.portName];
+                                                }
+                                                // 3. Node Inputs (if bound-input)
+                                                if (node && node.data.inputValues && node.data.inputValues[selectedWidget.portName] !== undefined && selectedWidget.type === 'bound-input') {
+                                                    return node.data.inputValues[selectedWidget.portName];
+                                                }
+                                            }
+                                            return null;
+                                        })()}
                                     />
                                 ) : (
                                     <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
