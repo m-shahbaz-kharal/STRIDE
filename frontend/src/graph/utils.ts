@@ -21,6 +21,7 @@ export const PORT_TYPE_COLORS: Record<string, string> = {
 export const PORT_ROW_HEIGHT = 42;
 export const PARAM_ROW_HEIGHT = 26;
 export const HEADER_HEIGHT = 70;
+export const APP_HEADER_HEIGHT = 44;
 export const MIN_NODE_WIDTH = 260;
 
 export const getExecutionStatusClass = (status?: NodeExecutionStatus): string => {

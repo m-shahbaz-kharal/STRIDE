@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactFlow, {
   addEdge,
   Background,
+  BackgroundVariant,
   Controls,
   Connection,
   MiniMap,
@@ -54,6 +55,7 @@ import {
   bezierIntersectsRect,
   computeNodeDimensions,
   getPortTypeColor,
+  APP_HEADER_HEIGHT,
   HEADER_HEIGHT,
   PORT_ROW_HEIGHT,
 } from "./graph/utils";
@@ -134,6 +136,7 @@ const App = () => {
   const [previewEdgeIds, setPreviewEdgeIds] = useState<string[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const panFrameRef = useRef<number | null>(null);
+  const [snapToGrid, setSnapToGrid] = useState(true);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<BlueprintNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -164,7 +167,7 @@ const App = () => {
   } = usePanelResize();
 
   // Undo/Redo hook
-  const { undo, redo, takeSnapshot } = useUndoRedo({
+  const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo({
     nodes,
     edges,
     setNodes,
@@ -2105,8 +2108,10 @@ const App = () => {
                   edgesFocusable
                   edgesUpdatable
                   elementsSelectable
+                  snapToGrid={snapToGrid}
+                  snapGrid={[20, 20]}
                 >
-                  <Background gap={20} size={1} color="rgba(255,255,255,0.03)" />
+                  {snapToGrid && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.15)" />}
                   <Controls
                     showZoom
                     showFitView
@@ -2127,6 +2132,71 @@ const App = () => {
                     zoomable
                   />
                 </ReactFlow>
+                {/* Graph Editor Controls (Undo/Redo & Snap) */}
+                <div style={{ position: 'absolute', top: APP_HEADER_HEIGHT + 20, right: actualRightWidth + 20, zIndex: 5, display: 'flex', gap: '10px', transition: 'right 0.3s ease' }}>
+                  {/* Undo/Redo */}
+                  <div style={{
+                    background: 'var(--bg-elevated)',
+                    padding: '4px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    gap: '4px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    border: '1px solid var(--border-subtle)',
+                    alignItems: 'center',
+                    height: '36px',
+                    boxSizing: 'border-box'
+                  }}>
+                    <button
+                      onClick={undo}
+                      disabled={!canUndo}
+                      title="Undo (Ctrl+Z)"
+                      className="icon-btn"
+                      style={{ width: 28, height: 28, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: !canUndo ? 0.3 : 1 }}>
+                        <path d="M3 7v6h6"></path>
+                        <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={redo}
+                      disabled={!canRedo}
+                      title="Redo (Ctrl+Y)"
+                      className="icon-btn"
+                      style={{ width: 28, height: 28, border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: !canRedo ? 0.3 : 1 }}>
+                        <path d="M21 7v6h-6"></path>
+                        <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Snap Button */}
+                  <button
+                    onClick={() => setSnapToGrid(!snapToGrid)}
+                    title={`Snap to Grid: ${snapToGrid ? "On" : "Off"}`}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-subtle)',
+                      background: snapToGrid ? 'var(--accent-primary)' : 'var(--bg-elevated)',
+                      color: snapToGrid ? 'white' : 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M10 10h4v4h-4zm0-6h4v4h-4zm0 12h4v4h-4zM4 4h4v4H4zm0 6h4v4H4zm0 6h4v4H4zM16 4h4v4h-4zm0 6h4v4h-4zm0 6h4v4h-4z" />
+                    </svg>
+                  </button>
+                </div>
                 <ConnectionToast message={connectionMessage} />
               </>
             )}
