@@ -83,7 +83,8 @@ export const useNodeOperations = ({
         const params: Record<string, unknown> = {};
         const defaults = nodeType.params_defaults ?? {};
         for (const [key, schema] of Object.entries(nodeType.params_schema ?? {})) {
-            params[key] = schema.default ?? defaults[key] ?? "";
+            const schemaObj = schema as { default?: unknown };
+            params[key] = schemaObj.default ?? defaults[key] ?? "";
         }
 
         const { input_ports, input_port_types } = getInitialPorts(nodeType);

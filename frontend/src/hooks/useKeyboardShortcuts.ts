@@ -39,9 +39,9 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            // Don't trigger shortcuts when typing in inputs
+            // Don't trigger shortcuts when typing in inputs or contenteditable elements
             const target = event.target as HTMLElement;
-            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
                 return;
             }
 

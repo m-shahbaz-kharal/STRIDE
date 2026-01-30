@@ -758,7 +758,7 @@ const App = () => {
     } finally {
       setGraphsLoading(false);
     }
-  }, [currentGraphId, handleSignOut, hydrateGraph, session, setEdges, setNodes]);
+  }, [currentGraphId, handleSignOut, session, setEdges, setNodes]);
 
   useEffect(() => {
     if (session) {

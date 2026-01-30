@@ -61,7 +61,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         // In a real app, we would load from backend here and set isDirty to false
         setIsDirty(false);
         onDirtyChange?.(false);
-    }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Intentionally only run on mount
 
     const pushToHistory = (newLayout: DashboardLayout) => {
         setHistory(prev => ({
@@ -73,51 +74,55 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         onDirtyChange?.(true);
     };
 
-    const handleUndo = () => {
-        if (history.past.length === 0) return;
-        const previous = history.past[history.past.length - 1];
-        const newPast = history.past.slice(0, -1);
-
-        setHistory({
-            past: newPast,
-            future: [layout, ...history.future]
+    const handleUndo = useCallback(() => {
+        setHistory(prev => {
+            if (prev.past.length === 0) return prev;
+            const previous = prev.past[prev.past.length - 1];
+            const newPast = prev.past.slice(0, -1);
+            onLayoutChange(previous);
+            setIsDirty(true);
+            onDirtyChange?.(true);
+            return {
+                past: newPast,
+                future: [layout, ...prev.future]
+            };
         });
-        onLayoutChange(previous);
-        setIsDirty(true);
-        onDirtyChange?.(true);
-    };
+    }, [layout, onLayoutChange, onDirtyChange]);
 
-    const handleRedo = () => {
-        if (history.future.length === 0) return;
-        const next = history.future[0];
-        const newFuture = history.future.slice(1);
-
-        setHistory({
-            past: [...history.past, layout],
-            future: newFuture
+    const handleRedo = useCallback(() => {
+        setHistory(prev => {
+            if (prev.future.length === 0) return prev;
+            const next = prev.future[0];
+            const newFuture = prev.future.slice(1);
+            onLayoutChange(next);
+            setIsDirty(true);
+            onDirtyChange?.(true);
+            return {
+                past: [...prev.past, layout],
+                future: newFuture
+            };
         });
-        onLayoutChange(next);
-        setIsDirty(true);
-        onDirtyChange?.(true);
-    };
+    }, [layout, onLayoutChange, onDirtyChange]);
 
     // Keyboard Shortcuts for Undo/Redo
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-                e.preventDefault(); // Prevent browser undo
+            // Don't trigger shortcuts when typing in inputs
+            const target = e.target as HTMLElement;
+            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
+                return;
+            }
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+                e.preventDefault();
                 handleUndo();
-            } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z' /* Mac style */))) {
+            } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
                 e.preventDefault();
                 handleRedo();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [history, layout]); // Dep on history/layout to ensure latest state access if closures were issue, but setState is safe. 
-    // Actually standard listener might capture stale state if not careful. 
-    // Better to use refs or functional updates? 
-    // standard approach with deps is fine for small scale.
+    }, [handleUndo, handleRedo]);
 
     const handleAddWidget = (widget: DashboardWidget) => {
         const newLayout = { ...layout, widgets: [...layout.widgets, widget] };
@@ -219,14 +224,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
 
     const handleDeleteWidget = (id: string) => {
         if (id === "root-container") return;
-        pushToHistory(layout); // Save current state before delete
-        onLayoutChange({
+        const newLayout = {
             ...layout,
             widgets: layout.widgets.filter(w => w.id !== id)
-        });
+        };
+        pushToHistory(newLayout);
         if (selectedWidgetId === id) setSelectedWidgetId(null);
-        setIsDirty(true);
-        onDirtyChange?.(true);
     };
 
     const handleUpdateViewBounds = (bounds: { x: number; y: number; w: number; h: number; style?: Record<string, unknown> }) => {

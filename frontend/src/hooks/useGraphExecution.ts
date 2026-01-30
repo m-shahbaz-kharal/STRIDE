@@ -12,7 +12,7 @@ interface GraphPayload {
     nodes: Array<{
       id: string;
       type: string;
-      params: Record<string, unknown>;
+      params?: Record<string, unknown>;
       input_values?: Record<string, unknown>;
       input_ports_override?: string[];
       input_port_types_override?: Record<string, unknown>;

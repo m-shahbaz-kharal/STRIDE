@@ -59,7 +59,9 @@ export interface NodeTypeDefinition {
   output_ports: string[];
   input_port_types?: Record<string, TypeDescriptor | string>;
   output_port_types?: Record<string, TypeDescriptor | string>;
-
+  // Node parameters
+  params_schema?: Record<string, unknown>;
+  params_defaults?: Record<string, unknown>;
 }
 
 export type NodeExecutionStatus =
@@ -180,9 +182,10 @@ export interface BlueprintNodeData {
   output_ports: string[];
   input_port_types?: Record<string, TypeDescriptor | string>;
   output_port_types?: Record<string, TypeDescriptor | string>;
+  params?: Record<string, unknown>;
 
   inputValues?: Record<string, unknown>;
-  breakpoint: boolean;
+  breakpoint?: boolean;
   metadata?: NodeTypeDefinition;
   last_outputs?: Record<string, unknown>;
   width?: number;
