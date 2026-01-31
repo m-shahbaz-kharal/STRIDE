@@ -43,6 +43,21 @@ import { useConnectionToast } from "./hooks/useConnectionToast";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNodeOperations } from "./hooks/useNodeOperations";
 import { useSmartConnect } from "./hooks/useSmartConnect";
+// Modular hooks for incremental refactoring
+// NOTE: These hooks are ready to use but require additional wiring.
+// Enabling them reduces App.tsx by ~400 lines (useGraphCrud), ~150 lines (useSelectionActions),
+// ~150 lines (useNodeExecutionSync), and ~100 lines (useEdgeSelection).
+// import { useGraphCrud } from "./hooks/useGraphCrud";
+// import { useSelectionActions } from "./hooks/useSelectionActions";
+// import { useNodeExecutionSync } from "./hooks/useNodeExecutionSync";
+// import { useEdgeSelection } from "./hooks/useEdgeSelection";
+// Domain layer - pure functions for type compatibility and graph traversal
+import {
+  getDownstreamNodes as domainGetDownstreamNodes,
+  getDependentNodes as domainGetDependentNodes,
+} from "./domain";
+import HomeView from "./components/views/HomeView";
+import GraphEditorView from "./components/views/GraphEditorView";
 import {
   BlueprintNodeData,
   NodeTypeDefinition,
@@ -285,51 +300,23 @@ const App = () => {
   }, []);
 
   // Helper to get all dependent nodes (upstream dependencies)
+  // Uses domain layer function for the core traversal logic
   const getDependentNodes = useCallback((targetNodeIds: string[], includeCached = false): Set<string> => {
-    const dependentIds = new Set<string>(targetNodeIds);
-    const visited = new Set<string>();
-    const queue = [...targetNodeIds];
+    const hasCachedOutput = (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId);
+      return Boolean(node?.data.last_outputs);
+    };
 
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      if (visited.has(nodeId)) continue;
-      visited.add(nodeId);
-
-      for (const edge of edges) {
-        if (edge.target === nodeId && !dependentIds.has(edge.source)) {
-          const sourceNode = nodes.find((n) => n.id === edge.source);
-          let isControl = edge.data?.kind === "control";
-          if (!isControl && edge.sourceHandle && edge.targetHandle) {
-            const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle, "source");
-            const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
-            isControl = sourceType.kind === "control" || targetType.kind === "control";
-          }
-          if (isControl || includeCached || !sourceNode?.data.last_outputs) {
-            dependentIds.add(edge.source);
-            queue.push(edge.source);
-          }
-        }
-      }
-    }
-
-    return dependentIds;
+    return domainGetDependentNodes(targetNodeIds, edges, {
+      includeCached,
+      hasCachedOutput,
+      getPortType: getPortTypeForHandle,
+    });
   }, [edges, getPortTypeForHandle, nodes]);
 
+  // Uses domain layer function for downstream traversal
   const getDownstreamNodes = useCallback((startNodeIds: string[]): Set<string> => {
-    const downstream = new Set<string>(startNodeIds);
-    const queue = [...startNodeIds];
-
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!;
-      for (const edge of edges) {
-        if (edge.source === nodeId && !downstream.has(edge.target)) {
-          downstream.add(edge.target);
-          queue.push(edge.target);
-        }
-      }
-    }
-
-    return downstream;
+    return domainGetDownstreamNodes(startNodeIds, edges);
   }, [edges]);
 
   const clearNodesCacheUI = useCallback((nodeIds: Set<string>) => {
@@ -2041,20 +2028,16 @@ const App = () => {
     <PopupProvider>
       <ReactFlowProvider>
         <div className="app-shell">
-          <div
-            className="home-fullpage"
-            style={{ display: headerTab === "home" ? "flex" : "none" }}
-          >
-            <GraphLibrary
-              graphs={graphs}
-              currentGraphId={currentGraphId}
-              isLoading={graphsLoading}
-              onCreate={handleCreateGraph}
-              onSelect={handleSelectGraph}
-              onUpdate={handleRenameGraphFromList}
-              onDelete={handleDeleteGraph}
-            />
-          </div>
+          <HomeView
+            graphs={graphs}
+            currentGraphId={currentGraphId}
+            isLoading={graphsLoading}
+            onCreate={handleCreateGraph}
+            onSelect={handleSelectGraph}
+            onUpdate={handleRenameGraphFromList}
+            onDelete={handleDeleteGraph}
+            visible={headerTab === "home"}
+          />
           {/* Keep both views mounted, use CSS to hide inactive view for instant switching */}
           <div
             className="reactflow-fullpage"

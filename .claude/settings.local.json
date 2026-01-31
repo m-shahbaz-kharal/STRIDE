@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)"
+    ]
+  }
+}
