@@ -535,6 +535,7 @@ const App = () => {
         input_port_types: node.data.input_port_types,
         output_port_types: node.data.output_port_types,
         params: node.data.params,
+        inputValues: node.data.inputValues,
         cacheEnabled: node.data.cacheEnabled,
         published_ports: node.data.published_ports,
       },

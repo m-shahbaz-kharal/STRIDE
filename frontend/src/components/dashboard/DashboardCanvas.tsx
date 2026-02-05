@@ -471,7 +471,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                         width: viewModeMetrics.width,
                         height: viewModeMetrics.height,
                         position: 'relative',
-                        backgroundColor: '#ffffff', // Default background
+                        backgroundColor: 'var(--bg-canvas)', // Dark background matching theme
                         ...(viewBounds?.style || {})
                     }}
                 >
@@ -484,7 +484,25 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                     }}>
                         {/* Render Widgets in View Mode */}
                         {widgets.map(widget => {
-                            const isComputing = widget.nodeId && nodes.find(n => n.id === widget.nodeId)?.data.executionStatus === "running";
+                            const node = widget.nodeId ? nodes.find(n => n.id === widget.nodeId) : null;
+                            const executionStatus = node?.data.executionStatus;
+
+                            const StatusIndicator = () => {
+                                if (!executionStatus || executionStatus === "queued" || executionStatus === "skipped") return null;
+                                return (
+                                    <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 20 }}>
+                                        {executionStatus === "running" && (
+                                            <div className="pulse-dot" style={{ width: 8, height: 8 }} />
+                                        )}
+                                        {executionStatus === "completed" && (
+                                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)', boxShadow: '0 0 4px rgba(63, 185, 80, 0.4)' }} />
+                                        )}
+                                        {executionStatus === "error" && (
+                                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red)', boxShadow: '0 0 4px rgba(248, 81, 73, 0.4)' }} />
+                                        )}
+                                    </div>
+                                );
+                            };
                             const customStyle: React.CSSProperties = widget.style ? (widget.style as React.CSSProperties) : {};
                             if (customStyle.borderWidth && !customStyle.borderStyle) customStyle.borderStyle = 'solid';
 
@@ -518,11 +536,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                                 onUpdateWidget={onUpdateWidget}
                                                 onInputChange={onInputChange}
                                             />
-                                            {isComputing && (
-                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                                    <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                                </div>
-                                            )}
+                                            <StatusIndicator />
                                         </>
                                     ) : (
                                         <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: '8px', position: 'relative' }}>
@@ -536,11 +550,7 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                                 onUpdateWidget={onUpdateWidget}
                                                 onInputChange={onInputChange}
                                             />
-                                            {isComputing && (
-                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                                    <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                                </div>
-                                            )}
+                                            <StatusIndicator />
                                         </div>
                                     )}
                                 </div>
@@ -648,11 +658,27 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                         // Design Mode Widget Render (includes handles, selection, etc)
                         const isSelected = selectedWidgetId === widget.id;
                         const isRoot = widget.id === "root-container";
-                        let isComputing = false;
-                        if (widget.nodeId) {
-                            const node = nodes.find(n => n.id === widget.nodeId);
-                            if (node?.data.executionStatus === "running") isComputing = true;
-                        }
+                        const node = widget.nodeId ? nodes.find(n => n.id === widget.nodeId) : null;
+                        const executionStatus = node?.data.executionStatus;
+                        // Design mode doesn't need to show status indicators usually, or should it?
+                        // User request implies "overlay + spinner on top of UI Widgets during their source node execution"
+                        // Usually design mode is static. But let's support it if running while designing.
+                        const StatusIndicator = () => {
+                            if (!executionStatus || executionStatus === "queued" || executionStatus === "skipped") return null;
+                            return (
+                                <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 20, pointerEvents: 'none' }}>
+                                    {executionStatus === "running" && (
+                                        <div className="pulse-dot" style={{ width: 8, height: 8 }} />
+                                    )}
+                                    {executionStatus === "completed" && (
+                                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-green)', boxShadow: '0 0 4px rgba(63, 185, 80, 0.4)' }} />
+                                    )}
+                                    {executionStatus === "error" && (
+                                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red)', boxShadow: '0 0 4px rgba(248, 81, 73, 0.4)' }} />
+                                    )}
+                                </div>
+                            );
+                        };
 
                         const customStyle: React.CSSProperties = widget.style ? (widget.style as React.CSSProperties) : {};
                         if (customStyle.borderWidth && !customStyle.borderStyle) {
@@ -703,11 +729,8 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                             onUpdateWidget={onUpdateWidget}
                                             onInputChange={onInputChange}
                                         />
-                                        {isComputing && (
-                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                                <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                            </div>
-                                        )}
+                                        {/* Removed overlay spinner in favor of StatusIndicator */}
+                                        <StatusIndicator />
                                     </>
                                 ) : (
                                     <div style={{ width: '100%', height: '100%', overflow: 'hidden', padding: '8px', position: 'relative' }}>
@@ -721,11 +744,8 @@ const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
                                             onUpdateWidget={onUpdateWidget}
                                             onInputChange={onInputChange}
                                         />
-                                        {isComputing && (
-                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(1px)', zIndex: 5 }}>
-                                                <div className="btn-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                            </div>
-                                        )}
+                                        {/* Removed overlay spinner in favor of StatusIndicator */}
+                                        <StatusIndicator />
                                     </div>
                                 )}
 
