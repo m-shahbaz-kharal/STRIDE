@@ -62,39 +62,54 @@ async def get_node_definitions() -> list[Dict[str, Any]]:
 
 
 @app.post("/api/run-graph")
-async def run_graph(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def run_graph(payload: Dict[str, Any]) -> Response:
     """Execute graph synchronously (legacy endpoint)."""
     try:
         graph_definition = payload.get("graph", payload)
         options = payload.get("options", {})
         graph_executor = GraphExecutor(graph_definition, options=options)
-        return graph_executor.run()
+        result = graph_executor.run()
+        return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
+        return Response(
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
+            status_code=400, 
+            media_type="application/json"
+        )
 
 
 @app.post("/api/run-graph-async")
-async def run_graph_async(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def run_graph_async(payload: Dict[str, Any]) -> Response:
     """Execute graph with parallel execution."""
     try:
         graph_definition = payload.get("graph", payload)
         options = payload.get("options", {})
         graph_executor = GraphExecutor(graph_definition, options=options)
-        return await graph_executor.run_async()
+        result = await graph_executor.run_async()
+        return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
+        return Response(
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
+            status_code=400, 
+            media_type="application/json"
+        )
 
 
 @app.post("/api/execution-plan")
-async def get_execution_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def get_execution_plan(payload: Dict[str, Any]) -> Response:
     """Get execution plan without running."""
     try:
         graph_definition = payload.get("graph", payload)
         options = payload.get("options", {})
         graph_executor = GraphExecutor(graph_definition, options=options)
-        return graph_executor.get_execution_plan()
+        result = graph_executor.get_execution_plan()
+        return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc), "code": getattr(exc, "code", "execution_error")})
+        return Response(
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
+            status_code=400, 
+            media_type="application/json"
+        )
 
 
 @app.post("/api/cache/clear")
