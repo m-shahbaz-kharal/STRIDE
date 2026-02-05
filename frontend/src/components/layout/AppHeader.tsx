@@ -42,6 +42,7 @@ interface AppHeaderProps {
     onRenameGraph: () => void;
     onSignOut: () => void;
     onAccountSettings: () => void;
+    hasRunningNodes: boolean;
 }
 
 const AppHeader: React.FC<AppHeaderProps> = ({
@@ -65,6 +66,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     onRenameGraph,
     onSignOut,
     onAccountSettings,
+    hasRunningNodes,
 }) => {
     const [accountOpen, setAccountOpen] = useState(false);
     const accountRef = useRef<HTMLDivElement>(null);
@@ -171,7 +173,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         <button
                             className="icon-btn primary"
                             onClick={onRunGraph}
-                            disabled={nodesCount === 0 || isRunning || jsonViewEnabled}
+                            disabled={nodesCount === 0 || hasRunningNodes || jsonViewEnabled}
                             title="Run Graph"
                         >
                             <PlayIcon />
@@ -180,7 +182,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                         <button
                             className="icon-btn danger"
                             onClick={onInterruptAll}
-                            disabled={!isRunning || !executionId}
+                            disabled={!hasRunningNodes}
                             title="Interrupt all running nodes"
                         >
                             <StopIcon />

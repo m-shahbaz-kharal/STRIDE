@@ -208,56 +208,80 @@ async def websocket_run_graph(websocket: WebSocket):
     """WebSocket endpoint for streaming graph execution."""
     await websocket.accept()
     
+    # Lock to ensure thread-safe writes to the websocket
+    send_lock = asyncio.Lock()
+    
+    async def handle_request(payload: Dict[str, Any]):
+        try:
+            graph_definition = payload.get("graph", payload)
+            options = payload.get("options", {})
+            graph_executor = GraphExecutor(graph_definition, options=options)
+            
+            async for event in graph_executor.run_streaming():
+                message = serialize_event(event)
+                try:
+                    async with send_lock:
+                        await websocket.send_text(message)
+                except Exception:
+                    # Connection likely closed
+                    break
+                    
+            final_result = {
+                "event_type": "result",
+                "execution_id": graph_executor.execution_id,
+                "outputs": graph_executor.outputs,
+                "trace": [
+                    {
+                        "node_id": r.node_id,
+                        "type": r.node_type,
+                        "display_name": graph_executor.nodes.get(r.node_id).spec.display_name if graph_executor.nodes.get(r.node_id) else r.node_type,
+                        "outputs": r.outputs,
+                        "logs": r.logs,
+                        "duration_ms": r.duration_ms,
+                        "level": r.level,
+                        "from_cache": r.from_cache,
+                    }
+                    for r in graph_executor.execution_trace
+                ],
+                "stats": graph_executor._calculate_stats(
+                    graph_executor._total_execution_time_ms,  # Use actual wall-clock time!
+                    graph_executor._max_parallelism
+                ).__dict__,
+                "levels": graph_executor._levels,
+            }
+            try:
+                async with send_lock:
+                    await websocket.send_text(json.dumps(final_result, default=_json_serializer))
+            except Exception:
+                pass
+                
+        except GraphExecutionError as exc:
+            error_response = {
+                "event_type": "error",
+                "error": str(exc),
+            }
+            try:
+                async with send_lock:
+                    await websocket.send_text(json.dumps(error_response))
+            except Exception:
+                pass
+        except Exception as exc:
+            error_response = {
+                "event_type": "error", 
+                "error": f"Unexpected error: {str(exc)}",
+            }
+            try:
+                async with send_lock:
+                    await websocket.send_text(json.dumps(error_response))
+            except Exception:
+                pass
+
     try:
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
-            
-            try:
-                graph_definition = payload.get("graph", payload)
-                options = payload.get("options", {})
-                graph_executor = GraphExecutor(graph_definition, options=options)
-                
-                async for event in graph_executor.run_streaming():
-                    await websocket.send_text(serialize_event(event))
-                    
-                final_result = {
-                    "event_type": "result",
-                    "execution_id": graph_executor.execution_id,
-                    "outputs": graph_executor.outputs,
-                    "trace": [
-                        {
-                            "node_id": r.node_id,
-                            "type": r.node_type,
-                            "display_name": graph_executor.nodes.get(r.node_id).spec.display_name if graph_executor.nodes.get(r.node_id) else r.node_type,
-                            "outputs": r.outputs,
-                            "logs": r.logs,
-                            "duration_ms": r.duration_ms,
-                            "level": r.level,
-                            "from_cache": r.from_cache,
-                        }
-                        for r in graph_executor.execution_trace
-                    ],
-                    "stats": graph_executor._calculate_stats(
-                        graph_executor._total_execution_time_ms,  # Use actual wall-clock time!
-                        graph_executor._max_parallelism
-                    ).__dict__,
-                    "levels": graph_executor._levels,
-                }
-                await websocket.send_text(json.dumps(final_result, default=_json_serializer))
-                
-            except GraphExecutionError as exc:
-                error_response = {
-                    "event_type": "error",
-                    "error": str(exc),
-                }
-                await websocket.send_text(json.dumps(error_response))
-            except Exception as exc:
-                error_response = {
-                    "event_type": "error", 
-                    "error": f"Unexpected error: {str(exc)}",
-                }
-                await websocket.send_text(json.dumps(error_response))
+            # Create a background task for each request to allow concurrency
+            asyncio.create_task(handle_request(payload))
                 
     except WebSocketDisconnect:
         pass

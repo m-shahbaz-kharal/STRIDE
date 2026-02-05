@@ -129,19 +129,29 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       switch (data.event_type) {
         case "start":
           setExecutionId(data.execution_id);
+          // Don't reset everything if we want concurrent visualization to persist partially
+          // For now, we still reset progress/trace for the NEW run, but we should try to keep other nodes alive if possible?
+          // Actually, if we just receive "start" it implies a new context.
+          // BUT, if we want to support concurrent independent runs, we should NOT wipe the whole map.
           setProgress(0);
-          setTrace([]);
           setError(null);
           setErrorCode(null);
           if (data.levels) {
             setLevels(data.levels);
           }
           if (data.execution_plan) {
-            const initialStatuses = new Map<string, NodeExecutionStatus>();
-            for (const node of data.execution_plan) {
-              initialStatuses.set(node.node_id, "pending");
-            }
-            setNodeStatuses(initialStatuses);
+            setNodeStatuses((prev) => {
+              const newMap = new Map(prev);
+              // @ts-ignore - execution_plan is checked above
+              for (const node of data.execution_plan) {
+                // Only set to pending if not already running/queued/completed?
+                // Or overwrite?
+                // If we overwrite, we might kill the status of a PARALLEL run.
+                // If it's a new run, maybe we only update the nodes invoked?
+                newMap.set(node.node_id, "pending");
+              }
+              return newMap;
+            });
           }
           break;
 
@@ -354,15 +364,21 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const runGraph = useCallback((payload: GraphPayload, runNodeIds: string[] = []) => {
     setActiveRuns((prev) => prev + 1);
     setError(null);
-    setTrace([]);
-    setOutputs({});
-    setStats(null);
-    setProgress(0);
-    setExecutionId(null);
-    setCurrentNodeId(null);
+
+    // Only clear previous results if this is a full graph run
+    if (runNodeIds.length === 0) {
+      setTrace([]);
+      setOutputs({});
+      setStats(null);
+      setProgress(0);
+      setExecutionId(null);
+      setCurrentNodeId(null);
+    }
+    // For partial runs, we keep the old state context to allow concurrent visualization
+
     setNodeStatuses((prev) => {
       const updated = new Map(prev);
-      runNodeIds.forEach((id) => updated.set(id, "running"));
+      runNodeIds.forEach((id) => updated.set(id, "queued"));
       return updated;
     });
     activeRunRef.current = true;
@@ -386,7 +402,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setExecutionId(null);
     setNodeStatuses((prev) => {
       const updated = new Map(prev);
-      runNodeIds.forEach((id) => updated.set(id, "running"));
+      runNodeIds.forEach((id) => updated.set(id, "queued"));
       return updated;
     });
 

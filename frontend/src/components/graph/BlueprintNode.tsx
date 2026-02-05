@@ -13,6 +13,7 @@ import {
   getExecutionStatusClass,
   getPortTypeColor,
 } from "../../graph/utils";
+import { getDownstreamNodes } from "../../domain";
 
 // PERF: Equality function for edge arrays - prevents re-renders when edges haven't changed
 const edgeArrayEquals = (a: Edge[], b: Edge[]): boolean => {
@@ -124,9 +125,26 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   const updateNodeInternals = useUpdateNodeInternals();
 
   // Notify React Flow when handles change (ports added/removed/toggled)
+  // Notify React Flow when handles change (ports added/removed/toggled)
   useEffect(() => {
     updateNodeInternals(id);
   }, [id, data.input_ports, data.output_ports, data.showControlPorts, data.hoverControlPorts, data.executionMode, updateNodeInternals]);
+
+  // Hook for strict execution control check (moved to top level)
+  const allEdges = useStore((state) => state.edges || []);
+  const nodeInternals = useStore((state) => state.nodeInternals);
+
+  const isDownstreamActive = useMemo(() => {
+    if (!nodeInternals) return false;
+    const downstreamIds = getDownstreamNodes([id], allEdges);
+    for (const dsId of downstreamIds) {
+      const node = nodeInternals.get(dsId);
+      if (node?.data?.executionStatus === "running" || node?.data?.executionStatus === "queued") {
+        return true;
+      }
+    }
+    return false;
+  }, [id, allEdges, nodeInternals]);
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
   const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
@@ -392,7 +410,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                 </button>
               );
             }
-            if (data.last_outputs && !wasInterrupted) {
+
+            if (data.last_outputs && !wasInterrupted && !isDownstreamActive) {
               return (
                 <button
                   className="node-action-btn clear-cache-btn nodrag"
@@ -411,9 +430,17 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             }
             return (
               <button
-                className="node-action-btn run-btn nodrag"
-                onClick={handleRunNode}
-                title="Run from this node"
+                className={`node-action-btn run-btn nodrag ${isDownstreamActive ? "disabled" : ""}`}
+                onClick={(e) => {
+                  if (isDownstreamActive) {
+                    e.stopPropagation();
+                    return;
+                  }
+                  handleRunNode(e);
+                }}
+                disabled={isDownstreamActive}
+                title={isDownstreamActive ? "Wait for downstream nodes to finish" : "Run from this node"}
+                style={isDownstreamActive ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
@@ -431,12 +458,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
               title={data.cacheEnabled ? "Disable node caching" : "Enable node caching"}
             >
               <div style={{ position: 'relative', width: 12, height: 12 }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: !data.cacheEnabled ? 0.5 : 1 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: 1 }}>
                   <path d="M12 2c-4.42 0-8 1.79-8 4s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zm0 10c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4V8c0 2.21-3.58 4-8 4zm0 6c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4v-4c0 2.21-3.58 4-8 4z" />
                 </svg>
                 {!data.cacheEnabled && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ position: 'absolute', top: 0, left: 0 }}>
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31C15.55 19.37 13.85 20 12 20zm6.31-3.1L7.1 5.69C8.45 4.63 10.15 4 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z" />
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ position: 'absolute', top: 0, left: 0, color: 'var(--accent-red)', pointerEvents: 'none' }}>
+                    <line x1="0" y1="0" x2="24" y2="24" stroke="currentColor" strokeWidth="3" />
                   </svg>
                 )}
               </div>

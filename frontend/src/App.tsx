@@ -2246,6 +2246,7 @@ const App = () => {
             onRenameGraph={handleRenameGraph}
             onSignOut={handleSignOut}
             onAccountSettings={handleAccountSettings}
+            hasRunningNodes={hasRunningNodes}
           />
 
           {unsavedDialog && (
