@@ -423,16 +423,23 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           })()}
           {!isCoreControlNode && (
             <button
-              className={`node-action-btn cache-toggle-btn nodrag${data.cacheEnabled ? " cache-toggle-on" : ""}`}
+              className={`node-action-btn cache-toggle-btn nodrag${!data.cacheEnabled ? " cache-disabled" : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
                 data.onToggleCache?.(id);
               }}
               title={data.cacheEnabled ? "Disable node caching" : "Enable node caching"}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2c-4.42 0-8 1.79-8 4s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zm0 10c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4V8c0 2.21-3.58 4-8 4zm0 6c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4v-4c0 2.21-3.58 4-8 4z" />
-              </svg>
+              <div style={{ position: 'relative', width: 12, height: 12 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ opacity: !data.cacheEnabled ? 0.5 : 1 }}>
+                  <path d="M12 2c-4.42 0-8 1.79-8 4s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zm0 10c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4V8c0 2.21-3.58 4-8 4zm0 6c-4.42 0-8-1.79-8-4v4c0 2.21 3.58 4 8 4s8-1.79 8-4v-4c0 2.21-3.58 4-8 4z" />
+                </svg>
+                {!data.cacheEnabled && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ position: 'absolute', top: 0, left: 0 }}>
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31C15.55 19.37 13.85 20 12 20zm6.31-3.1L7.1 5.69C8.45 4.63 10.15 4 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z" />
+                  </svg>
+                )}
+              </div>
             </button>
           )}
           {/* Toggle control ports visibility button */}

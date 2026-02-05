@@ -3632,6 +3632,7 @@ body {
 }
 
 /* Cache toggle button */
+/* Cache toggle button */
 .node-action-btn.cache-toggle-btn {
   color: var(--text-muted);
   opacity: 0.6;
@@ -3640,20 +3641,21 @@ body {
 
 .node-action-btn.cache-toggle-btn:hover {
   opacity: 1;
-  color: var(--accent-cyan);
-  background: rgba(57, 211, 232, 0.15);
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
-.node-action-btn.cache-toggle-btn.cache-toggle-on {
+/* Disabled state (Red + Ban) */
+.node-action-btn.cache-toggle-btn.cache-disabled {
   opacity: 1;
-  color: var(--accent-cyan);
-  background: rgba(57, 211, 232, 0.2);
-  box-shadow: 0 0 6px rgba(57, 211, 232, 0.35);
+  color: var(--accent-red);
+  background: rgba(248, 81, 73, 0.15);
+  box-shadow: 0 0 6px rgba(248, 81, 73, 0.25);
 }
 
-.node-action-btn.cache-toggle-btn.cache-toggle-on:hover {
-  background: rgba(57, 211, 232, 0.3);
-  box-shadow: 0 0 10px rgba(57, 211, 232, 0.5);
+.node-action-btn.cache-toggle-btn.cache-disabled:hover {
+  background: rgba(248, 81, 73, 0.25);
+  box-shadow: 0 0 10px rgba(248, 81, 73, 0.4);
 }
 
 .node-delete-btn {

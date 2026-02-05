@@ -117,7 +117,7 @@ export const useNodeOperations = ({
                 params,
                 inputValues: seededInputValues,
                 breakpoint: false,
-                cacheEnabled: false,
+                cacheEnabled: true,
                 metadata: nodeType,
                 width: initialWidth,
                 height: initialHeight,
