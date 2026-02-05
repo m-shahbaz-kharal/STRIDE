@@ -44,10 +44,12 @@ interface UseGraphExecutionReturn {
   nodeStatuses: Map<string, NodeExecutionStatus>;
   currentNodeId: string | null;
   progress: number;
-  executionId: string | null;
+  executionId: string | null; // Keeps the latest execution ID for backward compatibility
+  activeExecutionIds: string[]; // List of all currently active execution IDs
   runGraph: (payload: GraphPayload, runNodeIds?: string[]) => void;
   runGraphSync: (payload: GraphPayload, runNodeIds?: string[]) => Promise<ExecutionResult>;
   clearResults: () => void;
+  stop: () => Promise<void>; // Cancel all active executions
 }
 
 // Construct WebSocket URL - works with both Vite proxy and production
@@ -62,6 +64,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const pendingPayloadRef = useRef<GraphPayload | null>(null);
   const activeRunRef = useRef(false);
 
+  // Track active runs count in a ref for synchronous access in callbacks
+  const activeRunsCountRef = useRef(0);
+  // Track all active execution IDs
+  const activeExecutionIdsRef = useRef<Set<string>>(new Set());
+
   const [isConnected, setIsConnected] = useState(false);
   const [activeRuns, setActiveRuns] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +81,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [executionId, setExecutionId] = useState<string | null>(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    activeRunsCountRef.current = activeRuns;
+  }, [activeRuns]);
 
   // PERF: Batch rapid updates during loops to prevent overwhelming React
   const pendingStatusUpdatesRef = useRef<Map<string, NodeExecutionStatus>>(new Map());
@@ -125,6 +137,15 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const data: ExecutionEvent = JSON.parse(event.data);
+
+      // Track execution ID
+      if (data.execution_id) {
+        if (data.event_type === "start") {
+          activeExecutionIdsRef.current.add(data.execution_id);
+        } else if (data.event_type === "complete" || data.event_type === "error" || data.event_type === "result") {
+          activeExecutionIdsRef.current.delete(data.execution_id);
+        }
+      }
 
       switch (data.event_type) {
         case "start":
@@ -230,20 +251,24 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         case "complete":
           // Flush any pending updates before marking as complete
           flushPendingUpdates();
-          // Clear any remaining running/queued statuses
-          setNodeStatuses((prev) => {
-            const updated = new Map(prev);
-            for (const [nodeId, status] of updated) {
-              if (status === "running" || status === "queued") {
-                updated.set(nodeId, "skipped");
+
+          if (activeRunsCountRef.current <= 1) {
+            // Only clear statuses if this is the last run
+            setNodeStatuses((prev) => {
+              const updated = new Map(prev);
+              for (const [nodeId, status] of updated) {
+                if (status === "running" || status === "queued") {
+                  updated.set(nodeId, "skipped");
+                }
               }
-            }
-            return updated;
-          });
-          setCurrentNodeId(null);
-          setProgress(1);
-          setExecutionId(null);
-          activeRunRef.current = false;
+              return updated;
+            });
+            setCurrentNodeId(null);
+            setProgress(1);
+            setExecutionId(null);
+            activeRunRef.current = false;
+          }
+
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
 
@@ -254,39 +279,47 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           if (data.outputs) setOutputs(data.outputs as Record<string, unknown>);
           if (data.stats) setStats(data.stats);
           if (data.levels) setLevels(data.levels as string[][]);
-          // Clear any remaining running/queued statuses
-          setNodeStatuses((prev) => {
-            const updated = new Map(prev);
-            for (const [nodeId, status] of updated) {
-              if (status === "running" || status === "queued") {
-                updated.set(nodeId, "skipped");
+
+          if (activeRunsCountRef.current <= 1) {
+            // Only clear statuses if this is the last run
+            setNodeStatuses((prev) => {
+              const updated = new Map(prev);
+              for (const [nodeId, status] of updated) {
+                if (status === "running" || status === "queued") {
+                  updated.set(nodeId, "skipped");
+                }
               }
-            }
-            return updated;
-          });
-          setCurrentNodeId(null);
-          setProgress(1);
-          setExecutionId(null);
-          activeRunRef.current = false;
+              return updated;
+            });
+            setCurrentNodeId(null);
+            setProgress(1);
+            setExecutionId(null);
+            activeRunRef.current = false;
+          }
+
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
 
         case "error":
           setError(data.error ?? "Unknown error");
           setErrorCode(data.error_code ?? null);
-          // Clear any remaining running/queued statuses
-          setNodeStatuses((prev) => {
-            const updated = new Map(prev);
-            for (const [nodeId, status] of updated) {
-              if (status === "running" || status === "queued") {
-                updated.set(nodeId, "skipped");
+
+          if (activeRunsCountRef.current <= 1) {
+            // Only clear statuses if this is the last run
+            setNodeStatuses((prev) => {
+              const updated = new Map(prev);
+              for (const [nodeId, status] of updated) {
+                if (status === "running" || status === "queued") {
+                  updated.set(nodeId, "skipped");
+                }
               }
-            }
-            return updated;
-          });
-          setCurrentNodeId(null);
-          setExecutionId(null);
-          activeRunRef.current = false;
+              return updated;
+            });
+            setCurrentNodeId(null);
+            setExecutionId(null);
+            activeRunRef.current = false;
+          }
+
           setActiveRuns((prev) => Math.max(0, prev - 1));
           break;
       }
@@ -323,6 +356,8 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setActiveRuns(0);
           setError((prev) => prev ?? "Connection closed during execution");
         }
+        // Clear active execution IDs on disconnect
+        activeExecutionIdsRef.current.clear();
 
         reconnectTimeoutRef.current = window.setTimeout(() => {
           connect();
@@ -336,6 +371,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setActiveRuns((prev) => Math.max(0, prev - 1));
           setError("WebSocket connection error");
         }
+        activeExecutionIdsRef.current.clear();
       };
 
       ws.onmessage = handleMessage;
@@ -373,6 +409,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       setProgress(0);
       setExecutionId(null);
       setCurrentNodeId(null);
+      activeExecutionIdsRef.current.clear();
     }
     // For partial runs, we keep the old state context to allow concurrent visualization
 
@@ -400,6 +437,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setStats(null);
     setProgress(0);
     setExecutionId(null);
+    activeExecutionIdsRef.current.clear();
     setNodeStatuses((prev) => {
       const updated = new Map(prev);
       runNodeIds.forEach((id) => updated.set(id, "queued"));
@@ -460,6 +498,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setExecutionId(null);
     activeRunRef.current = false;
     setActiveRuns(0);
+    activeExecutionIdsRef.current.clear();
   }, []);
 
   // Compute hasRunningNodes: true if any node has running/queued status
@@ -467,6 +506,22 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const hasRunningNodes = Array.from(nodeStatuses.values()).some(
     (status) => status === "running" || status === "queued"
   );
+
+  // Stop/Cancel all active executions
+  const stop = useCallback(async () => {
+    const ids = Array.from(activeExecutionIdsRef.current);
+    if (ids.length === 0 && executionId) {
+      ids.push(executionId);
+    }
+
+    await Promise.all(ids.map(async (id) => {
+      try {
+        await fetch(`/api/executions/${id}/cancel`, { method: "POST" });
+      } catch (e) {
+        console.error(`Failed to cancel execution ${id}:`, e);
+      }
+    }));
+  }, [executionId]);
 
   return {
     isConnected,
@@ -482,8 +537,10 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     currentNodeId,
     progress,
     executionId,
+    activeExecutionIds: Array.from(activeExecutionIdsRef.current),
     runGraph,
     runGraphSync,
     clearResults,
+    stop,
   };
 }

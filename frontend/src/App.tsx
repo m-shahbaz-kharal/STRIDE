@@ -268,6 +268,7 @@ const App = () => {
     executionId,
     runGraph,
     runGraphSync,
+    stop,
   } = useGraphExecution();
 
   const nodeTypes = useMemo(() => ({ blueprint: BlueprintNode }), []);
@@ -1264,7 +1265,7 @@ const App = () => {
 
       dirtyNodesInRun.forEach((nodeId) => dirtyCacheNodesRef.current.delete(nodeId));
 
-      if (useStreaming && !isRunning) {
+      if (useStreaming) {
         runGraph(payload, runIds);
       } else {
         runGraphSync(payload, runIds).catch(() => {
@@ -1279,13 +1280,8 @@ const App = () => {
   }, [handleRunGraph]);
 
   const handleInterruptAll = useCallback(async () => {
-    if (!executionId) return;
-    try {
-      await fetch(`/api/executions/${executionId}/cancel`, { method: "POST" });
-    } catch (e) {
-      console.error("Failed to interrupt execution:", e);
-    }
-  }, [executionId]);
+    await stop();
+  }, [stop]);
 
   const handleClearBackendCache = useCallback(async () => {
     try {

@@ -291,15 +291,23 @@ async def websocket_run_graph(websocket: WebSocket):
             except Exception:
                 pass
 
+    # Keep track of active tasks to prevent garbage collection
+    background_tasks = set()
+    
     try:
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
+            
             # Create a background task for each request to allow concurrency
-            asyncio.create_task(handle_request(payload))
+            task = asyncio.create_task(handle_request(payload))
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
                 
     except WebSocketDisconnect:
-        pass
+        # Cancel all running tasks when connection drops
+        for task in background_tasks:
+            task.cancel()
     except Exception:
         pass
 
