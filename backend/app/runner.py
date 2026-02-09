@@ -324,28 +324,21 @@ class GraphExecutor:
             )
         interrupted = False
 
+        is_while = loop_node.type == "core.control.while"
+
         if loop_node.type == "core.control.for":
             inputs = executor.prepare_inputs(loop_id)
             first_index = int(inputs.get("first_index") or 0)
             last_index_input = int(inputs.get("last_index") or 0)
             step = 1 if last_index_input >= first_index else -1
             indices = range(first_index, last_index_input + step, step)
-        elif loop_node.type == "core.control.repeat":
-            inputs = executor.prepare_inputs(loop_id)
-            count = int(inputs.get("count") or 0)
-            indices = range(max(0, count))
-        else:
+        elif not is_while:
             indices = range(0)
+        else:
+            indices = None
 
-        if loop_node.type == "core.control.while":
-            inputs = executor.prepare_inputs(loop_id)
-            max_iterations_value = inputs.get("max_iterations")
-            if max_iterations_value is None:
-                max_iterations_value = loop_node.params.get("max_iterations", 100)
-            max_iterations = int(max_iterations_value)
-            indices = range(max_iterations)
-
-        for idx in indices:
+        idx = 0
+        while True:
             if self._should_interrupt(loop_id) or self._should_stop_execution():
                 interrupted = True
                 break
@@ -354,10 +347,25 @@ class GraphExecutor:
             if loop_id in breakpoints:
                 break
 
-            if loop_node.type == "core.control.while":
+            if is_while:
                 inputs = executor.prepare_inputs(loop_id)
                 if not bool(inputs.get("condition")):
                     break
+                idx = iterations
+            elif loop_node.type == "core.control.for":
+                inputs = executor.prepare_inputs(loop_id)
+                first_index = int(inputs.get("first_index") or 0)
+                last_index_input = int(inputs.get("last_index") or 0)
+                step = 1 if last_index_input >= first_index else -1
+                idx = first_index + iterations * step
+                if step > 0 and idx > last_index_input:
+                    break
+                if step < 0 and idx < last_index_input:
+                    break
+            else:
+                if iterations >= len(indices):
+                    break
+                idx = indices[iterations]
 
             self._computed_values[loop_id] = {"loop_body": None, "index": idx, "completed": None}
             last_index = idx

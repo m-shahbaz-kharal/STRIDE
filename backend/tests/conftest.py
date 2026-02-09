@@ -50,17 +50,17 @@ def simple_graph() -> Dict[str, Any]:
 
 @pytest.fixture
 def loop_graph() -> Dict[str, Any]:
-    """A graph with a repeat loop."""
+    """A graph with a for loop (0..2)."""
     return {
         "nodes": [
             {
-                "id": "count",
+                "id": "last",
                 "type": "core.literal.int",
-                "input_values": {"value": 3},
+                "input_values": {"value": 2},
             },
             {
                 "id": "loop",
-                "type": "core.control.repeat",
+                "type": "core.control.for",
             },
             {
                 "id": "inside-loop",
@@ -69,10 +69,10 @@ def loop_graph() -> Dict[str, Any]:
         ],
         "links": [
             {
-                "from_node": "count",
+                "from_node": "last",
                 "from_port": "value",
                 "to_node": "loop",
-                "to_port": "count",
+                "to_port": "last_index",
             },
             {
                 "from_node": "loop",

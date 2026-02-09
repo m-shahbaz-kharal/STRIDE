@@ -23,7 +23,7 @@ def is_loop_node(node: "NodeBase") -> bool:
     tags = getattr(spec, "tags", None) or []
     if "loop" in tags:
         return True
-    return node.type in {"core.control.for", "core.control.repeat", "core.control.while"}
+    return node.type in {"core.control.for", "core.control.while"}
 
 
 def is_ifelse_node(node: "NodeBase") -> bool:
