@@ -102,7 +102,7 @@ export const useNodeExecutionSync = ({
         const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
 
         const sourceType = sourceNode?.data.nodeType ?? "";
-        const isLoopNode = sourceType === "core.control.for" || sourceType === "core.control.repeat" || sourceType === "core.control.while";
+        const isLoopNode = sourceType === "core.control.for" || sourceType === "core.control.while";
         const isLoopBodyEdge = isLoopNode && edge.sourceHandle === "loop_body";
         const isLoopRunning = isLoopNode && nodeStatuses.get(edge.source) === "running";
 

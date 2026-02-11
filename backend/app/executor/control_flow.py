@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class LoopHandler:
     """Handles loop node detection and body collection."""
 
-    LOOP_TYPES = {"core.control.for", "core.control.repeat", "core.control.while"}
+    LOOP_TYPES = {"core.control.for", "core.control.while"}
 
     def __init__(
         self,

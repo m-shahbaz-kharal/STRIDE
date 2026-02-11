@@ -770,25 +770,19 @@ class StreamingExecutor:
         iterations = 0
         last_index = 0
 
+        is_while = loop_node.type == "core.control.while"
+        indices: Any = None
+
         if loop_node.type == "core.control.for":
             inputs = self.executor.prepare_inputs(node_id)
             first_index = int(inputs.get("first_index") or 0)
             last_index_input = int(inputs.get("last_index") or 0)
             step = 1 if last_index_input >= first_index else -1
             indices = range(first_index, last_index_input + step, step)
-        elif loop_node.type == "core.control.repeat":
-            inputs = self.executor.prepare_inputs(node_id)
-            count = int(inputs.get("count") or 0)
-            indices = range(max(0, count))
-        else:
-            inputs = self.executor.prepare_inputs(node_id)
-            max_iterations_value = inputs.get("max_iterations")
-            if max_iterations_value is None:
-                max_iterations_value = loop_node.params.get("max_iterations", 100)
-            max_iterations = int(max_iterations_value)
-            indices = range(max_iterations)
+        elif not is_while:
+            indices = range(0)  # unknown loop type — skip
 
-        if adjust_total:
+        if adjust_total and indices is not None:
             additional = len(indices) * len(body_order)
             if additional:
                 with progress_state["lock"]:
@@ -814,16 +808,44 @@ class StreamingExecutor:
         loop = asyncio.get_running_loop()
 
         loop_interrupted = False
-        for idx in indices:
+        idx = 0
+        idx_iter = iter(indices) if indices is not None else iter(range(0))
+
+        while True:
             if self._should_interrupt(node_id):
                 loop_interrupted = True
                 break
             if self._should_stop_execution():
                 break
-            if loop_node.type == "core.control.while":
+
+            if is_while:
+                # Re-read condition every iteration
                 inputs = self.executor.prepare_inputs(node_id)
                 if not bool(inputs.get("condition")):
                     break
+                idx = iterations
+                # Dynamically adjust progress total for the new iteration
+                if body_order:
+                    with progress_state["lock"]:
+                        progress_state["total"] += len(body_order)
+            else:
+                # For loop: re-read bounds each iteration
+                if loop_node.type == "core.control.for":
+                    inputs = self.executor.prepare_inputs(node_id)
+                    first_index = int(inputs.get("first_index") or 0)
+                    last_index_input = int(inputs.get("last_index") or 0)
+                    step = 1 if last_index_input >= first_index else -1
+                    idx = first_index + iterations * step
+                    if step > 0 and idx > last_index_input:
+                        break
+                    if step < 0 and idx < last_index_input:
+                        break
+                else:
+                    try:
+                        idx = next(idx_iter)
+                    except StopIteration:
+                        break
+
             self.computed_values[node_id] = {"loop_body": None, "index": idx, "completed": None}
             last_index = idx
             iterations += 1

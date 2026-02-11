@@ -383,33 +383,6 @@ class ForLoopNode(NodeBase):
         return {"loop_body": None, "index": first_index, "completed": None}
 
 
-REPEAT_LOOP_SPEC = NodeSpec(
-    type="core.control.repeat",
-    version="1.0.0",
-    display_name="Repeat",
-    category="Control",
-    summary="Repeat N times.",
-    description="Executes the loop body a fixed number of times.",
-    tags=["control", "loop"],
-    inputs=[
-        PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="count", type=t_int(), required=False, default=1),
-    ],
-    outputs=[
-        PortSpec(name="loop_body", type=t_control(), required=False, default=None),
-        PortSpec(name="index", type=t_int()),
-        PortSpec(name="completed", type=t_control(), required=False, default=None),
-    ],
-)
-
-
-@register_node(REPEAT_LOOP_SPEC)
-class RepeatLoopNode(NodeBase):
-    def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        count = int(inputs.get("count") or 0)
-        ctx.log(f"Repeat count {count}")
-        return {"loop_body": None, "index": 0, "completed": None}
-
 
 WHILE_LOOP_SPEC = NodeSpec(
     type="core.control.while",
@@ -417,12 +390,11 @@ WHILE_LOOP_SPEC = NodeSpec(
     display_name="While",
     category="Control",
     summary="Repeat while condition is true.",
-    description="Executes the loop body while condition remains true, with a max iteration safeguard.",
+    description="Loops indefinitely while the condition input is true. Breaks as soon as the condition becomes false.",
     tags=["control", "loop"],
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="condition", type=t_boolean(), required=False, default=False),
-        PortSpec(name="max_iterations", type=t_int(), required=False, default=100),
+        PortSpec(name="condition", type=t_boolean(), required=False, default=True),
     ],
     outputs=[
         PortSpec(name="loop_body", type=t_control(), required=False, default=None),

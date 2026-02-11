@@ -100,6 +100,10 @@ from . import math_ops  # noqa: E402,F401
 from . import programming  # noqa: E402,F401
 from . import utilities  # noqa: E402,F401
 from . import display  # noqa: E402,F401
+from . import sv_core        # noqa: E402,F401
+from . import sv_annotators  # noqa: E402,F401
+from . import sv_tools       # noqa: E402,F401
+from . import ul_yolo        # noqa: E402,F401
 
 # Note: fl511 and sam3 are now loaded as plugins, not built-in nodes
 # from . import fl511  # Moved to liguard-fl511 plugin

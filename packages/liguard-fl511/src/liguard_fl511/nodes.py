@@ -132,9 +132,23 @@ def get_active_stream(stream_id: str) -> Optional["StreamResource"]:
 
 
 class StreamResource:
-    """A self-contained stream resource that manages its own ffmpeg process."""
-    
-    def __init__(self, stream_id: str, hls_url: str, target_fps: int, buffer_seconds: int) -> None:
+    """A self-contained stream resource that manages its own ffmpeg process.
+
+    Supports automatic token refresh: when *camera_id* is provided, a background
+    thread periodically re-resolves the HLS URL (which carries a time-limited
+    token) and seamlessly swaps the underlying ffmpeg process so the frame queue
+    is never starved.
+    """
+
+    def __init__(
+        self,
+        stream_id: str,
+        hls_url: str,
+        target_fps: int,
+        buffer_seconds: int,
+        camera_id: Optional[int] = None,
+        refresh_minutes: int = 4,
+    ) -> None:
         _require_numpy()
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg not found in PATH. Please install ffmpeg.")
@@ -144,23 +158,45 @@ class StreamResource:
         self.target_fps = max(1, int(target_fps))
         self.buffer_frames = max(10, self.target_fps * max(1, int(buffer_seconds)))
         self.width, self.height = _probe_stream_resolution(hls_url)
+        self.camera_id = camera_id
+        self._refresh_interval: int = (
+            max(60, int(refresh_minutes) * 60)
+            if camera_id is not None and int(refresh_minutes) > 0
+            else 0
+        )
 
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=self.buffer_frames)
         self._running = threading.Event()
         self._running.set()
-        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
-        self._stderr_thread: Optional[threading.Thread] = None
         self._proc: Optional[subprocess.Popen] = None
         self._last_frame_time = 0.0
         self._lock = threading.Lock()
-        self._stderr_lines = deque(maxlen=20)
+        self._stderr_lines: deque[str] = deque(maxlen=20)
         self._stderr_lock = threading.Lock()
         self._ffmpeg_exit_code: Optional[int] = None
-        
-        ACTIVE_STREAMS[self.stream_id] = self
-        self._start()
 
-    def _ffmpeg_cmd(self) -> list[str]:
+        # Token refresh state
+        self._pending_url: Optional[str] = None
+        self._pending_url_lock = threading.Lock()
+        self._swap_requested = threading.Event()
+
+        ACTIVE_STREAMS[self.stream_id] = self
+
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+
+        self._refresher_thread: Optional[threading.Thread] = None
+        if self._refresh_interval > 0:
+            self._refresher_thread = threading.Thread(
+                target=self._refresher_loop, daemon=True
+            )
+            self._refresher_thread.start()
+
+    # ------------------------------------------------------------------
+    # ffmpeg helpers
+    # ------------------------------------------------------------------
+
+    def _ffmpeg_cmd(self, url: Optional[str] = None) -> list[str]:
         return [
             "ffmpeg",
             "-hide_banner",
@@ -169,7 +205,7 @@ class StreamResource:
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
-            "-i", self.hls_url,
+            "-i", url or self.hls_url,
             "-f", "rawvideo",
             "-pix_fmt", "bgr24",
             "-an", "-sn",
@@ -178,21 +214,33 @@ class StreamResource:
             "-",
         ]
 
-    def _start(self) -> None:
-        self._proc = subprocess.Popen(
-            self._ffmpeg_cmd(),
+    def _start_ffmpeg(self, url: Optional[str] = None) -> subprocess.Popen:
+        proc = subprocess.Popen(
+            self._ffmpeg_cmd(url),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=10**7,
         )
-        self._stderr_thread = threading.Thread(target=self._stderr_loop, daemon=True)
-        self._stderr_thread.start()
-        self._thread.start()
+        threading.Thread(
+            target=self._stderr_loop, args=(proc,), daemon=True
+        ).start()
+        return proc
 
-    def _stderr_loop(self) -> None:
-        assert self._proc and self._proc.stderr
+    @staticmethod
+    def _kill_proc(proc: subprocess.Popen) -> None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _stderr_loop(self, proc: subprocess.Popen) -> None:
+        assert proc.stderr
         while True:
-            line = self._proc.stderr.readline()
+            line = proc.stderr.readline()
             if not line:
                 break
             try:
@@ -202,31 +250,101 @@ class StreamResource:
             if text:
                 with self._stderr_lock:
                     self._stderr_lines.append(text)
-        self._ffmpeg_exit_code = self._proc.poll()
+        exit_code = proc.poll()
+        if exit_code is not None:
+            self._ffmpeg_exit_code = exit_code
+
+    # ------------------------------------------------------------------
+    # Proactive token refresh
+    # ------------------------------------------------------------------
+
+    def _refresher_loop(self) -> None:
+        """Periodically re-resolve the HLS URL before the token expires."""
+        while self._running.is_set():
+            elapsed = 0
+            while elapsed < self._refresh_interval and self._running.is_set():
+                time.sleep(1)
+                elapsed += 1
+            if not self._running.is_set():
+                return
+            try:
+                new_url = _resolve_fl511_hls_url(self.camera_id)
+                with self._pending_url_lock:
+                    self._pending_url = new_url
+                self._swap_requested.set()
+            except Exception:
+                pass  # keep current stream; will retry next interval
+
+    # ------------------------------------------------------------------
+    # Frame reader (with auto-restart)
+    # ------------------------------------------------------------------
 
     def _reader_loop(self) -> None:
-        assert self._proc and self._proc.stdout
+        """Start ffmpeg, read frames, and restart on swap or unexpected death."""
+        while self._running.is_set():
+            # Use a pre-resolved URL if available, otherwise the current one
+            url = self.hls_url
+            with self._pending_url_lock:
+                if self._pending_url:
+                    url = self._pending_url
+                    self.hls_url = self._pending_url
+                    self._pending_url = None
+            self._swap_requested.clear()
+
+            proc = self._start_ffmpeg(url)
+            with self._lock:
+                self._proc = proc
+
+            self._read_frames(proc)
+            self._kill_proc(proc)
+
+            if not self._running.is_set():
+                break
+
+            # A proactive swap already has a pending URL ready — loop back
+            if self._swap_requested.is_set():
+                continue
+
+            # ffmpeg died unexpectedly — try a reactive re-resolve
+            if self.camera_id is not None:
+                try:
+                    self.hls_url = _resolve_fl511_hls_url(self.camera_id)
+                    continue
+                except Exception:
+                    pass
+
+            # Cannot recover
+            self._running.clear()
+
+    def _read_frames(self, proc: subprocess.Popen) -> None:
+        assert proc.stdout
         frame_size = self.width * self.height * 3
         while self._running.is_set():
+            # Let the outer loop swap to a fresh ffmpeg process
+            if self._swap_requested.is_set():
+                return
+
             raw = b""
             while len(raw) < frame_size and self._running.is_set():
-                chunk = self._proc.stdout.read(frame_size - len(raw))
+                chunk = proc.stdout.read(frame_size - len(raw))
                 if not chunk:
-                    break
+                    return  # process exited
                 raw += chunk
 
             if len(raw) != frame_size:
-                break
+                return
 
-            frame = np.frombuffer(raw, dtype=np.uint8).reshape((self.height, self.width, 3))
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                (self.height, self.width, 3)
+            )
             try:
                 self._queue.put(frame, timeout=1.0)
             except queue.Full:
-                # Buffer full, skip this frame to avoid deadlock.
-                pass
-        self._running.clear()
-        if self._proc:
-            self._ffmpeg_exit_code = self._proc.poll()
+                pass  # drop frame to avoid deadlock
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def latest_frame(self, timeout: float, pace: bool = True) -> Optional["np.ndarray"]:
         if pace:
@@ -249,7 +367,9 @@ class StreamResource:
             exit_code = self._proc.poll()
             if exit_code is not None:
                 details.append(f"ffmpeg exit code {exit_code}")
-        if self._ffmpeg_exit_code is not None and (not details or str(self._ffmpeg_exit_code) not in details[-1]):
+        if self._ffmpeg_exit_code is not None and (
+            not details or str(self._ffmpeg_exit_code) not in details[-1]
+        ):
             details.append(f"ffmpeg exit code {self._ffmpeg_exit_code}")
         with self._stderr_lock:
             if self._stderr_lines:
@@ -262,19 +382,15 @@ class StreamResource:
         ACTIVE_STREAMS.pop(self.stream_id, None)
         self._running.clear()
         if self._proc:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
+            self._kill_proc(self._proc)
         if self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-        if self._stderr_thread and self._stderr_thread.is_alive():
-            self._stderr_thread.join(timeout=1.0)
-            
+            self._thread.join(timeout=3.0)
+        if self._refresher_thread and self._refresher_thread.is_alive():
+            self._refresher_thread.join(timeout=2.0)
+
     def __repr__(self) -> str:
         return f"<StreamResource id={self.stream_id} url={self.hls_url} size={self.width}x{self.height}>"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serializable representation of this stream."""
         return {
@@ -341,6 +457,7 @@ FL511_START_SPEC = NodeSpec(
         PortSpec(name="url", type=t_string(), required=False, default=None),
         PortSpec(name="fps", type=t_int(), required=False, default=15),
         PortSpec(name="buffer_seconds", type=t_int(), required=False, default=4),
+        PortSpec(name="refresh_minutes", type=t_int(), required=False, default=4),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -359,23 +476,31 @@ class Fl511StartNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         hls_url = inputs.get("url")
         camera_id = inputs.get("camera")
-        if not hls_url:
-            camera_id = inputs.get("camera", 2130)
+        if camera_id is not None:
             camera_id = int(camera_id)
+        if not hls_url:
+            camera_id = int(inputs.get("camera", 2130))
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
-        fps_value = inputs.get("fps", 15)
-        buffer_seconds_value = inputs.get("buffer_seconds", 4)
-        target_fps = int(fps_value)
-        buffer_seconds = int(buffer_seconds_value)
+
+        target_fps = int(inputs.get("fps", 15))
+        buffer_seconds = int(inputs.get("buffer_seconds", 4))
+        refresh_minutes = int(inputs.get("refresh_minutes", 4))
 
         stream_id = str(uuid.uuid4())[:8]
-        stream = StreamResource(stream_id, str(hls_url), target_fps, buffer_seconds)
-        
+        stream = StreamResource(
+            stream_id,
+            str(hls_url),
+            target_fps,
+            buffer_seconds,
+            camera_id=camera_id,
+            refresh_minutes=refresh_minutes,
+        )
+
         # Register the stream resource so it gets cleaned up automatically
         if hasattr(ctx, "register_resource"):
             ctx.register_resource(stream)
-            
+
         ctx.log(f"Connected stream {stream_id} at {stream.width}x{stream.height}")
         return {
             "control_out": None,
