@@ -283,7 +283,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
     const glRef = useRef<WebGLRenderingContext | null>(null);
     const hoverRef = useRef(false);
 
-    const cam = useRef({ th: Math.PI / 4, ph: Math.PI / 6, d: 50, tx: 0, ty: 0, tz: 0, ps: 2 });
+    const cam = useRef({ th: Math.PI / 4, ph: Math.PI / 6, d: 50, tx: 0, ty: 0, tz: 0, ps: 2, zUp: 1 as 1 | -1 });
 
     const [colorMode, setColorMode] = useState<ColorMode>("height");
     const [nav, setNav] = useState<NavMode>("rotate");
@@ -325,6 +325,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
     const viewFront = useCallback(() => { cam.current.th = -Math.PI / 2; cam.current.ph = 0; }, []);
     const viewSide = useCallback(() => { cam.current.th = 0; cam.current.ph = 0; }, []);
     const viewIso = useCallback(() => { cam.current.th = Math.PI / 4; cam.current.ph = Math.PI / 6; }, []);
+    const flipV = useCallback(() => { cam.current.zUp *= -1; }, []);
 
     // ── Data upload ──────────────────────────────────────────────────────
     useEffect(() => {
@@ -430,8 +431,8 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
 
             const c = cam.current;
             const cp = Math.cos(c.ph), sp = Math.sin(c.ph), ct = Math.cos(c.th), st = Math.sin(c.th);
-            const eye = [c.tx + c.d * st * cp, c.ty + c.d * ct * cp, c.tz + c.d * sp];
-            const view = m4Look(eye, [c.tx, c.ty, c.tz], [0, 0, 1]);
+            const eye = [c.tx + c.d * st * cp, c.ty + c.d * ct * cp, c.tz + c.d * sp * c.zUp];
+            const view = m4Look(eye, [c.tx, c.ty, c.tz], [0, 0, c.zUp]);
             const proj = m4Persp(Math.PI / 4, w / h, c.d * 0.001, c.d * 10);
             const mvp = m4Mul(proj, view);
 
@@ -513,14 +514,15 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
             const c = cam.current;
             const eff: NavMode = (e.buttons & 2) ? "pan" : navRef.current;
             if (eff === "rotate") {
-                c.th -= dx * 0.005; c.ph += dy * 0.005;
+                c.th -= dx * 0.005 * c.zUp; c.ph += dy * 0.005;
                 c.ph = Math.max(-Math.PI / 2 + .05, Math.min(Math.PI / 2 - .05, c.ph));
             } else if (eff === "pan") {
                 const s = c.d * 0.002;
                 const st = Math.sin(c.th), ct = Math.cos(c.th), sp = Math.sin(c.ph), cp = Math.cos(c.ph);
-                c.tx += (ct * dx + (-sp * st) * dy) * s;
-                c.ty += (-st * dx + (-sp * ct) * dy) * s;
-                c.tz += cp * dy * s;
+                const hdx = dx * c.zUp;
+                c.tx += (ct * hdx + (-sp * st) * dy) * s;
+                c.ty += (-st * hdx + (-sp * ct) * dy) * s;
+                c.tz += cp * dy * s * c.zUp;
             } else {
                 c.d *= 1 - dy * 0.005; c.d = Math.max(0.01, c.d);
             }
@@ -568,6 +570,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
                 case "2": viewFront(); break;
                 case "3": viewSide(); break;
                 case "4": viewIso(); break;
+                case "v": flipV(); break;
                 case "[": cam.current.ps = Math.max(1, cam.current.ps - 1); break;
                 case "]": cam.current.ps = Math.min(10, cam.current.ps + 1); break;
                 default: return;
@@ -576,7 +579,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
         };
         window.addEventListener("keydown", kd);
         return () => window.removeEventListener("keydown", kd);
-    }, [fit, viewTop, viewFront, viewSide, viewIso]);
+    }, [fit, viewTop, viewFront, viewSide, viewIso, flipV]);
 
     // ── Available color modes ────────────────────────────────────────────
     const hasF = (k: string) => !!(data.fields_b64?.[k] || data.fields?.[k]);
@@ -639,6 +642,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
                         <TB label="Front" tooltip="Front View  [2]" onClick={viewFront} />
                         <TB label="Side" tooltip="Side View  [3]" onClick={viewSide} />
                         <TB label="Iso" tooltip="Isometric  [4]" onClick={viewIso} />
+                        <TB label="⇅" tooltip="Vertical Flip  [V]" onClick={flipV} compact />
                     </div>
                 </div>
 
