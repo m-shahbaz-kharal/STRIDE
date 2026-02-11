@@ -26,6 +26,9 @@ def _json_serializer(obj: Any) -> Any:
     """Custom JSON serializer for objects that are not JSON serializable."""
     if hasattr(obj, "to_dict"):
         return obj.to_dict()
+    # numpy arrays/scalars
+    if hasattr(obj, "dtype"):
+        return obj.tolist()
     return str(obj)
 
 

@@ -1,112 +1,196 @@
-import React, { useRef, useEffect, useCallback, useState } from "react";
+import React, { useRef, useEffect, useCallback, useState, memo } from "react";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA TYPES
+// ═══════════════════════════════════════════════════════════════════════════
 interface PointCloudData {
     _type: "PointCloud";
     num_points: number;
-    positions: number[][];
-    fields?: Record<string, number[]>;
+    positions_b64?: string;                   // base64 Float32 (preferred)
+    fields_b64?: Record<string, string>;      // base64 Float32 per field
+    positions?: number[][];                   // legacy nested
+    fields?: Record<string, number[]>;        // legacy nested
     metadata?: Record<string, unknown>;
 }
 
-interface Props {
-    data: PointCloudData;
+interface Props { data: PointCloudData; }
+
+type ColorMode = "height" | "signal" | "reflectivity" | "near_ir" | "solid";
+type NavMode = "rotate" | "pan" | "zoom";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITY
+// ═══════════════════════════════════════════════════════════════════════════
+function b64ToF32(b64: string): Float32Array {
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new Float32Array(u8.buffer);
 }
 
-type ColorMode = "height" | "intensity" | "reflectivity" | "solid";
-type InteractionMode = "rotate" | "pan" | "zoom";
+// ═══════════════════════════════════════════════════════════════════════════
+// UI COMPONENTS  (defined OUTSIDE the main component to prevent remounting)
+// ═══════════════════════════════════════════════════════════════════════════
+const panelStyle: React.CSSProperties = {
+    background: "rgba(10, 12, 18, 0.65)",
+    backdropFilter: "blur(12px) saturate(1.4)",
+    WebkitBackdropFilter: "blur(12px) saturate(1.4)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 6,
+    padding: 3,
+    display: "flex",
+    gap: 2,
+    pointerEvents: "auto",
+};
 
-function turboColormap(t: number): [number, number, number] {
-    t = Math.max(0, Math.min(1, t));
-    const r = Math.max(0, Math.min(1, 0.13572 + t * (4.6153 + t * (-42.66 + t * (132.13 + t * (-152.95 + t * 56.67))))));
-    const g = Math.max(0, Math.min(1, 0.09140 + t * (2.1643 + t * (4.8428 + t * (-27.66 + t * (29.04 + t * (-8.36)))))));
-    const b = Math.max(0, Math.min(1, 0.10667 + t * (12.486 + t * (-60.46 + t * (109.98 + t * (-89.09 + t * 25.79))))));
-    return [r, g, b];
+const btnBase: React.CSSProperties = {
+    border: "1px solid transparent",
+    borderRadius: 4,
+    fontSize: 11,
+    fontWeight: 600,
+    fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
+    cursor: "pointer",
+    transition: "all 0.12s ease",
+    outline: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 26,
+    height: 26,
+    padding: "0 7px",
+    letterSpacing: 0.3,
+};
+
+interface TBProps {
+    label: string;
+    tooltip: string;
+    active?: boolean;
+    onClick: () => void;
+    compact?: boolean;
 }
 
-// ── Shaders ──────────────────────────────────────────────────────────────
-const VERT_SRC = `
-attribute vec3 a_position;
-attribute vec3 a_color;
+const TB = memo(({ label, tooltip, active, onClick, compact }: TBProps) => (
+    <button
+        title={tooltip}
+        style={{
+            ...btnBase,
+            minWidth: compact ? 26 : undefined,
+            padding: compact ? "0 5px" : "0 7px",
+            background: active
+                ? "linear-gradient(135deg, rgba(56,128,255,0.35), rgba(80,180,255,0.25))"
+                : "rgba(255,255,255,0.04)",
+            border: active
+                ? "1px solid rgba(80,160,255,0.5)"
+                : "1px solid rgba(255,255,255,0.06)",
+            color: active ? "#8ac4ff" : "rgba(200,200,210,0.7)",
+            boxShadow: active ? "0 0 8px rgba(56,128,255,0.3), inset 0 0 6px rgba(56,128,255,0.1)" : "none",
+        }}
+        onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+        }}
+        onPointerDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+        }}
+        onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onClick();
+        }}
+    >{label}</button>
+));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SHADERS — GPU turbo colormap
+// ═══════════════════════════════════════════════════════════════════════════
+const POINT_VS = `
+attribute vec3 a_pos;
+attribute float a_h;    // height (z)
+attribute float a_f1;   // signal
+attribute float a_f2;   // reflectivity
+attribute float a_f3;   // near_ir
+
 uniform mat4 u_mvp;
-uniform float u_pointSize;
-varying vec3 v_color;
+uniform float u_ps;      // point size
+uniform int u_cm;        // color mode: 0=height 1=signal 2=reflect 3=near_ir 4=solid
+uniform vec2 u_range;    // (min, max) of active field
+
+varying float v_t;
+varying float v_solid;
+
 void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
-    gl_PointSize = u_pointSize;
-    v_color = a_color;
+    gl_Position = u_mvp * vec4(a_pos, 1.0);
+    gl_PointSize = u_ps;
+    float val = a_h;
+    if (u_cm == 1) val = a_f1;
+    else if (u_cm == 2) val = a_f2;
+    else if (u_cm == 3) val = a_f3;
+    v_t = clamp((val - u_range.x) / max(u_range.y - u_range.x, 0.0001), 0.0, 1.0);
+    v_solid = u_cm == 4 ? 1.0 : 0.0;
 }
 `;
 
-const FRAG_SRC = `
+const POINT_FS = `
 precision mediump float;
-varying vec3 v_color;
+varying float v_t;
+varying float v_solid;
+
+vec3 turbo(float t) {
+    float r = 0.13572+t*(4.6153+t*(-42.66+t*(132.13+t*(-152.95+t*56.67))));
+    float g = 0.09140+t*(2.1643+t*(4.8428+t*(-27.66+t*(29.04+t*(-8.36)))));
+    float b = 0.10667+t*(12.486+t*(-60.46+t*(109.98+t*(-89.09+t*25.79))));
+    return clamp(vec3(r,g,b), 0.0, 1.0);
+}
+
 void main() {
-    vec2 c = gl_PointCoord - vec2(0.5);
-    if (dot(c, c) > 0.25) discard;
-    gl_FragColor = vec4(v_color, 1.0);
+    vec2 c = gl_PointCoord - 0.5;
+    if (dot(c,c) > 0.25) discard;
+    vec3 col = v_solid > 0.5 ? vec3(0.25,0.72,1.0) : turbo(v_t);
+    gl_FragColor = vec4(col, 1.0);
 }
 `;
 
-const LINE_VERT = `
-attribute vec3 a_position;
-attribute vec3 a_color;
+const LINE_VS = `
+attribute vec3 a_pos;
+attribute vec3 a_col;
 uniform mat4 u_mvp;
-varying vec3 v_color;
-void main() {
-    gl_Position = u_mvp * vec4(a_position, 1.0);
-    v_color = a_color;
-}
+varying vec3 v_col;
+void main() { gl_Position = u_mvp * vec4(a_pos,1.0); v_col = a_col; }
 `;
-const LINE_FRAG = `
+const LINE_FS = `
 precision mediump float;
-varying vec3 v_color;
-void main() { gl_FragColor = vec4(v_color, 1.0); }
+varying vec3 v_col;
+void main() { gl_FragColor = vec4(v_col,1.0); }
 `;
 
-// ── Matrix helpers (column-major for WebGL) ──────────────────────────────
-
-function mat4Multiply(a: Float32Array, b: Float32Array): Float32Array {
+// ═══════════════════════════════════════════════════════════════════════════
+// MATH HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function m4Mul(a: Float32Array, b: Float32Array): Float32Array {
     const o = new Float32Array(16);
     for (let c = 0; c < 4; c++)
         for (let r = 0; r < 4; r++)
-            o[c * 4 + r] =
-                a[0 * 4 + r] * b[c * 4 + 0] +
-                a[1 * 4 + r] * b[c * 4 + 1] +
-                a[2 * 4 + r] * b[c * 4 + 2] +
-                a[3 * 4 + r] * b[c * 4 + 3];
+            o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
     return o;
 }
 
-function mat4Perspective(fov: number, aspect: number, near: number, far: number): Float32Array {
-    const m = new Float32Array(16);
-    const f = 1 / Math.tan(fov / 2);
-    m[0] = f / aspect;
-    m[5] = f;
-    m[10] = (far + near) / (near - far);
-    m[11] = -1;
-    m[14] = (2 * far * near) / (near - far);
+function m4Persp(fov: number, asp: number, zn: number, zf: number): Float32Array {
+    const f = 1 / Math.tan(fov / 2), m = new Float32Array(16);
+    m[0] = f / asp; m[5] = f; m[10] = (zf + zn) / (zn - zf); m[11] = -1; m[14] = 2 * zf * zn / (zn - zf);
     return m;
 }
 
-function mat4LookAt(eye: number[], center: number[], up: number[]): Float32Array {
-    let fx = eye[0] - center[0], fy = eye[1] - center[1], fz = eye[2] - center[2];
-    let len = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
-    fx /= len; fy /= len; fz /= len;
-
-    let rx = up[1] * fz - up[2] * fy;
-    let ry = up[2] * fx - up[0] * fz;
-    let rz = up[0] * fy - up[1] * fx;
-    len = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
-    rx /= len; ry /= len; rz /= len;
-
-    const ux = fy * rz - fz * ry;
-    const uy = fz * rx - fx * rz;
-    const uz = fx * ry - fy * rx;
-
+function m4Look(eye: number[], ctr: number[], up: number[]): Float32Array {
+    let fx = eye[0] - ctr[0], fy = eye[1] - ctr[1], fz = eye[2] - ctr[2];
+    let l = Math.hypot(fx, fy, fz) || 1; fx /= l; fy /= l; fz /= l;
+    let rx = up[1] * fz - up[2] * fy, ry = up[2] * fx - up[0] * fz, rz = up[0] * fy - up[1] * fx;
+    l = Math.hypot(rx, ry, rz) || 1; rx /= l; ry /= l; rz /= l;
+    const ux = fy * rz - fz * ry, uy = fz * rx - fx * rz, uz = fx * ry - fy * rx;
     const m = new Float32Array(16);
-    m[0] = rx;  m[1] = ux;  m[2] = fx;  m[3] = 0;
-    m[4] = ry;  m[5] = uy;  m[6] = fy;  m[7] = 0;
-    m[8] = rz;  m[9] = uz;  m[10] = fz; m[11] = 0;
+    m[0] = rx; m[1] = ux; m[2] = fx;
+    m[4] = ry; m[5] = uy; m[6] = fy;
+    m[8] = rz; m[9] = uz; m[10] = fz;
     m[12] = -(rx * eye[0] + ry * eye[1] + rz * eye[2]);
     m[13] = -(ux * eye[0] + uy * eye[1] + uz * eye[2]);
     m[14] = -(fx * eye[0] + fy * eye[1] + fz * eye[2]);
@@ -114,490 +198,463 @@ function mat4LookAt(eye: number[], center: number[], up: number[]): Float32Array
     return m;
 }
 
-// ── WebGL helpers ────────────────────────────────────────────────────────
-function compileShader(gl: WebGLRenderingContext, src: string, type: number): WebGLShader {
+// ═══════════════════════════════════════════════════════════════════════════
+// GL HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function mkShader(gl: WebGLRenderingContext, src: string, type: number) {
     const s = gl.createShader(type)!;
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-        throw new Error(gl.getShaderInfoLog(s) || "shader compile error");
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) || "");
     return s;
 }
-
-function linkProgram(gl: WebGLRenderingContext, vs: string, fs: string): WebGLProgram {
+function mkProg(gl: WebGLRenderingContext, vs: string, fs: string) {
     const p = gl.createProgram()!;
-    gl.attachShader(p, compileShader(gl, vs, gl.VERTEX_SHADER));
-    gl.attachShader(p, compileShader(gl, fs, gl.FRAGMENT_SHADER));
+    gl.attachShader(p, mkShader(gl, vs, gl.VERTEX_SHADER));
+    gl.attachShader(p, mkShader(gl, fs, gl.FRAGMENT_SHADER));
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS))
-        throw new Error(gl.getProgramInfoLog(p) || "link error");
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || "");
     return p;
 }
+function mkBuf(gl: WebGLRenderingContext, data: Float32Array, usage?: number) {
+    const b = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data, usage ?? gl.DYNAMIC_DRAW);
+    return b;
+}
 
-// ═════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA PARSER
+// ═══════════════════════════════════════════════════════════════════════════
+interface Parsed {
+    pos: Float32Array;
+    h: Float32Array;
+    fields: Record<string, Float32Array>;
+    n: number;
+    bounds: { min: [number, number, number]; max: [number, number, number] };
+}
+
+function parse(d: PointCloudData): Parsed | null {
+    const N = d.num_points;
+    if (!N) return null;
+    let pos: Float32Array;
+    if (d.positions_b64) {
+        pos = b64ToF32(d.positions_b64);
+    } else if (d.positions) {
+        pos = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const p = d.positions[i];
+            pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
+        }
+    } else return null;
+
+    const h = new Float32Array(N);
+    for (let i = 0; i < N; i++) h[i] = pos[i * 3 + 2];
+
+    const fields: Record<string, Float32Array> = {};
+    if (d.fields_b64) {
+        for (const [k, v] of Object.entries(d.fields_b64)) fields[k] = b64ToF32(v);
+    } else if (d.fields) {
+        for (const [k, a] of Object.entries(d.fields)) fields[k] = new Float32Array(a);
+    }
+
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < N; i++) {
+        const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    return { pos, h, fields, n: N, bounds: { min: [x0, y0, z0], max: [x1, y1, z1] } };
+}
+
+function fieldRange(arr: Float32Array): [number, number] {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < arr.length; i++) { if (arr[i] < lo) lo = arr[i]; if (arr[i] > hi) hi = arr[i]; }
+    if (hi === lo) hi = lo + 1;
+    return [lo, hi];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════
 export const PointCloudWidget: React.FC<Props> = ({ data }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const boxRef = useRef<HTMLDivElement>(null);
     const glRef = useRef<WebGLRenderingContext | null>(null);
-    const hoveredRef = useRef(false);
+    const hoverRef = useRef(false);
 
-    const cameraRef = useRef({
-        theta: Math.PI / 4,
-        phi: Math.PI / 6,
-        distance: 50,
-        targetX: 0,
-        targetY: 0,
-        targetZ: 0,
-        pointSize: 2.0,
-    });
-
-    // Store initial camera for reset
-    const initialCamRef = useRef<typeof cameraRef.current | null>(null);
+    const cam = useRef({ th: Math.PI / 4, ph: Math.PI / 6, d: 50, tx: 0, ty: 0, tz: 0, ps: 2 });
 
     const [colorMode, setColorMode] = useState<ColorMode>("height");
-    const [mode, setMode] = useState<InteractionMode>("rotate");
+    const [nav, setNav] = useState<NavMode>("rotate");
     const [info, setInfo] = useState("");
+    const [fpsVal, setFps] = useState(0);
 
-    // Expose mode to pointer handler via ref
-    const modeRef = useRef<InteractionMode>(mode);
-    modeRef.current = mode;
+    const navRef = useRef<NavMode>(nav);
+    navRef.current = nav;
+    const cmRef = useRef<ColorMode>(colorMode);
+    cmRef.current = colorMode;
 
-    const gpuRef = useRef<{
-        program: WebGLProgram;
-        lineProgram: WebGLProgram;
-        posBuf: WebGLBuffer;
-        colBuf: WebGLBuffer;
-        axisBuf: WebGLBuffer;
-        axisColBuf: WebGLBuffer;
-        numPoints: number;
-        bounds: { min: number[]; max: number[] };
+    const gpu = useRef<{
+        pp: WebGLProgram; lp: WebGLProgram;
+        posBuf: WebGLBuffer; hBuf: WebGLBuffer;
+        fBufs: Record<string, WebGLBuffer>;
+        axBuf: WebGLBuffer; axCBuf: WebGLBuffer;
+        n: number;
+        bounds: Parsed["bounds"];
+        ranges: Record<string, [number, number]>;
+        u: Record<string, WebGLUniformLocation | null>;
+        a: Record<string, number>;
     } | null>(null);
 
-    const fittedRef = useRef(false);
+    const fitted = useRef(false);
+    const fc = useRef(0);
+    const lt = useRef(performance.now());
 
-    // ── Fit camera to bounds ─────────────────────────────────────────────
-    const fitCamera = useCallback(() => {
-        const gpu = gpuRef.current;
-        if (!gpu) return;
-        const { min, max } = gpu.bounds;
-        const cam = cameraRef.current;
-        cam.targetX = (min[0] + max[0]) / 2;
-        cam.targetY = (min[1] + max[1]) / 2;
-        cam.targetZ = (min[2] + max[2]) / 2;
-        cam.distance = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2], 1) * 1.5;
-        cam.theta = Math.PI / 4;
-        cam.phi = Math.PI / 6;
+    // ── Camera control ───────────────────────────────────────────────────
+    const fit = useCallback(() => {
+        const g = gpu.current; if (!g) return;
+        const { min, max } = g.bounds;
+        const c = cam.current;
+        c.tx = (min[0] + max[0]) / 2; c.ty = (min[1] + max[1]) / 2; c.tz = (min[2] + max[2]) / 2;
+        c.d = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2], 1) * 1.5;
+        c.th = Math.PI / 4; c.ph = Math.PI / 6;
     }, []);
 
-    // ── Build GPU buffers ────────────────────────────────────────────────
-    const buildBuffers = useCallback((gl: WebGLRenderingContext, cloud: PointCloudData, cMode: ColorMode) => {
-        const N = cloud.num_points;
-        if (N === 0) return null;
+    const viewTop = useCallback(() => { cam.current.th = 0; cam.current.ph = Math.PI / 2 - 0.01; }, []);
+    const viewFront = useCallback(() => { cam.current.th = -Math.PI / 2; cam.current.ph = 0; }, []);
+    const viewSide = useCallback(() => { cam.current.th = 0; cam.current.ph = 0; }, []);
+    const viewIso = useCallback(() => { cam.current.th = Math.PI / 4; cam.current.ph = Math.PI / 6; }, []);
 
-        const positions = new Float32Array(N * 3);
-        for (let i = 0; i < N; i++) {
-            const p = cloud.positions[i];
-            positions[i * 3] = p[0];
-            positions[i * 3 + 1] = p[1];
-            positions[i * 3 + 2] = p[2];
-        }
-
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (let i = 0; i < N; i++) {
-            const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-        }
-        const bounds = { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
-
-        const fields: Record<string, Float32Array> = {};
-        if (cloud.fields) {
-            for (const [k, arr] of Object.entries(cloud.fields))
-                fields[k] = new Float32Array(arr);
-        }
-
-        const heightRange = (maxZ - minZ) || 1;
-        let fMin = 0, fMax = 1;
-        const activeField = cMode === "intensity" ? fields.signal : cMode === "reflectivity" ? fields.reflectivity : null;
-        if (activeField) {
-            fMin = Infinity; fMax = -Infinity;
-            for (let i = 0; i < N; i++) {
-                if (activeField[i] < fMin) fMin = activeField[i];
-                if (activeField[i] > fMax) fMax = activeField[i];
-            }
-            if (fMax === fMin) fMax = fMin + 1;
-        }
-
-        const colors = new Float32Array(N * 3);
-        for (let i = 0; i < N; i++) {
-            let t = 0;
-            if (cMode === "height") {
-                t = (positions[i * 3 + 2] - minZ) / heightRange;
-            } else if (activeField) {
-                t = (activeField[i] - fMin) / (fMax - fMin);
-            }
-            const [r, g, b] = cMode === "solid" ? [0.2, 0.7, 1.0] as const : turboColormap(t);
-            colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b;
-        }
-
-        const posBuf = gl.createBuffer()!;
-        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-        const colBuf = gl.createBuffer()!;
-        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
-
-        const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 10;
-        const axLen = extent * 0.08;
-        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-        const axisVerts = new Float32Array([
-            cx, cy, minZ, cx + axLen, cy, minZ,
-            cx, cy, minZ, cx, cy + axLen, minZ,
-            cx, cy, minZ, cx, cy, minZ + axLen,
-        ]);
-        const axisColors = new Float32Array([
-            1, 0.2, 0.2, 1, 0.2, 0.2,
-            0.2, 1, 0.2, 0.2, 1, 0.2,
-            0.3, 0.5, 1, 0.3, 0.5, 1,
-        ]);
-
-        const axisBuf = gl.createBuffer()!;
-        gl.bindBuffer(gl.ARRAY_BUFFER, axisBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, axisVerts, gl.STATIC_DRAW);
-
-        const axisColBuf = gl.createBuffer()!;
-        gl.bindBuffer(gl.ARRAY_BUFFER, axisColBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, axisColors, gl.STATIC_DRAW);
-
-        return { posBuf, colBuf, axisBuf, axisColBuf, numPoints: N, bounds };
-    }, []);
-
-    // ── Init WebGL + upload data ─────────────────────────────────────────
+    // ── Data upload ──────────────────────────────────────────────────────
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas || !data || data._type !== "PointCloud" || data.num_points === 0) return;
+        const cv = canvasRef.current;
+        if (!cv || !data || data._type !== "PointCloud" || !data.num_points) return;
+        const p = parse(data); if (!p) return;
 
         let gl = glRef.current;
-        if (!gl) {
-            gl = canvas.getContext("webgl", { antialias: true, alpha: false });
-            if (!gl) return;
-            glRef.current = gl;
-        }
+        if (!gl) { gl = cv.getContext("webgl", { antialias: true, alpha: false }); if (!gl) return; glRef.current = gl; }
 
-        let program: WebGLProgram;
-        let lineProgram: WebGLProgram;
-        if (gpuRef.current) {
-            program = gpuRef.current.program;
-            lineProgram = gpuRef.current.lineProgram;
-            gl.deleteBuffer(gpuRef.current.posBuf);
-            gl.deleteBuffer(gpuRef.current.colBuf);
-            gl.deleteBuffer(gpuRef.current.axisBuf);
-            gl.deleteBuffer(gpuRef.current.axisColBuf);
+        let pp: WebGLProgram, lp: WebGLProgram;
+        if (gpu.current) {
+            pp = gpu.current.pp; lp = gpu.current.lp;
+            gl.deleteBuffer(gpu.current.posBuf); gl.deleteBuffer(gpu.current.hBuf);
+            for (const b of Object.values(gpu.current.fBufs)) gl.deleteBuffer(b);
+            gl.deleteBuffer(gpu.current.axBuf); gl.deleteBuffer(gpu.current.axCBuf);
         } else {
-            program = linkProgram(gl, VERT_SRC, FRAG_SRC);
-            lineProgram = linkProgram(gl, LINE_VERT, LINE_FRAG);
+            pp = mkProg(gl, POINT_VS, POINT_FS);
+            lp = mkProg(gl, LINE_VS, LINE_FS);
         }
 
-        const bufs = buildBuffers(gl, data, colorMode);
-        if (!bufs) return;
-
-        gpuRef.current = { program, lineProgram, ...bufs };
-
-        if (!fittedRef.current) {
-            fitCamera();
-            // Save initial camera state for Home reset
-            initialCamRef.current = { ...cameraRef.current };
-            fittedRef.current = true;
+        const posBuf = mkBuf(gl, p.pos);
+        const hBuf = mkBuf(gl, p.h);
+        const fBufs: Record<string, WebGLBuffer> = {};
+        const ranges: Record<string, [number, number]> = { height: fieldRange(p.h) };
+        for (const [k, arr] of Object.entries(p.fields)) {
+            fBufs[k] = mkBuf(gl, arr);
+            ranges[k] = fieldRange(arr);
         }
 
-        setInfo(`${bufs.numPoints.toLocaleString()} pts`);
-    }, [data, colorMode, buildBuffers, fitCamera]);
+        // Axis
+        const { min, max } = p.bounds;
+        const ext = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 10;
+        const al = ext * 0.08;
+        const cx = (min[0] + max[0]) / 2, cy = (min[1] + max[1]) / 2;
+        const axBuf = mkBuf(gl, new Float32Array([
+            cx, cy, min[2], cx + al, cy, min[2],
+            cx, cy, min[2], cx, cy + al, min[2],
+            cx, cy, min[2], cx, cy, min[2] + al,
+        ]), gl.STATIC_DRAW);
+        const axCBuf = mkBuf(gl, new Float32Array([
+            1, .2, .2, 1, .2, .2, .2, 1, .2, .2, 1, .2, .3, .5, 1, .3, .5, 1,
+        ]), gl.STATIC_DRAW);
+
+        const u: Record<string, WebGLUniformLocation | null> = {
+            mvp: gl.getUniformLocation(pp, "u_mvp"),
+            ps: gl.getUniformLocation(pp, "u_ps"),
+            cm: gl.getUniformLocation(pp, "u_cm"),
+            rng: gl.getUniformLocation(pp, "u_range"),
+            lmvp: gl.getUniformLocation(lp, "u_mvp"),
+        };
+        const a: Record<string, number> = {
+            pos: gl.getAttribLocation(pp, "a_pos"),
+            h: gl.getAttribLocation(pp, "a_h"),
+            f1: gl.getAttribLocation(pp, "a_f1"),
+            f2: gl.getAttribLocation(pp, "a_f2"),
+            f3: gl.getAttribLocation(pp, "a_f3"),
+            lp: gl.getAttribLocation(lp, "a_pos"),
+            lc: gl.getAttribLocation(lp, "a_col"),
+        };
+
+        gpu.current = { pp, lp, posBuf, hBuf, fBufs, axBuf, axCBuf, n: p.n, bounds: p.bounds, ranges, u, a };
+
+        if (!fitted.current) { fit(); fitted.current = true; }
+        setInfo(`${p.n.toLocaleString()} pts`);
+    }, [data, fit]);
 
     // ── Render loop ──────────────────────────────────────────────────────
     useEffect(() => {
-        let animId: number;
-        const render = () => {
-            animId = requestAnimationFrame(render);
-            const gl = glRef.current;
-            const gpu = gpuRef.current;
-            const canvas = canvasRef.current;
-            const container = containerRef.current;
-            if (!gl || !gpu || !canvas || !container) return;
+        let id: number;
+        const draw = () => {
+            id = requestAnimationFrame(draw);
+            const gl = glRef.current, g = gpu.current, cv = canvasRef.current, bx = boxRef.current;
+            if (!gl || !g || !cv || !bx) return;
 
-            const rect = container.getBoundingClientRect();
-            const dpr = window.devicePixelRatio || 1;
-            const w = Math.round(rect.width * dpr);
-            const h = Math.round(rect.height * dpr);
-            if (w === 0 || h === 0) return;
-            if (canvas.width !== w || canvas.height !== h) {
-                canvas.width = w; canvas.height = h;
-            }
+            // FPS
+            fc.current++;
+            const now = performance.now();
+            if (now - lt.current >= 1000) { setFps(fc.current); fc.current = 0; lt.current = now; }
+
+            const r = bx.getBoundingClientRect();
+            const dpr = devicePixelRatio || 1;
+            const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+            if (!w || !h) return;
+            if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
 
             gl.viewport(0, 0, w, h);
-            gl.clearColor(0.08, 0.08, 0.1, 1);
+            gl.clearColor(0.06, 0.06, 0.08, 1);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             gl.enable(gl.DEPTH_TEST);
 
-            const cam = cameraRef.current;
-            const cosP = Math.cos(cam.phi), sinP = Math.sin(cam.phi);
-            const cosT = Math.cos(cam.theta), sinT = Math.sin(cam.theta);
-            const eyeX = cam.targetX + cam.distance * sinT * cosP;
-            const eyeY = cam.targetY + cam.distance * cosT * cosP;
-            const eyeZ = cam.targetZ + cam.distance * sinP;
+            const c = cam.current;
+            const cp = Math.cos(c.ph), sp = Math.sin(c.ph), ct = Math.cos(c.th), st = Math.sin(c.th);
+            const eye = [c.tx + c.d * st * cp, c.ty + c.d * ct * cp, c.tz + c.d * sp];
+            const view = m4Look(eye, [c.tx, c.ty, c.tz], [0, 0, 1]);
+            const proj = m4Persp(Math.PI / 4, w / h, c.d * 0.001, c.d * 10);
+            const mvp = m4Mul(proj, view);
 
-            const view = mat4LookAt([eyeX, eyeY, eyeZ], [cam.targetX, cam.targetY, cam.targetZ], [0, 0, 1]);
-            const proj = mat4Perspective(Math.PI / 4, w / h, cam.distance * 0.001, cam.distance * 10);
-            const mvp = mat4Multiply(proj, view);
+            // Color mode
+            const cm = cmRef.current;
+            const cmi = cm === "height" ? 0 : cm === "signal" ? 1 : cm === "reflectivity" ? 2 : cm === "near_ir" ? 3 : 4;
+            const rng = (cm === "solid") ? [0, 1] : (g.ranges[cm] || g.ranges.height || [0, 1]);
 
-            // Points
-            gl.useProgram(gpu.program);
-            gl.uniformMatrix4fv(gl.getUniformLocation(gpu.program, "u_mvp"), false, mvp);
-            gl.uniform1f(gl.getUniformLocation(gpu.program, "u_pointSize"), cam.pointSize);
+            gl.useProgram(g.pp);
+            gl.uniformMatrix4fv(g.u.mvp, false, mvp);
+            gl.uniform1f(g.u.ps, c.ps);
+            gl.uniform1i(g.u.cm, cmi);
+            gl.uniform2f(g.u.rng, rng[0], rng[1]);
 
-            const aPos = gl.getAttribLocation(gpu.program, "a_position");
-            const aCol = gl.getAttribLocation(gpu.program, "a_color");
+            // Bind attributes
+            gl.enableVertexAttribArray(g.a.pos);
+            gl.bindBuffer(gl.ARRAY_BUFFER, g.posBuf);
+            gl.vertexAttribPointer(g.a.pos, 3, gl.FLOAT, false, 0, 0);
 
-            gl.enableVertexAttribArray(aPos);
-            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.posBuf);
-            gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(aCol);
-            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.colBuf);
-            gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 0, 0);
-            gl.drawArrays(gl.POINTS, 0, gpu.numPoints);
-            gl.disableVertexAttribArray(aPos);
-            gl.disableVertexAttribArray(aCol);
+            gl.enableVertexAttribArray(g.a.h);
+            gl.bindBuffer(gl.ARRAY_BUFFER, g.hBuf);
+            gl.vertexAttribPointer(g.a.h, 1, gl.FLOAT, false, 0, 0);
 
-            // Axis lines
-            gl.useProgram(gpu.lineProgram);
-            gl.uniformMatrix4fv(gl.getUniformLocation(gpu.lineProgram, "u_mvp"), false, mvp);
+            const bindField = (loc: number, key: string) => {
+                if (loc < 0) return;
+                if (g.fBufs[key]) {
+                    gl.enableVertexAttribArray(loc);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, g.fBufs[key]);
+                    gl.vertexAttribPointer(loc, 1, gl.FLOAT, false, 0, 0);
+                } else {
+                    gl.disableVertexAttribArray(loc);
+                    gl.vertexAttrib1f(loc, 0);
+                }
+            };
+            bindField(g.a.f1, "signal");
+            bindField(g.a.f2, "reflectivity");
+            bindField(g.a.f3, "near_ir");
 
-            const lPos = gl.getAttribLocation(gpu.lineProgram, "a_position");
-            const lCol = gl.getAttribLocation(gpu.lineProgram, "a_color");
-            gl.enableVertexAttribArray(lPos);
-            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.axisBuf);
-            gl.vertexAttribPointer(lPos, 3, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(lCol);
-            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.axisColBuf);
-            gl.vertexAttribPointer(lCol, 3, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.POINTS, 0, g.n);
+
+            gl.disableVertexAttribArray(g.a.pos);
+            gl.disableVertexAttribArray(g.a.h);
+            if (g.a.f1 >= 0) gl.disableVertexAttribArray(g.a.f1);
+            if (g.a.f2 >= 0) gl.disableVertexAttribArray(g.a.f2);
+            if (g.a.f3 >= 0) gl.disableVertexAttribArray(g.a.f3);
+
+            // Axis
+            gl.useProgram(g.lp);
+            gl.uniformMatrix4fv(g.u.lmvp, false, mvp);
+            gl.enableVertexAttribArray(g.a.lp);
+            gl.bindBuffer(gl.ARRAY_BUFFER, g.axBuf);
+            gl.vertexAttribPointer(g.a.lp, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(g.a.lc);
+            gl.bindBuffer(gl.ARRAY_BUFFER, g.axCBuf);
+            gl.vertexAttribPointer(g.a.lc, 3, gl.FLOAT, false, 0, 0);
             gl.drawArrays(gl.LINES, 0, 6);
-            gl.disableVertexAttribArray(lPos);
-            gl.disableVertexAttribArray(lCol);
+            gl.disableVertexAttribArray(g.a.lp);
+            gl.disableVertexAttribArray(g.a.lc);
         };
-        render();
-        return () => cancelAnimationFrame(animId);
+        draw();
+        return () => cancelAnimationFrame(id);
     }, []);
 
-    // ── Pointer interaction ──────────────────────────────────────────────
+    // ── Pointer interaction on CANVAS only ───────────────────────────────
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        const cv = canvasRef.current; if (!cv) return;
+        let drag = false, lx = 0, ly = 0;
 
-        let active = false;
-        let lastX = 0, lastY = 0;
-
-        const onPointerDown = (e: PointerEvent) => {
+        const down = (e: PointerEvent) => {
             if (e.button !== 0 && e.button !== 2) return;
-            canvas.setPointerCapture(e.pointerId);
-            active = true;
-            lastX = e.clientX; lastY = e.clientY;
-            e.preventDefault();
-            e.stopPropagation();
+            cv.setPointerCapture(e.pointerId);
+            drag = true; lx = e.clientX; ly = e.clientY;
+            e.preventDefault(); e.stopPropagation();
         };
-
-        const onPointerMove = (e: PointerEvent) => {
-            if (!active) return;
-            const dx = e.clientX - lastX;
-            const dy = e.clientY - lastY;
-            lastX = e.clientX; lastY = e.clientY;
-            const cam = cameraRef.current;
-
-            // Right-click always pans regardless of mode
-            const effectiveMode: InteractionMode = (e.buttons & 2) ? "pan" : modeRef.current;
-
-            if (effectiveMode === "rotate") {
-                cam.theta -= dx * 0.005;
-                cam.phi += dy * 0.005;
-                cam.phi = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, cam.phi));
-            } else if (effectiveMode === "pan") {
-                const panScale = cam.distance * 0.002;
-                const sinT = Math.sin(cam.theta), cosT = Math.cos(cam.theta);
-                const sinP = Math.sin(cam.phi), cosP = Math.cos(cam.phi);
-                // Camera right vector (horizontal)
-                const rx = -cosT, ry = sinT;
-                // Camera up vector (accounts for elevation angle)
-                const ux = -sinP * sinT, uy = -sinP * cosT, uz = cosP;
-                cam.targetX += (-rx * dx + ux * dy) * panScale;
-                cam.targetY += (-ry * dx + uy * dy) * panScale;
-                cam.targetZ += uz * dy * panScale;
-            } else if (effectiveMode === "zoom") {
-                cam.distance *= 1 - dy * 0.005;
-                cam.distance = Math.max(0.01, cam.distance);
+        const move = (e: PointerEvent) => {
+            if (!drag) return;
+            const dx = e.clientX - lx, dy = e.clientY - ly;
+            lx = e.clientX; ly = e.clientY;
+            const c = cam.current;
+            const eff: NavMode = (e.buttons & 2) ? "pan" : navRef.current;
+            if (eff === "rotate") {
+                c.th -= dx * 0.005; c.ph += dy * 0.005;
+                c.ph = Math.max(-Math.PI / 2 + .05, Math.min(Math.PI / 2 - .05, c.ph));
+            } else if (eff === "pan") {
+                const s = c.d * 0.002;
+                const st = Math.sin(c.th), ct = Math.cos(c.th), sp = Math.sin(c.ph), cp = Math.cos(c.ph);
+                c.tx += (ct * dx + (-sp * st) * dy) * s;
+                c.ty += (-st * dx + (-sp * ct) * dy) * s;
+                c.tz += cp * dy * s;
+            } else {
+                c.d *= 1 - dy * 0.005; c.d = Math.max(0.01, c.d);
             }
             e.stopPropagation();
         };
-
-        const onPointerUp = (e: PointerEvent) => {
-            active = false;
-            canvas.releasePointerCapture(e.pointerId);
+        const up = (e: PointerEvent) => { drag = false; cv.releasePointerCapture(e.pointerId); };
+        const wheel = (e: WheelEvent) => {
+            if (!hoverRef.current) return;
+            e.preventDefault(); e.stopPropagation();
+            cam.current.d *= e.deltaY > 0 ? 1.1 : 0.9;
+            cam.current.d = Math.max(0.01, cam.current.d);
         };
+        const ctx = (e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
+        const enter = () => { hoverRef.current = true; };
+        const leave = () => { hoverRef.current = false; };
 
-        const onWheel = (e: WheelEvent) => {
-            if (!hoveredRef.current) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const cam = cameraRef.current;
-            cam.distance *= e.deltaY > 0 ? 1.1 : 0.9;
-            cam.distance = Math.max(0.01, cam.distance);
-        };
-
-        const onContext = (e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
-        const onEnter = () => { hoveredRef.current = true; };
-        const onLeave = () => { hoveredRef.current = false; };
-
-        canvas.addEventListener("pointerdown", onPointerDown);
-        canvas.addEventListener("pointermove", onPointerMove);
-        canvas.addEventListener("pointerup", onPointerUp);
-        canvas.addEventListener("wheel", onWheel, { passive: false });
-        canvas.addEventListener("contextmenu", onContext);
-        canvas.addEventListener("pointerenter", onEnter);
-        canvas.addEventListener("pointerleave", onLeave);
-
+        cv.addEventListener("pointerdown", down);
+        cv.addEventListener("pointermove", move);
+        cv.addEventListener("pointerup", up);
+        cv.addEventListener("wheel", wheel, { passive: false });
+        cv.addEventListener("contextmenu", ctx);
+        cv.addEventListener("pointerenter", enter);
+        cv.addEventListener("pointerleave", leave);
         return () => {
-            canvas.removeEventListener("pointerdown", onPointerDown);
-            canvas.removeEventListener("pointermove", onPointerMove);
-            canvas.removeEventListener("pointerup", onPointerUp);
-            canvas.removeEventListener("wheel", onWheel);
-            canvas.removeEventListener("contextmenu", onContext);
-            canvas.removeEventListener("pointerenter", onEnter);
-            canvas.removeEventListener("pointerleave", onLeave);
+            cv.removeEventListener("pointerdown", down);
+            cv.removeEventListener("pointermove", move);
+            cv.removeEventListener("pointerup", up);
+            cv.removeEventListener("wheel", wheel);
+            cv.removeEventListener("contextmenu", ctx);
+            cv.removeEventListener("pointerenter", enter);
+            cv.removeEventListener("pointerleave", leave);
         };
     }, []);
 
-    // ── Keyboard shortcuts (active when hovered) ─────────────────────────
+    // ── Keyboard shortcuts ───────────────────────────────────────────────
     useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (!hoveredRef.current) return;
-            const key = e.key.toLowerCase();
-            switch (key) {
-                case "r": setMode("rotate"); break;
-                case "g": setMode("pan"); break;
-                case "z": setMode("zoom"); break;
-                case "f": case "home": case "h": fitCamera(); break;
-                case "[": cameraRef.current.pointSize = Math.max(1, cameraRef.current.pointSize - 1); break;
-                case "]": cameraRef.current.pointSize = Math.min(10, cameraRef.current.pointSize + 1); break;
+        const kd = (e: KeyboardEvent) => {
+            if (!hoverRef.current) return;
+            switch (e.key.toLowerCase()) {
+                case "r": setNav("rotate"); break;
+                case "g": setNav("pan"); break;
+                case "z": setNav("zoom"); break;
+                case "f": case "h": case "home": fit(); break;
+                case "1": viewTop(); break;
+                case "2": viewFront(); break;
+                case "3": viewSide(); break;
+                case "4": viewIso(); break;
+                case "[": cam.current.ps = Math.max(1, cam.current.ps - 1); break;
+                case "]": cam.current.ps = Math.min(10, cam.current.ps + 1); break;
                 default: return;
             }
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
         };
-        window.addEventListener("keydown", onKeyDown);
-        return () => window.removeEventListener("keydown", onKeyDown);
-    }, [fitCamera]);
+        window.addEventListener("keydown", kd);
+        return () => window.removeEventListener("keydown", kd);
+    }, [fit, viewTop, viewFront, viewSide, viewIso]);
 
-    // ── Color mode options ───────────────────────────────────────────────
-    const colorModes: { value: ColorMode; label: string }[] = [
-        { value: "height", label: "Height" },
-    ];
-    if (data.fields?.signal) colorModes.push({ value: "intensity", label: "Signal" });
-    if (data.fields?.reflectivity) colorModes.push({ value: "reflectivity", label: "Reflect." });
-    colorModes.push({ value: "solid", label: "Solid" });
+    // ── Available color modes ────────────────────────────────────────────
+    const hasF = (k: string) => !!(data.fields_b64?.[k] || data.fields?.[k]);
+    const cms: { v: ColorMode; l: string }[] = [{ v: "height", l: "Height" }];
+    if (hasF("signal")) cms.push({ v: "signal", l: "Signal" });
+    if (hasF("reflectivity")) cms.push({ v: "reflectivity", l: "Reflect." });
+    if (hasF("near_ir")) cms.push({ v: "near_ir", l: "Near IR" });
+    cms.push({ v: "solid", l: "Solid" });
 
-    // ── Toolbar button helper ────────────────────────────────────────────
-    const ToolBtn = ({ label, tooltip, active, onClick }: {
-        label: string; tooltip: string; active?: boolean; onClick: () => void;
-    }) => (
-        <button
-            onClick={onClick}
-            onPointerDown={(e) => e.stopPropagation()}
-            title={tooltip}
-            style={{
-                ...tbStyle,
-                background: active ? "rgba(80,140,255,0.35)" : "rgba(0,0,0,0.5)",
-                border: active ? "1px solid rgba(80,140,255,0.6)" : "1px solid #444",
-                color: active ? "#9fc5ff" : "#aaa",
-            }}
-        >{label}</button>
-    );
-
+    // ═════════════════════════════════════════════════════════════════════
+    // RENDER
+    // ═════════════════════════════════════════════════════════════════════
     return (
-        <div
-            ref={containerRef}
-            style={{
-                width: "100%", height: "100%", position: "relative",
-                background: "#14141a", borderRadius: 4, overflow: "hidden",
-            }}
-        >
-            <canvas
-                ref={canvasRef}
-                style={{ width: "100%", height: "100%", display: "block", touchAction: "none" }}
-            />
+        <div ref={boxRef} style={{
+            width: "100%", height: "100%", position: "relative",
+            background: "#0e0e12", borderRadius: 4, overflow: "hidden",
+        }}>
+            {/* WebGL canvas — z-index 0 */}
+            <canvas ref={canvasRef} style={{
+                position: "absolute", inset: 0,
+                width: "100%", height: "100%",
+                display: "block", touchAction: "none",
+                zIndex: 0,
+            }} />
 
-            {/* ── Top-left: Color mode + Point size ── */}
-            <div style={{ position: "absolute", top: 6, left: 8, display: "flex", gap: 4, alignItems: "center" }}>
-                <select
-                    value={colorMode}
-                    onChange={(e) => setColorMode(e.target.value as ColorMode)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    style={{
-                        background: "rgba(0,0,0,0.6)", color: "#ccc",
-                        border: "1px solid #555", borderRadius: 3,
-                        padding: "2px 4px", fontSize: 11, cursor: "pointer",
-                    }}
-                >
-                    {colorModes.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                </select>
-
-                <button onClick={() => { cameraRef.current.pointSize = Math.max(1, cameraRef.current.pointSize - 1); }}
-                    onPointerDown={(e) => e.stopPropagation()} style={tbStyle} title="Decrease point size  [ [ ]">-</button>
-                <button onClick={() => { cameraRef.current.pointSize = Math.min(10, cameraRef.current.pointSize + 1); }}
-                    onPointerDown={(e) => e.stopPropagation()} style={tbStyle} title="Increase point size  [ ] ]">+</button>
-            </div>
-
-            {/* ── Left toolbar: Interaction modes ── */}
+            {/* ── UI OVERLAY — z-index 10, pointer-events: none container ── */}
             <div style={{
-                position: "absolute", top: 36, left: 8,
-                display: "flex", flexDirection: "column", gap: 3,
+                position: "absolute", inset: 0, zIndex: 10,
+                pointerEvents: "none",
+                display: "flex", flexDirection: "column",
+                justifyContent: "space-between",
+                padding: 6,
             }}>
-                <ToolBtn label="R" tooltip="Rotate  [R]" active={mode === "rotate"} onClick={() => setMode("rotate")} />
-                <ToolBtn label="G" tooltip="Grab / Pan  [G]" active={mode === "pan"} onClick={() => setMode("pan")} />
-                <ToolBtn label="Z" tooltip="Zoom  [Z]" active={mode === "zoom"} onClick={() => setMode("zoom")} />
-                <div style={{ height: 4 }} />
-                <ToolBtn label="F" tooltip="Fit to view  [F]" onClick={fitCamera} />
-            </div>
+                {/* TOP ROW */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    {/* Top-left: Color + Size */}
+                    <div style={{ ...panelStyle }}>
+                        <select
+                            value={colorMode}
+                            onChange={(e) => setColorMode(e.target.value as ColorMode)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            style={{
+                                background: "rgba(0,0,0,0.4)", color: "#bbb",
+                                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4,
+                                padding: "3px 6px", fontSize: 11, cursor: "pointer",
+                                fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
+                                outline: "none", height: 26,
+                                pointerEvents: "auto",
+                            }}
+                        >
+                            {cms.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                        </select>
+                        <TB label="−" tooltip="Smaller points  [ [ ]" compact onClick={() => { cam.current.ps = Math.max(1, cam.current.ps - 1); }} />
+                        <TB label="+" tooltip="Larger points  [ ] ]" compact onClick={() => { cam.current.ps = Math.min(10, cam.current.ps + 1); }} />
+                    </div>
+                    {/* Top-right: View presets */}
+                    <div style={{ ...panelStyle }}>
+                        <TB label="Top" tooltip="Top View  [1]" onClick={viewTop} />
+                        <TB label="Front" tooltip="Front View  [2]" onClick={viewFront} />
+                        <TB label="Side" tooltip="Side View  [3]" onClick={viewSide} />
+                        <TB label="Iso" tooltip="Isometric  [4]" onClick={viewIso} />
+                    </div>
+                </div>
 
-            {/* ── Bottom-right: Point count ── */}
-            <div style={{
-                position: "absolute", bottom: 6, right: 8,
-                background: "rgba(0,0,0,0.55)", color: "#aaa",
-                fontSize: 10, padding: "2px 6px", borderRadius: 3, fontFamily: "monospace",
-            }}>
-                {info}
-            </div>
-
-            {/* ── Bottom-left: Interaction hint ── */}
-            <div style={{
-                position: "absolute", bottom: 6, left: 8,
-                color: "#555", fontSize: 9, fontFamily: "monospace",
-            }}>
-                LMB: {mode} | RMB: pan | Scroll: zoom
+                {/* BOTTOM ROW */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+                    {/* Bottom-left: Nav modes + Fit */}
+                    <div style={{ display: "flex", gap: 4 }}>
+                        <div style={{ ...panelStyle }}>
+                            <TB label="R" tooltip="Rotate  [R]" active={nav === "rotate"} onClick={() => setNav("rotate")} compact />
+                            <TB label="G" tooltip="Pan  [G]" active={nav === "pan"} onClick={() => setNav("pan")} compact />
+                            <TB label="Z" tooltip="Zoom  [Z]" active={nav === "zoom"} onClick={() => setNav("zoom")} compact />
+                        </div>
+                        <div style={{ ...panelStyle }}>
+                            <TB label="Fit" tooltip="Fit to view  [F]" onClick={fit} />
+                        </div>
+                    </div>
+                    {/* Bottom-right: Stats */}
+                    <div style={{
+                        ...panelStyle,
+                        gap: 8, padding: "3px 8px",
+                        color: "rgba(180,180,200,0.6)", fontSize: 10,
+                        fontFamily: "'JetBrains Mono','Fira Code',monospace",
+                    }}>
+                        <span>{info}</span>
+                        <span style={{ color: "rgba(120,200,120,0.5)" }}>{fpsVal} fps</span>
+                    </div>
+                </div>
             </div>
         </div>
     );
-};
-
-const tbStyle: React.CSSProperties = {
-    background: "rgba(0,0,0,0.5)",
-    color: "#aaa",
-    border: "1px solid #444",
-    borderRadius: 3,
-    width: 24, height: 24,
-    fontSize: 12, fontWeight: 600,
-    cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    padding: 0,
 };

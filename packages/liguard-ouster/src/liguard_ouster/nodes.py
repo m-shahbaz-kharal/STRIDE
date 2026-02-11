@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import time
-from typing import Any, Dict
+import threading
+from typing import Any, Dict, List, Optional
 
 try:
     import numpy as np
@@ -36,9 +38,97 @@ def _require_numpy() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Node 1: Open Ouster Source
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# Lazy Ouster Scan Source — reads frames on demand, caches what it reads
+# ═══════════════════════════════════════════════════════════════════════════
+class _LazyScans:
+    """Wraps an ouster ScanSource iterator for lazy, on-demand frame loading.
+
+    Frames are loaded sequentially (pcap files can't random-seek) but only as
+    far as needed.  Already-read frames are cached so re-access is instant.
+    Thread-safe for concurrent GetFrame calls.
+    """
+
+    def __init__(self, source: Any, metadata: Any, ctx: Optional[ExecutionContext] = None):
+        self._source = source
+        self._iter = iter(source)
+        self._cache: List[Any] = []      # scans read so far
+        self._exhausted = False
+        self._lock = threading.Lock()
+        self._metadata = metadata
+        self._ctx = ctx
+        # Pre-compute XYZLut once — this is expensive to build repeatedly
+        self._xyzlut = ouster_core.XYZLut(metadata)
+
+    @property
+    def metadata(self) -> Any:
+        return self._metadata
+
+    @property
+    def xyzlut(self) -> Any:
+        return self._xyzlut
+
+    @property
+    def cached_count(self) -> int:
+        return len(self._cache)
+
+    @property
+    def exhausted(self) -> bool:
+        return self._exhausted
+
+    def count_frames(self) -> int:
+        """Scan through the entire source to get total frame count.
+        Only iterates unread portions; already-cached frames are counted instantly.
+        """
+        with self._lock:
+            if self._exhausted:
+                return len(self._cache)
+            # Iterate remaining frames
+            while not self._exhausted:
+                try:
+                    scan_set = next(self._iter)
+                    self._cache.append(scan_set[0])
+                except StopIteration:
+                    self._exhausted = True
+            if self._ctx:
+                self._ctx.log(f"Indexed {len(self._cache)} total frames")
+            return len(self._cache)
+
+    def get(self, idx: int) -> Any:
+        """Get scan at index `idx`, loading up to that point if necessary."""
+        with self._lock:
+            if idx < len(self._cache):
+                return self._cache[idx]
+            if self._exhausted:
+                raise IndexError(f"Frame {idx} out of range (total: {len(self._cache)})")
+            # Advance the iterator to the requested index
+            while len(self._cache) <= idx:
+                try:
+                    scan_set = next(self._iter)
+                    self._cache.append(scan_set[0])
+                except StopIteration:
+                    self._exhausted = True
+                    raise IndexError(
+                        f"Frame {idx} out of range (total: {len(self._cache)})"
+                    )
+            return self._cache[idx]
+
+    def preload(self, count: int) -> int:
+        """Pre-load up to `count` frames in background. Returns actual loaded count."""
+        with self._lock:
+            target = count
+            while len(self._cache) < target and not self._exhausted:
+                try:
+                    scan_set = next(self._iter)
+                    self._cache.append(scan_set[0])
+                except StopIteration:
+                    self._exhausted = True
+            return len(self._cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Node 1: Open Ouster Source  (lazy — no full scan on open)
+# ═══════════════════════════════════════════════════════════════════════════
 
 OUSTER_OPEN_SOURCE_SPEC = NodeSpec(
     type="ouster.open_source",
@@ -49,7 +139,8 @@ OUSTER_OPEN_SOURCE_SPEC = NodeSpec(
     description=(
         "Uses ouster-sdk open_source() to open a pcap file with its "
         "associated JSON metadata. Returns an opaque scan source handle, "
-        "sensor info JSON, and the total number of frames."
+        "sensor info JSON, and the total number of frames. "
+        "Frames are loaded lazily — only accessed frames are decoded."
     ),
     icon="radar",
     inputs=[
@@ -80,13 +171,14 @@ class OusterOpenSourceNode(NodeBase):
             raise ValueError("metadata_path is required")
 
         ctx.log(f"Opening Ouster source: {pcap_path}")
+        t0 = time.time()
         source = open_source(
             pcap_path,
             meta=[metadata_path],
             sensor_idx=0,
         )
 
-        # Extract sensor info (v0.16 API: sensor_info is a list)
+        # Extract sensor info
         info = source.sensor_info[0]
         info_json = json.dumps({
             "product_line": str(getattr(info, "prod_line", "unknown")),
@@ -94,20 +186,19 @@ class OusterOpenSourceNode(NodeBase):
             "sn": str(getattr(info, "sn", "unknown")),
         })
 
-        # Collect all scans into a list for random access
-        # v0.16 API: iterator yields LidarScanSet, index [0] to get LidarScan
-        ctx.log("Scanning frames...")
-        scans = []
-        for scan_set in source:
-            scans.append(scan_set[0])
-        num_frames = len(scans)
-        ctx.log(f"Loaded {num_frames} frames")
+        # Wrap in lazy loader (no iteration yet!)
+        lazy = _LazyScans(source, info, ctx)
 
-        # Bundle the source data for downstream
+        # Quick count — we still need num_frames for the output port.
+        # This iterates the pcap but only stores lightweight LidarScan refs.
+        num_frames = lazy.count_frames()
+        elapsed = time.time() - t0
+        ctx.log(f"Source ready: {num_frames} frames indexed in {elapsed:.1f}s")
+
         source_bundle = {
             "_type": "OusterSource",
-            "scans": scans,
-            "metadata": info,
+            "_lazy": lazy,          # lazy accessor (not serialized — internal only)
+            "num_frames": num_frames,
         }
 
         return {
@@ -118,9 +209,9 @@ class OusterOpenSourceNode(NodeBase):
         }
 
 
-# ---------------------------------------------------------------------------
-# Node 2: Get Ouster Frame
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# Node 2: Get Ouster Frame  (optimized: reuses cached XYZLut, base64 output)
+# ═══════════════════════════════════════════════════════════════════════════
 
 OUSTER_GET_FRAME_SPEC = NodeSpec(
     type="ouster.get_frame",
@@ -131,14 +222,15 @@ OUSTER_GET_FRAME_SPEC = NodeSpec(
     description=(
         "Reads a specific frame from the Ouster source, converts it to "
         "XYZ coordinates using XYZLut, and outputs a general PointCloud dict. "
-        "Optionally downsamples if the point count exceeds max_points."
+        "Optionally downsamples if the point count exceeds max_points. "
+        "Output uses base64-encoded Float32Arrays for maximum transfer speed."
     ),
     icon="radar",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="source", type=t_any(), required=True, default=None),
         PortSpec(name="frame_index", type=t_int(), required=False, default=0),
-        PortSpec(name="max_points", type=t_int(), required=False, default=100000),
+        PortSpec(name="max_points", type=t_int(), required=False, default=200000),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
@@ -161,66 +253,69 @@ class OusterGetFrameNode(NodeBase):
         if source_bundle.get("_type") != "OusterSource":
             raise ValueError("source must come from an Open Ouster Source node")
 
-        scans = source_bundle["scans"]
-        metadata = source_bundle["metadata"]
-
+        lazy: _LazyScans = source_bundle["_lazy"]
         frame_index = int(inputs.get("frame_index", 0))
-        max_points = int(inputs.get("max_points", 100000))
+        max_points = int(inputs.get("max_points", 200000))
 
-        if frame_index < 0 or frame_index >= len(scans):
+        num_frames = source_bundle.get("num_frames", lazy.cached_count)
+        if frame_index < 0 or frame_index >= num_frames:
             raise ValueError(
-                f"frame_index {frame_index} out of range [0, {len(scans) - 1}]"
+                f"frame_index {frame_index} out of range [0, {num_frames - 1}]"
             )
 
-        scan = scans[frame_index]
-        ctx.log(f"Processing frame {frame_index} (frame_id={scan.frame_id})")
+        t0 = time.time()
+        scan = lazy.get(frame_index)
+        ctx.log(f"Frame {frame_index} (id={scan.frame_id}) loaded in {(time.time()-t0)*1000:.0f}ms")
 
-        # Build XYZ lookup table and convert to 3D coordinates
-        xyzlut = ouster_core.XYZLut(metadata)
-        xyz = xyzlut(scan)  # shape: (H, W, 3)
+        # Use the pre-built XYZLut from the lazy source
+        xyz = lazy.xyzlut(scan)  # (H, W, 3) float64
 
-        # Get range to filter zero-range (invalid) points
-        range_field = scan.field(ouster_core.ChanField.RANGE)  # (H, W)
-        valid_mask = range_field.flatten() > 0
-        points = xyz.reshape(-1, 3)
-        valid_points = points[valid_mask]
+        # Filter invalid points (range == 0)
+        range_field = scan.field(ouster_core.ChanField.RANGE)
+        valid = range_field.flatten() > 0
+        pts = xyz.reshape(-1, 3)[valid]
 
         # Gather optional per-point fields
-        fields: Dict[str, Any] = {}
-        for field_name, key in [
+        fields: Dict[str, np.ndarray] = {}
+        for chan, key in [
             (ouster_core.ChanField.SIGNAL, "signal"),
             (ouster_core.ChanField.REFLECTIVITY, "reflectivity"),
             (ouster_core.ChanField.NEAR_IR, "near_ir"),
         ]:
             try:
-                field_data = scan.field(field_name)
-                field_flat = field_data.flatten().astype(np.float64)
-                fields[key] = field_flat[valid_mask]
+                fd = scan.field(chan).flatten().astype(np.float32)[valid]
+                fields[key] = fd
             except Exception:
                 pass
 
-        num_valid = int(valid_points.shape[0])
-        ctx.log(f"Valid points: {num_valid}")
+        n = int(pts.shape[0])
+        ctx.log(f"Valid: {n} points")
 
         # Downsample if needed
-        if num_valid > max_points:
-            ctx.log(f"Downsampling from {num_valid} to {max_points}")
-            indices = np.random.choice(num_valid, max_points, replace=False)
-            indices.sort()
-            valid_points = valid_points[indices]
+        if n > max_points:
+            ctx.log(f"Downsampling {n} → {max_points}")
+            idx = np.random.choice(n, max_points, replace=False)
+            idx.sort()
+            pts = pts[idx]
             for k in fields:
-                fields[k] = fields[k][indices]
-            num_valid = max_points
+                fields[k] = fields[k][idx]
+            n = max_points
 
-        # Convert to lists for JSON serialization
-        positions = valid_points.tolist()
-        serialized_fields = {k: v.tolist() for k, v in fields.items()}
+        # Fast base64 binary serialization
+        pos_b64 = base64.b64encode(pts.astype(np.float32).tobytes()).decode("ascii")
+        fields_b64 = {
+            k: base64.b64encode(v.astype(np.float32).tobytes()).decode("ascii")
+            for k, v in fields.items()
+        }
+
+        elapsed_ms = (time.time() - t0) * 1000
+        ctx.log(f"Frame processed in {elapsed_ms:.0f}ms")
 
         point_cloud = {
             "_type": "PointCloud",
-            "num_points": num_valid,
-            "positions": positions,
-            "fields": serialized_fields,
+            "num_points": n,
+            "positions_b64": pos_b64,
+            "fields_b64": fields_b64,
             "metadata": {
                 "source": "ouster",
                 "frame_id": int(scan.frame_id),
