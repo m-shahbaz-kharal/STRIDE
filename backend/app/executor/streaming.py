@@ -857,6 +857,10 @@ class StreamingExecutor:
         body_nodes = self.loop_handler.loop_body_nodes.get(node_id, set())
         body_order = [nid for nid in self.topo_order if nid in body_nodes]
 
+        # Register loop-body relationships for cascading cancellation
+        # When this loop is cancelled, all body nodes will also be cancelled
+        self.cancellation.register_loop_body(node_id, body_nodes)
+
         iterations = 0
         last_index = 0
 

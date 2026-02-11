@@ -152,30 +152,29 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       switch (data.event_type) {
         case "start":
           setExecutionId(data.execution_id);
-          // Don't reset everything if we want concurrent visualization to persist partially
-          // For now, we still reset progress/trace for the NEW run, but we should try to keep other nodes alive if possible?
-          // Actually, if we just receive "start" it implies a new context.
-          // BUT, if we want to support concurrent independent runs, we should NOT wipe the whole map.
+          // Reset progress and errors for new run
           setProgress(0);
           setError(null);
           setErrorCode(null);
           if (data.levels) {
             setLevels(data.levels);
           }
-          if (data.execution_plan) {
-            setNodeStatuses((prev) => {
-              const newMap = new Map(prev);
+          // IMPORTANT: Reset ALL node statuses first, then set execution_plan nodes to pending
+          // This ensures loop body nodes (not in execution_plan) get cleared from previous runs
+          setNodeStatuses((prev) => {
+            // First, clear all statuses that are not "idle"
+            // This resets loop body nodes that have stale statuses from previous interrupted runs
+            const newMap = new Map<string, NodeExecutionStatus>();
+
+            // Set all nodes from execution_plan to pending
+            if (data.execution_plan) {
               // @ts-ignore - execution_plan is checked above
               for (const node of data.execution_plan) {
-                // Only set to pending if not already running/queued/completed?
-                // Or overwrite?
-                // If we overwrite, we might kill the status of a PARALLEL run.
-                // If it's a new run, maybe we only update the nodes invoked?
                 newMap.set(node.node_id, "pending");
               }
-              return newMap;
-            });
-          }
+            }
+            return newMap;
+          });
           break;
 
         case "node_queued":

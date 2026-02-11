@@ -23,6 +23,7 @@ class CancellationController:
     - Task registration: Tracks running asyncio tasks for forced cancellation
     - Process tracking: Tracks subprocesses for forced termination
     - Interruption callbacks: Notify listeners when interruption is requested
+    - Loop-body tracking: When a loop is cancelled, its body nodes are also cancelled
     """
 
     def __init__(self, state_lock: threading.Lock) -> None:
@@ -38,6 +39,10 @@ class CancellationController:
         self._running_processes: Dict[str, List[subprocess.Popen]] = {}
         self._interruption_callbacks: List[Callable[[Optional[str]], None]] = []
         self._interruption_time: Optional[float] = None
+        # Track loop -> body node relationships for cascading cancellation
+        self._loop_body_nodes: Dict[str, Set[str]] = {}
+        # Track body node -> parent loop for reverse lookup
+        self._body_to_loop: Dict[str, str] = {}
 
     def reset(self) -> None:
         """Reset all cancellation state for a new execution run."""
@@ -47,6 +52,22 @@ class CancellationController:
         with self._state_lock:
             self._running_tasks = {}
             self._running_processes = {}
+            self._loop_body_nodes = {}
+            self._body_to_loop = {}
+
+    def register_loop_body(self, loop_id: str, body_nodes: Set[str]) -> None:
+        """Register loop-body relationships for cascading cancellation.
+
+        When a loop node is cancelled, all its body nodes will also be cancelled.
+
+        Args:
+            loop_id: ID of the loop node
+            body_nodes: Set of node IDs that are inside the loop body
+        """
+        with self._state_lock:
+            self._loop_body_nodes[loop_id] = body_nodes
+            for body_id in body_nodes:
+                self._body_to_loop[body_id] = loop_id
 
     def cancel_all(self) -> None:
         """Request cancellation of entire execution."""
@@ -59,12 +80,24 @@ class CancellationController:
     def cancel_node(self, node_id: str) -> None:
         """Request cancellation of a specific node.
 
+        If the node is a loop, all its body nodes are also cancelled.
+
         Args:
             node_id: ID of the node to cancel
         """
         self._cancelled_nodes.add(node_id)
         self._cancel_running_processes(target=node_id)
         self.cancel_running_tasks(target=node_id)
+
+        # If this is a loop node, cascade cancellation to all body nodes
+        with self._state_lock:
+            body_nodes = self._loop_body_nodes.get(node_id, set())
+
+        for body_id in body_nodes:
+            self._cancelled_nodes.add(body_id)
+            self._cancel_running_processes(target=body_id)
+            self.cancel_running_tasks(target=body_id)
+
         self._notify_interruption(node_id)
 
     def should_stop(self) -> bool:
@@ -78,12 +111,19 @@ class CancellationController:
             node_id: Optional node ID to check for specific cancellation
 
         Returns:
-            True if global cancellation is set, or if the specific node is cancelled
+            True if global cancellation is set, or if the specific node is cancelled,
+            or if the node is inside a loop that has been cancelled.
         """
         if self._cancel_all.is_set():
             return True
-        if node_id is not None and node_id in self._cancelled_nodes:
-            return True
+        if node_id is not None:
+            if node_id in self._cancelled_nodes:
+                return True
+            # Also check if this node's parent loop is cancelled
+            with self._state_lock:
+                parent_loop = self._body_to_loop.get(node_id)
+            if parent_loop and parent_loop in self._cancelled_nodes:
+                return True
         return False
 
     def register_running(self, node_id: str, fut: asyncio.Future) -> None:
