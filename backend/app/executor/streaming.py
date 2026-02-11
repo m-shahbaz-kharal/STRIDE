@@ -21,7 +21,10 @@ if TYPE_CHECKING:
     from .cancellation import CancellationController
 
 # Timeout for checking interruption during task execution
-_INTERRUPTION_CHECK_INTERVAL = 0.1  # 100ms
+_INTERRUPTION_CHECK_INTERVAL = 0.05  # 50ms - check twice as often for responsiveness
+
+# Maximum time to wait for a node after interruption before forcefully abandoning it
+_FORCE_ABANDON_TIMEOUT = 0.5  # 500ms
 
 
 class StreamingExecutor:
@@ -107,10 +110,16 @@ class StreamingExecutor:
         node_id: str,
         timeout: float = _INTERRUPTION_CHECK_INTERVAL,
     ) -> Any:
-        """Await a task with periodic interruption checks.
+        """Await a task with periodic interruption checks and forced abandonment.
 
-        This allows responsive interruption even for long-running blocking tasks
-        by periodically checking the cancellation state instead of waiting indefinitely.
+        This is the KEY mechanism for robust interruption:
+        - Checks for cancellation every `timeout` seconds (default 50ms)
+        - When interrupted, IMMEDIATELY abandons the task without waiting
+        - The underlying thread may continue running but we don't wait for it
+        - This ensures interruption is ALWAYS responsive, regardless of node code
+
+        Node developers do NOT need to check ctx.is_interrupted - interruption
+        happens at this level by abandoning the task.
 
         Args:
             task: The asyncio task to await
@@ -121,34 +130,58 @@ class StreamingExecutor:
             The task result
 
         Raises:
-            asyncio.CancelledError: If the task is cancelled or interruption is requested
+            asyncio.CancelledError: If interruption is requested (task is abandoned)
         """
+        interruption_start: Optional[float] = None
+
         while True:
-            # Check for interruption before waiting
-            if self._should_interrupt(node_id) or self._should_stop_execution():
-                if not task.done():
-                    task.cancel()
+            # Check for interruption FIRST - this is the critical check
+            if self._should_stop_execution():
+                # Track when we first detected interruption
+                if interruption_start is None:
+                    interruption_start = time.time()
+
+                # If task is done, we can return cleanly
+                if task.done():
+                    raise asyncio.CancelledError()
+
+                # Check if we've waited too long after interruption
+                elapsed = time.time() - interruption_start
+                if elapsed >= _FORCE_ABANDON_TIMEOUT:
+                    # Force abandon - don't wait for task anymore
+                    # The thread will continue in background but we move on
+                    raise asyncio.CancelledError()
+
+                # Give the task a tiny bit more time to finish gracefully
+                # but use a very short timeout
+                try:
+                    done, _ = await asyncio.wait({task}, timeout=0.01)  # 10ms
+                    if task in done:
+                        raise asyncio.CancelledError()
+                except Exception:
+                    pass
                 raise asyncio.CancelledError()
 
+            # Also check node-specific interruption
+            if self._should_interrupt(node_id):
+                raise asyncio.CancelledError()
+
+            # Use asyncio.wait which does NOT cancel the task on timeout
+            # This is important - we want to keep the task running while we check
             try:
-                # Wait with timeout to allow periodic interruption checks
-                result = await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-                # Check for interruption after task completes - cancellation may have been
-                # requested while we were waiting, and we want to respond to it immediately
+                done, _ = await asyncio.wait({task}, timeout=timeout)
+            except asyncio.CancelledError:
+                # External cancellation (e.g., from cancel_running_tasks)
+                raise
+
+            if task in done:
+                # Task finished - check interruption one more time before returning
                 if self._should_stop_execution():
                     raise asyncio.CancelledError()
-                return result
-            except asyncio.TimeoutError:
-                # Task still running, check interruption and continue waiting
-                if task.done():
-                    # Task finished during timeout handling - check interruption first
-                    if self._should_stop_execution():
-                        raise asyncio.CancelledError()
-                    return task.result()
-                continue
-            except asyncio.CancelledError:
-                # Task was cancelled externally
-                raise
+                # Return the result (will raise if task had an exception)
+                return task.result()
+
+            # Task still running, loop to check interruption again
 
     def _record_interrupted(
         self,
