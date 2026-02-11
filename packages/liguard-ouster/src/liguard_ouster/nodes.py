@@ -189,11 +189,19 @@ class OusterOpenSourceNode(NodeBase):
         # Wrap in lazy loader (no iteration yet!)
         lazy = _LazyScans(source, info, ctx)
 
-        # Quick count — we still need num_frames for the output port.
-        # This iterates the pcap but only stores lightweight LidarScan refs.
-        num_frames = lazy.count_frames()
+        # Try instant O(1) frame count from the SDK first.
+        # Only iterate the full file if that fails.
+        num_frames: int
+        try:
+            num_frames = len(source)  # type: ignore[arg-type]
+            ctx.log(f"Source reports {num_frames} frames (instant)")
+        except (TypeError, AttributeError):
+            # SDK doesn't support len() for this source type — full scan required
+            ctx.log("Source does not support len(); scanning frames...")
+            num_frames = lazy.count_frames()
+
         elapsed = time.time() - t0
-        ctx.log(f"Source ready: {num_frames} frames indexed in {elapsed:.1f}s")
+        ctx.log(f"Source ready: {num_frames} frames in {elapsed:.1f}s")
 
         source_bundle = {
             "_type": "OusterSource",

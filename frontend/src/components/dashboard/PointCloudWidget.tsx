@@ -332,8 +332,8 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
         if (!cv || !data || data._type !== "PointCloud" || !data.num_points) return;
         const p = parse(data); if (!p) return;
 
-        let gl = glRef.current;
-        if (!gl) { gl = cv.getContext("webgl", { antialias: true, alpha: false }); if (!gl) return; glRef.current = gl; }
+        const gl = glRef.current;
+        if (!gl) return; // GL is initialized by the render loop
 
         let pp: WebGLProgram, lp: WebGLProgram;
         if (gpu.current) {
@@ -392,13 +392,21 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
         setInfo(`${p.n.toLocaleString()} pts`);
     }, [data, fit]);
 
-    // ── Render loop ──────────────────────────────────────────────────────
+    // ── Render loop (always runs — even with no data) ─────────────────
     useEffect(() => {
         let id: number;
         const draw = () => {
             id = requestAnimationFrame(draw);
-            const gl = glRef.current, g = gpu.current, cv = canvasRef.current, bx = boxRef.current;
-            if (!gl || !g || !cv || !bx) return;
+            const cv = canvasRef.current, bx = boxRef.current;
+            if (!cv || !bx) return;
+
+            // Initialize GL context once
+            let gl = glRef.current;
+            if (!gl) {
+                gl = cv.getContext("webgl", { antialias: true, alpha: false });
+                if (!gl) return;
+                glRef.current = gl;
+            }
 
             // FPS
             fc.current++;
@@ -415,6 +423,10 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
             gl.clearColor(0.06, 0.06, 0.08, 1);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             gl.enable(gl.DEPTH_TEST);
+
+            // If no GPU data yet, just show the cleared background
+            const g = gpu.current;
+            if (!g) return;
 
             const c = cam.current;
             const cp = Math.cos(c.ph), sp = Math.sin(c.ph), ct = Math.cos(c.th), st = Math.sin(c.th);
@@ -479,7 +491,7 @@ export const PointCloudWidget: React.FC<Props> = ({ data }) => {
             gl.disableVertexAttribArray(g.a.lp);
             gl.disableVertexAttribArray(g.a.lc);
         };
-        draw();
+        id = requestAnimationFrame(draw);
         return () => cancelAnimationFrame(id);
     }, []);
 
