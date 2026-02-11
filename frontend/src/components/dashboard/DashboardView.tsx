@@ -61,7 +61,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
         // In a real app, we would load from backend here and set isDirty to false
         setIsDirty(false);
         onDirtyChange?.(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Intentionally only run on mount
 
     const pushToHistory = (newLayout: DashboardLayout) => {
@@ -322,55 +322,47 @@ const DashboardView: React.FC<DashboardViewProps> = ({ nodes, outputs, onRunGrap
             {/* Main Canvas Area */}
             <div className="dashboard-main" style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-                {/* Overlay Controls */}
-                <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 50, display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    {/* View/Design Toggle */}
-                    <div className="mode-toggle-tabs" style={{
-                        background: 'var(--bg-elevated)',
-                        padding: '4px',
+                {/* Mode Toggle - Bottom Right */}
+                <button
+                    onClick={() => {
+                        if (mode === "design") { setMode("view"); setSelectedWidgetId(null); }
+                        else { setMode("design"); }
+                    }}
+                    title={mode === "design" ? "Switch to View mode" : "Switch to Design mode"}
+                    style={{
+                        position: 'absolute',
+                        bottom: 16,
+                        right: 16,
+                        zIndex: 50,
+                        width: '36px',
+                        height: '36px',
                         borderRadius: '8px',
+                        border: '1px solid var(--border-subtle)',
+                        background: mode === "view" ? 'var(--bg-elevated)' : 'var(--accent-primary)',
+                        color: mode === "view" ? 'var(--text-secondary)' : 'white',
                         display: 'flex',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                        border: '1px solid var(--border-subtle)'
-                    }}>
-                        <button
-                            className={mode === "design" ? "active" : ""}
-                            onClick={() => setMode("design")}
-                            style={{
-                                padding: '6px 16px',
-                                border: 'none',
-                                borderRadius: '6px',
-                                background: mode === "design" ? 'var(--accent-primary)' : 'transparent',
-                                color: mode === "design" ? 'white' : 'var(--text-secondary)',
-                                cursor: 'pointer',
-                                fontSize: '13px',
-                                fontWeight: 500,
-                                transition: 'all 0.2s ease'
-                            }}
-                        >
-                            Design
-                        </button>
-                        <button
-                            className={mode === "view" ? "active" : ""}
-                            onClick={() => { setMode("view"); setSelectedWidgetId(null); }}
-                            style={{
-                                padding: '6px 16px',
-                                border: 'none',
-                                borderRadius: '6px',
-                                background: mode === "view" ? 'var(--accent-primary)' : 'transparent',
-                                color: mode === "view" ? 'white' : 'var(--text-secondary)',
-                                cursor: 'pointer',
-                                fontSize: '13px',
-                                fontWeight: 500,
-                                transition: 'all 0.2s ease'
-                            }}
-                        >
-                            View
-                        </button>
-                    </div>
-
-
-                </div>
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                        transition: 'all 0.2s ease',
+                        opacity: mode === "view" ? 0.6 : 1,
+                    }}
+                    onMouseEnter={e => { if (mode === "view") (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+                    onMouseLeave={e => { if (mode === "view") (e.currentTarget as HTMLElement).style.opacity = "0.6"; }}
+                >
+                    {mode === "design" ? (
+                        /* Pencil icon - currently in design mode */
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                    ) : (
+                        /* Eye icon - currently in view mode */
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                        </svg>
+                    )}
+                </button>
 
                 {/* Snap to Grid Icon & Undo/Redo - Design Mode Only */}
                 {mode === "design" && (

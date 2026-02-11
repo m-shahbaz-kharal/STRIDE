@@ -291,6 +291,7 @@ const SmartConnectModal = ({
                         <div
                             key={node.node_type}
                             className={`smart-connect-item ${index === selectedIndex ? "selected" : ""}`}
+                            style={{ ["--category-color" as string]: catColor }}
                             onClick={() => onSelect(node)}
                             onMouseEnter={() => {
                                 lastInteractionRef.current = "mouse";

@@ -366,7 +366,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     <div
       ref={nodeRef}
       className={`blueprint-node ${statusClass} ${highlightClass}`}
-      style={sizeStyle}
+      style={{ ...sizeStyle, ["--category-color" as string]: categoryColor }}
     >
       {data.executionStatus === "running" && <div className="node-execution-ring" />}
 
@@ -381,7 +381,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         />
       ))}
 
-      <div className="node-header" style={{ ["--category-color" as string]: categoryColor }}>
+      <div className="node-header">
         <div className="node-title-section">
           <div className="node-name-tooltip" data-tooltip={data.nodeType}>
             <strong>{data.displayName}</strong>

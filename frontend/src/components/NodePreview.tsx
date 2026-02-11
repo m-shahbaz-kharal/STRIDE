@@ -29,9 +29,10 @@ const NodePreview = ({ nodeType }: NodePreviewProps) => {
                 position: "relative",
                 transform: "scale(1)", // Ensure it renders at 1:1 scale for the drag image
                 transformOrigin: "top left",
+                ["--category-color" as string]: categoryColor,
             }}
         >
-            <div className="node-header" style={{ ["--category-color" as string]: categoryColor }}>
+            <div className="node-header">
                 <div className="node-title-section">
                     <strong>{nodeType.display_name}</strong>
                 </div>

@@ -469,9 +469,12 @@ body {
 }
 
 @keyframes interrupting-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 0.7;
   }
+
   50% {
     opacity: 1;
   }
@@ -1692,9 +1695,8 @@ body {
   margin: 2px 0;
   font-size: 12px;
   color: var(--text-secondary);
-  background: transparent;
+  background: color-mix(in srgb, var(--category-color, transparent) 8%, transparent);
   border: 1px solid transparent;
-  border-left: 3px solid var(--category-color, transparent);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -3393,8 +3395,8 @@ body {
 .blueprint-node {
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--category-color, var(--border-default)) 30%, var(--border-default));
+  background: color-mix(in srgb, var(--category-color, transparent) 6%, var(--bg-elevated));
   /* min-width and min-height are set dynamically via inline styles based on content */
   width: fit-content;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -3450,12 +3452,11 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  padding-left: 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--category-color, var(--border-subtle));
-  border-radius: 2px 0 0 0;
+  margin: -8px -10px 8px -10px;
+  padding: 8px 10px 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--category-color, var(--border-subtle)) 25%, var(--border-subtle));
+  border-radius: 6px 6px 0 0;
+  background: color-mix(in srgb, var(--category-color, transparent) 12%, var(--bg-elevated));
 }
 
 .node-params {
@@ -4503,6 +4504,7 @@ body {
   cursor: pointer;
   transition: all 0.15s ease;
   border: 1px solid transparent;
+  background: color-mix(in srgb, var(--category-color, transparent) 8%, transparent);
 }
 
 .smart-connect-item:hover {
