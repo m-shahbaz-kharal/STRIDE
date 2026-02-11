@@ -66,7 +66,24 @@ class TimeDelayNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         seconds = float(inputs.get("seconds") or 1.0)
         passthrough = inputs.get("passthrough")
-        time.sleep(max(0, min(seconds, 60)))  # Cap at 60s for safety
+
+        # Cap at 60s for safety
+        total_delay = max(0, min(seconds, 60))
+
+        # Sleep in small increments to allow interruption
+        sleep_interval = 0.1  # Check for interruption every 100ms
+        elapsed = 0.0
+        while elapsed < total_delay:
+            # Check for interruption
+            if ctx.is_interrupted:
+                ctx.log(f"Delay interrupted after {elapsed:.2f}s (target: {seconds}s)")
+                raise InterruptedError(f"Delay interrupted after {elapsed:.2f}s")
+
+            remaining = total_delay - elapsed
+            sleep_time = min(sleep_interval, remaining)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
+
         ctx.log(f"Delayed {seconds}s")
         return {"control_out": None, "passthrough": passthrough}
 

@@ -79,15 +79,25 @@ class _LazyScans:
     def count_frames(self) -> int:
         """Scan through the entire source to get total frame count.
         Only iterates unread portions; already-cached frames are counted instantly.
+        Respects interruption requests via ctx.is_interrupted.
         """
         with self._lock:
             if self._exhausted:
                 return len(self._cache)
-            # Iterate remaining frames
+            # Iterate remaining frames, checking for interruption periodically
+            frames_since_check = 0
             while not self._exhausted:
+                # Check for interruption every 10 frames to avoid overhead
+                if self._ctx and frames_since_check >= 10:
+                    if self._ctx.is_interrupted:
+                        if self._ctx:
+                            self._ctx.log(f"Frame counting interrupted at {len(self._cache)} frames")
+                        break
+                    frames_since_check = 0
                 try:
                     scan_set = next(self._iter)
                     self._cache.append(scan_set[0])
+                    frames_since_check += 1
                 except StopIteration:
                     self._exhausted = True
             if self._ctx:
@@ -95,17 +105,28 @@ class _LazyScans:
             return len(self._cache)
 
     def get(self, idx: int) -> Any:
-        """Get scan at index `idx`, loading up to that point if necessary."""
+        """Get scan at index `idx`, loading up to that point if necessary.
+        Respects interruption requests via ctx.is_interrupted.
+        """
         with self._lock:
             if idx < len(self._cache):
                 return self._cache[idx]
             if self._exhausted:
                 raise IndexError(f"Frame {idx} out of range (total: {len(self._cache)})")
-            # Advance the iterator to the requested index
+            # Advance the iterator to the requested index, checking for interruption
+            frames_since_check = 0
             while len(self._cache) <= idx:
+                # Check for interruption every 10 frames
+                if self._ctx and frames_since_check >= 10:
+                    if self._ctx.is_interrupted:
+                        raise InterruptedError(
+                            f"Frame loading interrupted at {len(self._cache)} (target: {idx})"
+                        )
+                    frames_since_check = 0
                 try:
                     scan_set = next(self._iter)
                     self._cache.append(scan_set[0])
+                    frames_since_check += 1
                 except StopIteration:
                     self._exhausted = True
                     raise IndexError(
@@ -114,13 +135,22 @@ class _LazyScans:
             return self._cache[idx]
 
     def preload(self, count: int) -> int:
-        """Pre-load up to `count` frames in background. Returns actual loaded count."""
+        """Pre-load up to `count` frames in background. Returns actual loaded count.
+        Respects interruption requests via ctx.is_interrupted.
+        """
         with self._lock:
             target = count
+            frames_since_check = 0
             while len(self._cache) < target and not self._exhausted:
+                # Check for interruption every 10 frames
+                if self._ctx and frames_since_check >= 10:
+                    if self._ctx.is_interrupted:
+                        break
+                    frames_since_check = 0
                 try:
                     scan_set = next(self._iter)
                     self._cache.append(scan_set[0])
+                    frames_since_check += 1
                 except StopIteration:
                     self._exhausted = True
             return len(self._cache)
