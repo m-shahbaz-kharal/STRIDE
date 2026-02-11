@@ -4,7 +4,14 @@
       "Bash(npx tsc --noEmit)",
       "Bash(python:*)",
       "Bash(find:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "WebFetch(domain:static.ouster.dev)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(uv run python:*)"
     ]
   }
 }

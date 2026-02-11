@@ -35,6 +35,7 @@ from liguard_core.typesystem import (
     t_box,
     t_mask,
     t_session,
+    t_pointcloud,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "t_box",
     "t_mask",
     "t_session",
+    "t_pointcloud",
 ]

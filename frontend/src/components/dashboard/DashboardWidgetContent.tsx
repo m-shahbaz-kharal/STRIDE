@@ -1,6 +1,7 @@
 import React from "react";
 import { DashboardWidget, BlueprintNodeData } from "../../types";
 import { Node } from "reactflow";
+import { PointCloudWidget } from "./PointCloudWidget";
 
 interface DashboardWidgetContentProps {
     widget: DashboardWidget;
@@ -102,6 +103,8 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
                         <img src={`/api/streams/${stream.stream_id}/frame?ts=${Date.now()}`} alt="stream" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
                 );
+            } else if (value && typeof value === 'object' && (value as any)._type === 'PointCloud') {
+                return <PointCloudWidget data={value as any} />;
             }
             return (
                 <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>

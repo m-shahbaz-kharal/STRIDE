@@ -21,12 +21,14 @@ dependencies = [
     "liguard-core",
     "liguard-sam3",
     "liguard-fl511",
+    "liguard-ouster",
 ]
 
 [tool.uv.sources]
 liguard-core = { path = "../packages/liguard-core", editable = true }
 liguard-sam3 = { path = "../packages/liguard-sam3", editable = true }
 liguard-fl511 = { path = "../packages/liguard-fl511", editable = true }
+liguard-ouster = { path = "../packages/liguard-ouster", editable = true }
 
 [dependency-groups]
 dev = [

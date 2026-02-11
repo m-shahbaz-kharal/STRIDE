@@ -17,7 +17,8 @@ export type TypeKind =
   | "record"
   | "tuple"
   | "option"
-  | "tensor";
+  | "tensor"
+  | "pointcloud";
 
 export interface TypeDescriptor {
   kind: TypeKind;

@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
 CONTAINERS = {"list", "map", "record", "tuple", "option"}
-FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session"}
+FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session", "pointcloud"}
 
 
 @dataclass(frozen=True)
@@ -353,3 +353,8 @@ def t_mask() -> TypeDescriptor:
 def t_session() -> TypeDescriptor:
     """An AI model session handle."""
     return TypeDescriptor(kind="session")
+
+
+def t_pointcloud() -> TypeDescriptor:
+    """A 3D point cloud (positions + optional per-point fields)."""
+    return TypeDescriptor(kind="pointcloud")
