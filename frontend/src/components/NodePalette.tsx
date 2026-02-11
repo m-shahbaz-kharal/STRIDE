@@ -1,6 +1,21 @@
 import React, { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { NodeTypeDefinition } from "../types";
+import { getCategoryColor } from "../graph/utils";
 import NodePreview from "./NodePreview";
+
+// Highlight matching portions of text during search
+const HighlightText = ({ text, query }: { text: string; query: string }) => {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="search-highlight">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+};
 
 // Debounce hook for search input
 const useDebouncedValue = <T,>(value: T, delay: number): T => {
@@ -124,15 +139,18 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
       <div className="palette-list">
         {categorizedNodes.map(([category, nodes]) => {
           const isCollapsed = collapsedCategories.has(category);
+          const catColor = getCategoryColor(category);
           return (
             <div key={category} className="palette-category">
               <button
                 type="button"
                 className={`category-header ${isCollapsed ? "collapsed" : ""}`}
                 onClick={() => toggleCategory(category)}
+                style={{ ["--category-color" as string]: catColor }}
               >
+                <span className="category-dot" style={{ background: catColor }} />
                 <ChevronIcon collapsed={isCollapsed} />
-                <span>{category}</span>
+                <span style={{ color: catColor }}>{category}</span>
                 <span className="category-count">{nodes.length}</span>
               </button>
               <div className={`category-items ${isCollapsed ? "collapsed" : ""}`}>
@@ -145,6 +163,7 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
                     onMouseEnter={() => setHoveredNode(nodeType)}
                     onMouseLeave={() => setHoveredNode(null)}
                     title={nodeType.description}
+                    style={{ ["--category-color" as string]: catColor }}
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.setData("application/reactflow", JSON.stringify(nodeType));
@@ -156,7 +175,9 @@ const NodePalette = ({ nodeTypes, onAddNode }: NodePaletteProps) => {
                       }
                     }}
                   >
-                    <span className="palette-item-name">{nodeType.display_name}</span>
+                    <span className="palette-item-name">
+                      <HighlightText text={nodeType.display_name} query={debouncedQuery.trim()} />
+                    </span>
                     <span className="palette-item-add">+</span>
                   </button>
                 ))}

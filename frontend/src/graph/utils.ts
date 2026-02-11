@@ -18,6 +18,20 @@ export const PORT_TYPE_COLORS: Record<string, string> = {
   control: "#f97316",
 };
 
+/**
+ * Deterministically compute a unique HSL color for a category name.
+ * Uses djb2 hash to map any string to a hue, with fixed saturation/lightness
+ * for vibrant, readable colors on dark backgrounds.
+ */
+export const getCategoryColor = (category: string): string => {
+  let hash = 5381;
+  for (let i = 0; i < category.length; i++) {
+    hash = ((hash << 5) + hash + category.charCodeAt(i)) | 0;
+  }
+  const hue = ((hash % 360) + 360) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+};
+
 export const PORT_ROW_HEIGHT = 42;
 export const PARAM_ROW_HEIGHT = 26;
 export const HEADER_HEIGHT = 70;

@@ -10,6 +10,7 @@ import {
   MIN_NODE_WIDTH,
   computeNodeDimensions,
   formatPortTypeLabel,
+  getCategoryColor,
   getExecutionStatusClass,
   getPortTypeColor,
 } from "../../graph/utils";
@@ -358,6 +359,9 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
     return null;
   };
 
+  const nodeCategory = data.metadata?.category || data.nodeType.split(".")[0] || "Other";
+  const categoryColor = getCategoryColor(nodeCategory);
+
   return (
     <div
       ref={nodeRef}
@@ -377,7 +381,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
         />
       ))}
 
-      <div className="node-header">
+      <div className="node-header" style={{ ["--category-color" as string]: categoryColor }}>
         <div className="node-title-section">
           <div className="node-name-tooltip" data-tooltip={data.nodeType}>
             <strong>{data.displayName}</strong>

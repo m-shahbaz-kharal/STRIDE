@@ -1616,6 +1616,21 @@ body {
   margin-bottom: 4px;
 }
 
+.category-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Search text highlighting */
+.search-highlight {
+  background: rgba(255, 213, 79, 0.3);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .category-header {
   display: flex;
   align-items: center;
@@ -1679,6 +1694,7 @@ body {
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid transparent;
+  border-left: 3px solid var(--category-color, transparent);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -3436,7 +3452,10 @@ body {
   gap: 8px;
   margin-bottom: 8px;
   padding-bottom: 6px;
+  padding-left: 10px;
   border-bottom: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--category-color, var(--border-subtle));
+  border-radius: 2px 0 0 0;
 }
 
 .node-params {
@@ -4502,6 +4521,7 @@ body {
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
   margin-right: 12px;
   font-family: var(--font-mono);
@@ -4512,6 +4532,7 @@ body {
 .smart-connect-item.selected .item-icon {
   background: var(--accent-blue);
   color: white;
+  border-color: var(--accent-blue);
 }
 
 .item-content {

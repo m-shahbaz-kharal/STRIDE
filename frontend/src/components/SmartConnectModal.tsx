@@ -1,5 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NodeTypeDefinition } from "../types";
+import { getCategoryColor } from "../graph/utils";
+
+// Highlight matching portions of text during search
+const HighlightText = ({ text, query }: { text: string; query: string }) => {
+    if (!query) return <>{text}</>;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return <>{text}</>;
+    return (
+        <>
+            {text.slice(0, idx)}
+            <mark className="search-highlight">{text.slice(idx, idx + query.length)}</mark>
+            {text.slice(idx + query.length)}
+        </>
+    );
+};
 
 interface SmartConnectModalProps {
     isOpen: boolean;
@@ -270,6 +285,8 @@ const SmartConnectModal = ({
             <div className="smart-connect-list" ref={listRef}>
                 {filteredNodes.map((node, index) => {
                     const category = node.category || "Other";
+                    const catColor = getCategoryColor(category);
+                    const normalizedQuery = query.trim().toLowerCase();
                     return (
                         <div
                             key={node.node_type}
@@ -280,11 +297,13 @@ const SmartConnectModal = ({
                                 setSelectedIndex(index);
                             }}
                         >
-                            <div className="item-icon">{getCategoryIcon(category)}</div>
+                            <div className="item-icon" style={{ background: `${catColor}22`, color: catColor, borderColor: `${catColor}44` }}>{getCategoryIcon(category)}</div>
                             <div className="item-content">
                                 <div className="node-title-row">
-                                    <span className="node-category">{category}</span>
-                                    <span className="node-name">{node.display_name}</span>
+                                    <span className="node-category" style={{ background: `${catColor}18`, borderColor: `${catColor}33`, color: catColor }}>{category}</span>
+                                    <span className="node-name">
+                                        <HighlightText text={node.display_name} query={normalizedQuery} />
+                                    </span>
                                 </div>
                                 <span className="node-desc">{node.description}</span>
                             </div>

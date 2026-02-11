@@ -1,6 +1,6 @@
 import React from "react";
 import { NodeTypeDefinition, TypeDescriptor } from "../types";
-import { formatPortTypeLabel, getPortTypeColor } from "../graph/utils";
+import { formatPortTypeLabel, getCategoryColor, getPortTypeColor } from "../graph/utils";
 
 interface NodePreviewProps {
     nodeType: NodeTypeDefinition;
@@ -17,6 +17,9 @@ const NodePreview = ({ nodeType }: NodePreviewProps) => {
     const getTypeKind = (portType: TypeDescriptor | string | undefined) =>
         typeof portType === "string" ? portType.toLowerCase() : portType?.kind ?? "any";
 
+    const category = nodeType.category || nodeType.node_type.split(".")[0] || "Other";
+    const categoryColor = getCategoryColor(category);
+
     return (
         <div
             className="blueprint-node"
@@ -28,7 +31,7 @@ const NodePreview = ({ nodeType }: NodePreviewProps) => {
                 transformOrigin: "top left",
             }}
         >
-            <div className="node-header">
+            <div className="node-header" style={{ ["--category-color" as string]: categoryColor }}>
                 <div className="node-title-section">
                     <strong>{nodeType.display_name}</strong>
                 </div>
