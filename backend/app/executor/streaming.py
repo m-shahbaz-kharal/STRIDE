@@ -132,10 +132,18 @@ class StreamingExecutor:
 
             try:
                 # Wait with timeout to allow periodic interruption checks
-                return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+                result = await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+                # Check for interruption after task completes - cancellation may have been
+                # requested while we were waiting, and we want to respond to it immediately
+                if self._should_stop_execution():
+                    raise asyncio.CancelledError()
+                return result
             except asyncio.TimeoutError:
                 # Task still running, check interruption and continue waiting
                 if task.done():
+                    # Task finished during timeout handling - check interruption first
+                    if self._should_stop_execution():
+                        raise asyncio.CancelledError()
                     return task.result()
                 continue
             except asyncio.CancelledError:
@@ -924,6 +932,10 @@ class StreamingExecutor:
                         completed_nodes=completed,
                     )
                     self._cancel_dependents(body_id)
+                    # Check for stop after yield
+                    if self._should_stop_execution():
+                        loop_interrupted = True
+                        break
                     continue
 
                 if body_id in self.skipped_branches:
@@ -945,6 +957,10 @@ class StreamingExecutor:
                         total_nodes=total,
                         completed_nodes=completed,
                     )
+                    # Check for stop after yield
+                    if self._should_stop_execution():
+                        loop_interrupted = True
+                        break
                     continue
 
                 # Handle nested loops by recursive streaming execution
@@ -957,12 +973,16 @@ class StreamingExecutor:
                         adjust_total=True,
                     ):
                         yield nested_event
-                    # Check if nested loop failed
+                    # Check if nested loop failed or if we should stop
                     nested_status = self.node_status.get(body_id)
                     if nested_status == NodeStatus.ERROR:
                         if self.fail_fast:
                             loop_interrupted = True
                             break
+                    # Check for interruption after nested loop
+                    if self._should_stop_execution():
+                        loop_interrupted = True
+                        break
                     continue
 
                 # Handle if/else in loop body
@@ -993,6 +1013,10 @@ class StreamingExecutor:
                             from_cache=result.from_cache,
                         )
                         if self.fail_fast:
+                            loop_interrupted = True
+                            break
+                        # Check for stop after error yield
+                        if self._should_stop_execution():
                             loop_interrupted = True
                             break
                         continue
@@ -1040,6 +1064,10 @@ class StreamingExecutor:
                         completed_nodes=completed,
                         from_cache=False,
                     )
+                    # Check for stop after yield
+                    if self._should_stop_execution():
+                        loop_interrupted = True
+                        break
                     continue
 
                 # Regular body node execution
@@ -1069,6 +1097,10 @@ class StreamingExecutor:
                         from_cache=result.from_cache,
                     )
                     if self.fail_fast:
+                        loop_interrupted = True
+                        break
+                    # Check for stop after error yield
+                    if self._should_stop_execution():
                         loop_interrupted = True
                         break
                     continue
@@ -1109,6 +1141,10 @@ class StreamingExecutor:
                         completed_nodes=completed,
                         from_cache=True,
                     )
+                    # Check for stop after yield
+                    if self._should_stop_execution():
+                        loop_interrupted = True
+                        break
                     continue
 
                 with progress_state["lock"]:
@@ -1128,6 +1164,30 @@ class StreamingExecutor:
                     completed_nodes=completed,
                 )
 
+                # Check for stop before starting thread pool work
+                if self._should_stop_execution():
+                    # Emit skipped event for this node
+                    with progress_state["lock"]:
+                        progress_state["completed"] += 1
+                        completed = progress_state["completed"]
+                        total = progress_state["total"]
+                    yield ExecutionEvent(
+                        event_type="node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=body_id,
+                        node_type=self.nodes[body_id].type,
+                        status=NodeStatus.SKIPPED,
+                        logs=[f"[loop {idx}] Interrupted before execution"],
+                        level=self.node_levels.get(body_id, 0),
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=False,
+                    )
+                    loop_interrupted = True
+                    break
+
                 future = loop.run_in_executor(
                     self._thread_pool,
                     self.executor.execute_node_work,
@@ -1141,6 +1201,14 @@ class StreamingExecutor:
                     result = await self._await_with_interruption_check(task, body_id)
                 except asyncio.CancelledError:
                     result = self.executor.make_interrupted_result(body_id)
+
+                # Check for interruption immediately after node execution
+                # This catches the case where cancellation was requested during execution
+                was_interrupted_after = False
+                if result.status != NodeStatus.SKIPPED and self._should_stop_execution():
+                    result = self.executor.make_interrupted_result(body_id)
+                    was_interrupted_after = True
+
                 result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]
                 self.finalize_node_result(body_id, inputs, result, cached=False)
 
@@ -1148,6 +1216,26 @@ class StreamingExecutor:
                     progress_state["completed"] += 1
                     completed = progress_state["completed"]
                     total = progress_state["total"]
+
+                # Break out of loop body immediately if interrupted
+                if was_interrupted_after:
+                    loop_interrupted = True
+                    yield ExecutionEvent(
+                        event_type="node_skipped",
+                        execution_id=self.execution_id,
+                        timestamp=time.time(),
+                        node_id=body_id,
+                        node_type=result.node_type,
+                        status=NodeStatus.SKIPPED,
+                        logs=result.logs,
+                        duration_ms=result.duration_ms,
+                        level=result.level,
+                        progress=completed / total if total > 0 else 0,
+                        total_nodes=total,
+                        completed_nodes=completed,
+                        from_cache=False,
+                    )
+                    break
 
                 if result.status == NodeStatus.ERROR:
                     yield ExecutionEvent(
@@ -1167,6 +1255,7 @@ class StreamingExecutor:
                         from_cache=result.from_cache,
                     )
                     if self.fail_fast:
+                        loop_interrupted = True
                         break
                 else:
                     event_type = "node_completed" if result.status == NodeStatus.COMPLETED else "node_skipped"
@@ -1188,6 +1277,15 @@ class StreamingExecutor:
                     )
                     if result.status == NodeStatus.SKIPPED:
                         self._cancel_dependents(body_id)
+
+                # Check for interruption after yielding event (yield is an await point)
+                if self._should_stop_execution():
+                    loop_interrupted = True
+                    break
+
+            # After body loop - break out of iteration loop if interrupted
+            if loop_interrupted or self._should_stop_execution():
+                break
 
         if loop_interrupted or self._should_stop_execution():
             loop_result = self._record_interrupted(node_id)
