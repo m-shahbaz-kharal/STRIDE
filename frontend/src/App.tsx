@@ -256,6 +256,7 @@ const App = () => {
   const {
     isConnected,
     isRunning,
+    isInterrupting,
     hasRunningNodes,
     error,
     trace,
@@ -2223,6 +2224,7 @@ const App = () => {
             graphName={currentGraph?.name ?? null}
             isGraphDirty={isGraphDirty || isDashboardDirty}
             isRunning={isRunning}
+            isInterrupting={isInterrupting}
             isConnected={isConnected}
             progress={progress}
             error={error}

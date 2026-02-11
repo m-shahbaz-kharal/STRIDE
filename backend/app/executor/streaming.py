@@ -7,6 +7,7 @@ Handles async streaming execution with events, parallel branches, and ready-queu
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import time
 from collections import defaultdict, deque
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
     from .node_execution import NodeExecutor
     from .control_flow import LoopHandler, IfElseHandler, BranchHandler
     from .cancellation import CancellationController
+
+# Timeout for checking interruption during task execution
+_INTERRUPTION_CHECK_INTERVAL = 0.1  # 100ms
 
 
 class StreamingExecutor:
@@ -96,6 +100,47 @@ class StreamingExecutor:
 
     def _should_stop_execution(self) -> bool:
         return self.cancellation.should_stop()
+
+    async def _await_with_interruption_check(
+        self,
+        task: asyncio.Task,
+        node_id: str,
+        timeout: float = _INTERRUPTION_CHECK_INTERVAL,
+    ) -> Any:
+        """Await a task with periodic interruption checks.
+
+        This allows responsive interruption even for long-running blocking tasks
+        by periodically checking the cancellation state instead of waiting indefinitely.
+
+        Args:
+            task: The asyncio task to await
+            node_id: ID of the node being executed
+            timeout: Interval between interruption checks
+
+        Returns:
+            The task result
+
+        Raises:
+            asyncio.CancelledError: If the task is cancelled or interruption is requested
+        """
+        while True:
+            # Check for interruption before waiting
+            if self._should_interrupt(node_id) or self._should_stop_execution():
+                if not task.done():
+                    task.cancel()
+                raise asyncio.CancelledError()
+
+            try:
+                # Wait with timeout to allow periodic interruption checks
+                return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Task still running, check interruption and continue waiting
+                if task.done():
+                    return task.result()
+                continue
+            except asyncio.CancelledError:
+                # Task was cancelled externally
+                raise
 
     def _record_interrupted(
         self,
@@ -725,7 +770,11 @@ class StreamingExecutor:
 
         finally:
             if self._thread_pool:
-                self._thread_pool.shutdown(wait=False)
+                # Python 3.9+ supports cancel_futures parameter
+                if sys.version_info >= (3, 9):
+                    self._thread_pool.shutdown(wait=False, cancel_futures=True)
+                else:
+                    self._thread_pool.shutdown(wait=False)
                 self._thread_pool = None
             self.cleanup_resources()
             self.unregister_execution()
@@ -1088,7 +1137,8 @@ class StreamingExecutor:
                 task = asyncio.wrap_future(future)
                 self.cancellation.register_running(body_id, task)
                 try:
-                    result = await task
+                    # Use timeout-based waiting to allow interruption checks
+                    result = await self._await_with_interruption_check(task, body_id)
                 except asyncio.CancelledError:
                     result = self.executor.make_interrupted_result(body_id)
                 result.logs = [f"[loop {idx}] {log}" for log in result.logs] or [f"[loop {idx}]"]

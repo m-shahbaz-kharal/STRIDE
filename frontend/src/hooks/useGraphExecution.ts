@@ -34,6 +34,7 @@ interface GraphPayload {
 interface UseGraphExecutionReturn {
   isConnected: boolean;
   isRunning: boolean;
+  isInterrupting: boolean; // True while interruption is in progress
   hasRunningNodes: boolean; // True if any nodes are running/queued - for interrupt button
   error: string | null;
   errorCode?: string | null;
@@ -71,6 +72,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
 
   const [isConnected, setIsConnected] = useState(false);
   const [activeRuns, setActiveRuns] = useState(0);
+  const [isInterrupting, setIsInterrupting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [trace, setTrace] = useState<ExecutionTraceEntry[]>([]);
@@ -267,6 +269,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
             setProgress(1);
             setExecutionId(null);
             activeRunRef.current = false;
+            setIsInterrupting(false);
           }
 
           setActiveRuns((prev) => Math.max(0, prev - 1));
@@ -295,6 +298,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
             setProgress(1);
             setExecutionId(null);
             activeRunRef.current = false;
+            setIsInterrupting(false);
           }
 
           setActiveRuns((prev) => Math.max(0, prev - 1));
@@ -318,6 +322,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
             setCurrentNodeId(null);
             setExecutionId(null);
             activeRunRef.current = false;
+            setIsInterrupting(false);
           }
 
           setActiveRuns((prev) => Math.max(0, prev - 1));
@@ -358,6 +363,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         }
         // Clear active execution IDs on disconnect
         activeExecutionIdsRef.current.clear();
+        setIsInterrupting(false);
 
         reconnectTimeoutRef.current = window.setTimeout(() => {
           connect();
@@ -372,6 +378,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           setError("WebSocket connection error");
         }
         activeExecutionIdsRef.current.clear();
+        setIsInterrupting(false);
       };
 
       ws.onmessage = handleMessage;
@@ -498,6 +505,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     setExecutionId(null);
     activeRunRef.current = false;
     setActiveRuns(0);
+    setIsInterrupting(false);
     activeExecutionIdsRef.current.clear();
   }, []);
 
@@ -514,6 +522,25 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       ids.push(executionId);
     }
 
+    if (ids.length === 0) return;
+
+    // Set interrupting state immediately for responsive UI feedback
+    setIsInterrupting(true);
+
+    // Immediately flush any pending updates to show current state
+    flushPendingUpdates();
+
+    // Mark all currently running/queued nodes as "interrupting" visually
+    setNodeStatuses((prev) => {
+      const updated = new Map(prev);
+      for (const [nodeId, status] of updated) {
+        if (status === "running" || status === "queued") {
+          // Keep as running but the isInterrupting flag will show visual feedback
+        }
+      }
+      return updated;
+    });
+
     await Promise.all(ids.map(async (id) => {
       try {
         await fetch(`/api/executions/${id}/cancel`, { method: "POST" });
@@ -521,11 +548,14 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         console.error(`Failed to cancel execution ${id}:`, e);
       }
     }));
-  }, [executionId]);
+
+    // Note: isInterrupting will be cleared when we receive completion events
+  }, [executionId, flushPendingUpdates]);
 
   return {
     isConnected,
     isRunning: activeRuns > 0,
+    isInterrupting,
     hasRunningNodes,
     error,
     errorCode,

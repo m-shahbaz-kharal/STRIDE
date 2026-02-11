@@ -28,6 +28,7 @@ interface AppHeaderProps {
     graphName: string | null;
     isGraphDirty: boolean;
     isRunning: boolean;
+    isInterrupting: boolean;
     isConnected: boolean;
     progress: number;
     error: string | null;
@@ -52,6 +53,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
     graphName,
     isGraphDirty,
     isRunning,
+    isInterrupting,
     isConnected,
     progress,
     error,
@@ -145,9 +147,9 @@ const AppHeader: React.FC<AppHeaderProps> = ({
 
                 {headerTab === "graph-editor" && isRunning && (
                     <div className="header-stats">
-                        <span className="stat-badge running">
+                        <span className={`stat-badge ${isInterrupting ? "interrupting" : "running"}`}>
                             <span className="pulse-dot" />
-                            {Math.round(progress * 100)}%
+                            {isInterrupting ? "Stopping..." : `${Math.round(progress * 100)}%`}
                         </span>
                     </div>
                 )}
@@ -180,12 +182,13 @@ const AppHeader: React.FC<AppHeaderProps> = ({
                             {isRunning && <span className="btn-spinner" />}
                         </button>
                         <button
-                            className="icon-btn danger"
+                            className={`icon-btn danger ${isInterrupting ? "interrupting" : ""}`}
                             onClick={onInterruptAll}
-                            disabled={!hasRunningNodes}
-                            title="Interrupt all running nodes"
+                            disabled={!hasRunningNodes || isInterrupting}
+                            title={isInterrupting ? "Interrupting..." : "Interrupt all running nodes"}
                         >
                             <StopIcon />
+                            {isInterrupting && <span className="btn-spinner" />}
                         </button>
                         {headerTab !== "dashboard" && (
                             <button

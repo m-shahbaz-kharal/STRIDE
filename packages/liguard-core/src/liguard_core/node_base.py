@@ -5,8 +5,9 @@ Base classes for LiGuard-Web nodes.
 from __future__ import annotations
 
 import abc
+import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .node_spec import NodeSpec
@@ -14,13 +15,27 @@ if TYPE_CHECKING:
 
 @dataclass
 class ExecutionContext:
-    """Provides runtime metadata that nodes can use while running."""
+    """Provides runtime metadata that nodes can use while running.
+
+    Attributes:
+        logger: List of log messages.
+        metadata: Shared metadata dict.
+        variables: Shared variables dict.
+        resources: List of resources to clean up.
+        _interrupted: Internal interruption flag.
+        register_subprocess: Callback to register a subprocess for cleanup on interruption.
+        check_cancelled: Callback to check if the node has been cancelled.
+    """
 
     logger: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     variables: Dict[str, Any] = field(default_factory=dict)
     resources: List[Any] = field(default_factory=list)
     _interrupted: bool = field(default=False, repr=False)
+
+    # These are injected by the executor at runtime
+    register_subprocess: Optional[Callable[[subprocess.Popen], None]] = field(default=None, repr=False)
+    check_cancelled: Optional[Callable[[], bool]] = field(default=None, repr=False)
 
     def log(self, message: str) -> None:
         """Add a log message."""
@@ -40,7 +55,14 @@ class ExecutionContext:
 
     @property
     def is_interrupted(self) -> bool:
-        """Check if execution has been interrupted."""
+        """Check if execution has been interrupted.
+
+        Nodes can call this periodically during long-running operations
+        to cooperatively respond to cancellation requests.
+        """
+        # Use the injected check_cancelled if available (more accurate)
+        if self.check_cancelled is not None:
+            return self.check_cancelled()
         return self._interrupted
 
     def interrupt(self) -> None:

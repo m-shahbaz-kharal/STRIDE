@@ -218,6 +218,17 @@ class NodeExecutor:
                     self.resources.append((node_id, r))
             ctx.register_resource = _register_resource
 
+            # Hook up subprocess registration for interruptible external processes
+            import subprocess
+            def _register_subprocess(proc: subprocess.Popen) -> None:
+                self.cancellation.register_process(node_id, proc)
+            ctx.register_subprocess = _register_subprocess
+
+            # Hook up cancellation check for cooperative interruption
+            def _check_cancelled() -> bool:
+                return self.cancellation.is_cancelled(node_id)
+            ctx.check_cancelled = _check_cancelled
+
             outputs = node.forward(inputs, ctx)
 
             if set(outputs.keys()) != set(node.output_ports):
