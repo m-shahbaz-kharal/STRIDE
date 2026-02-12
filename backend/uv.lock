@@ -676,6 +676,23 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "liguard-people"
+version = "0.1.0"
+source = { editable = "../packages/liguard-people" }
+dependencies = [
+    { name = "liguard-core" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "liguard-core" },
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "scipy", specifier = ">=1.10" },
+]
+
+[[package]]
 name = "liguard-sam3"
 version = "1.0.0"
 source = { editable = "../packages/liguard-sam3" }
@@ -710,12 +727,14 @@ dependencies = [
     { name = "liguard-core" },
     { name = "liguard-fl511" },
     { name = "liguard-ouster" },
+    { name = "liguard-people" },
     { name = "liguard-sam3" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "passlib", extra = ["bcrypt"] },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-jose" },
+    { name = "scipy" },
     { name = "sqlalchemy" },
     { name = "supervision" },
     { name = "ultralytics" },
@@ -738,12 +757,14 @@ requires-dist = [
     { name = "liguard-core", editable = "../packages/liguard-core" },
     { name = "liguard-fl511", editable = "../packages/liguard-fl511" },
     { name = "liguard-ouster", editable = "../packages/liguard-ouster" },
+    { name = "liguard-people", editable = "../packages/liguard-people" },
     { name = "liguard-sam3", editable = "../packages/liguard-sam3" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.19" },
     { name = "python-jose", specifier = ">=3.3.0" },
+    { name = "scipy", specifier = ">=1.10" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "supervision", specifier = ">=0.25.0" },
     { name = "ultralytics", specifier = ">=8.3.0" },

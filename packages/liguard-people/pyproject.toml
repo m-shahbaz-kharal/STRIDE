@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "liguard-people"
+version = "0.1.0"
+description = "People detection and occupancy tracking for LiGuard-Web"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "liguard-core",
+]
+
+[project.entry-points."liguard.plugins"]
+people = "liguard_people:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/liguard_people"]

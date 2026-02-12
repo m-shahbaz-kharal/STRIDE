@@ -18,7 +18,10 @@ export type TypeKind =
   | "tuple"
   | "option"
   | "tensor"
-  | "pointcloud";
+  | "pointcloud"
+  | "bbox3d"
+  | "region3d"
+  | "scene3d";
 
 export interface TypeDescriptor {
   kind: TypeKind;

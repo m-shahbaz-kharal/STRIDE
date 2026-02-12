@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
 CONTAINERS = {"list", "map", "record", "tuple", "option"}
-FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session", "pointcloud"}
+FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session", "pointcloud", "bbox3d", "region3d", "scene3d"}
 
 
 @dataclass(frozen=True)
@@ -358,3 +358,18 @@ def t_session() -> TypeDescriptor:
 def t_pointcloud() -> TypeDescriptor:
     """A 3D point cloud (positions + optional per-point fields)."""
     return TypeDescriptor(kind="pointcloud")
+
+
+def t_bbox3d() -> TypeDescriptor:
+    """A 3D bounding box (center, size, id)."""
+    return TypeDescriptor(kind="bbox3d")
+
+
+def t_region3d() -> TypeDescriptor:
+    """A 3D occupancy region (center, size, name)."""
+    return TypeDescriptor(kind="region3d")
+
+
+def t_scene3d() -> TypeDescriptor:
+    """A 3D scene for visualization (point cloud + boxes + regions)."""
+    return TypeDescriptor(kind="scene3d")

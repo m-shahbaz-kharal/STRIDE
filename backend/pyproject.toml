@@ -19,11 +19,13 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-jose>=3.3.0",
     "email-validator>=2.1.1",
+    "scipy>=1.10",
     # Plugin packages (editable install from local packages/)
     "liguard-core",
     "liguard-sam3",
     "liguard-fl511",
     "liguard-ouster",
+    "liguard-people",
 ]
 
 [tool.uv.sources]
@@ -31,6 +33,7 @@ liguard-core = { path = "../packages/liguard-core", editable = true }
 liguard-sam3 = { path = "../packages/liguard-sam3", editable = true }
 liguard-fl511 = { path = "../packages/liguard-fl511", editable = true }
 liguard-ouster = { path = "../packages/liguard-ouster", editable = true }
+liguard-people = { path = "../packages/liguard-people", editable = true }
 
 [dependency-groups]
 dev = [
