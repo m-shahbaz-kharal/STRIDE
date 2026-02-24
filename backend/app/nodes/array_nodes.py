@@ -10,6 +10,21 @@ from ..typesystem import t_any, t_boolean, t_control, t_float, t_int, t_list
 
 
 # ============================================================================
+# UTILITIES
+# ============================================================================
+
+def _ensure_list(val: Any) -> list:
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    # If it's a tuple or set, we can convert it to a list. Otherwise, wrap it.
+    if isinstance(val, (tuple, set)):
+        return list(val)
+    return [val]
+
+
+# ============================================================================
 # ARRAY OPERATIONS
 # ============================================================================
 
@@ -34,7 +49,7 @@ ARRAY_FIRST_SPEC = NodeSpec(
 @register_node(ARRAY_FIRST_SPEC)
 class ArrayFirstNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         value = array[0] if array else None
         ctx.log(f"First -> {value}")
         return {"control_out": None, "value": value}
@@ -61,7 +76,7 @@ ARRAY_LAST_SPEC = NodeSpec(
 @register_node(ARRAY_LAST_SPEC)
 class ArrayLastNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         value = array[-1] if array else None
         ctx.log(f"Last -> {value}")
         return {"control_out": None, "value": value}
@@ -90,7 +105,7 @@ ARRAY_SLICE_SPEC = NodeSpec(
 @register_node(ARRAY_SLICE_SPEC)
 class ArraySliceNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         start = int(inputs.get("start") or 0)
         end = inputs.get("end")
         if end is None or end == -1:
@@ -122,7 +137,7 @@ ARRAY_REVERSE_SPEC = NodeSpec(
 @register_node(ARRAY_REVERSE_SPEC)
 class ArrayReverseNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         result = list(reversed(array))
         ctx.log(f"Reverse -> {len(result)} items")
         return {"control_out": None, "result": result}
@@ -150,7 +165,7 @@ ARRAY_SORT_SPEC = NodeSpec(
 @register_node(ARRAY_SORT_SPEC)
 class ArraySortNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         descending = bool(inputs.get("descending"))
         try:
             result = sorted(array, reverse=descending)
@@ -182,7 +197,7 @@ ARRAY_CONTAINS_SPEC = NodeSpec(
 @register_node(ARRAY_CONTAINS_SPEC)
 class ArrayContainsNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         value = inputs.get("value")
         result = value in array
         ctx.log(f"Contains {value} -> {result}")
@@ -211,7 +226,7 @@ ARRAY_INDEX_OF_SPEC = NodeSpec(
 @register_node(ARRAY_INDEX_OF_SPEC)
 class ArrayIndexOfNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         value = inputs.get("value")
         try:
             index = array.index(value)
@@ -242,7 +257,7 @@ ARRAY_SUM_SPEC = NodeSpec(
 @register_node(ARRAY_SUM_SPEC)
 class ArraySumNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         total = 0.0
         for item in array:
             try:
@@ -274,7 +289,7 @@ ARRAY_AVERAGE_SPEC = NodeSpec(
 @register_node(ARRAY_AVERAGE_SPEC)
 class ArrayAverageNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        array = inputs.get("array") or []
+        array = _ensure_list(inputs.get("array"))
         values = []
         for item in array:
             try:

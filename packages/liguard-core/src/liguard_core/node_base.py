@@ -80,7 +80,7 @@ class NodeBase(abc.ABC):
 
     def __init__(self, config: Dict[str, Any], spec: Optional["NodeSpec"] = None) -> None:
         self.spec = spec or getattr(self, "spec", None)
-        self.id: str = config["id"]
+        self.id: str = config.get("id", "")
         self.type: str = config.get("type") or (self.spec.type if self.spec else "")
         self.params: Dict[str, Any] = config.get("params", {})
         self.input_values: Dict[str, Any] = config.get("input_values", {})

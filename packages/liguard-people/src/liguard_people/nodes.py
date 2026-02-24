@@ -241,9 +241,10 @@ class VoxelBackgroundModel:
     Learns static scene by tracking voxel occupancy counts.
     """
 
-    def __init__(self, voxel_size: float = 0.1, threshold: int = 5):
+    def __init__(self, voxel_size: float = 0.1, threshold: int = 5, learning_frames: int = 30):
         self.voxel_size = voxel_size
         self.threshold = threshold
+        self.learning_frames = learning_frames
         self.occupancy: Dict[tuple, int] = {}
         self.frame_count = 0
 
@@ -252,18 +253,19 @@ class VoxelBackgroundModel:
         voxels = voxel_hash(pts, self.voxel_size)
         unique_voxels = set(map(tuple, voxels))
 
-        for v in unique_voxels:
-            self.occupancy[v] = self.occupancy.get(v, 0) + 1
-
-        self.frame_count += 1
+        # Only update model during learning phase
+        if self.frame_count < self.learning_frames:
+            for v in unique_voxels:
+                self.occupancy[v] = self.occupancy.get(v, 0) + 1
+            self.frame_count += 1
 
     def get_foreground(self, pts: "np.ndarray") -> "np.ndarray":
         """
         Return mask of foreground points (not in static background).
         """
-        if self.frame_count < 3:
-            # Not enough frames to build background, return all
-            return np.ones(len(pts), dtype=bool)
+        if self.frame_count < self.learning_frames:
+            # Still learning background, return nothing (mask everything out)
+            return np.zeros(len(pts), dtype=bool)
 
         voxels = voxel_hash(pts, self.voxel_size)
         mask = np.zeros(len(pts), dtype=bool)
@@ -385,6 +387,7 @@ DETECT_SPEC = NodeSpec(
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(name="point_cloud", type=t_pointcloud(), description="Input point cloud"),
         PortSpec(name="voxel_size", type=t_float(), default=0.1, description="Voxel size for background model (m)"),
+        PortSpec(name="learning_frames", type=t_int(), default=30, description="Frames to learn background"),
         PortSpec(name="cluster_eps", type=t_float(), default=0.3, description="DBSCAN epsilon (m)"),
         PortSpec(name="min_cluster_points", type=t_int(), default=30, description="Minimum points per cluster"),
         PortSpec(name="min_height", type=t_float(), default=0.8, description="Minimum person height (m)"),
@@ -497,6 +500,7 @@ class DetectPeopleNode(NodeBase):
 
         # Get parameters
         voxel_size = inputs.get("voxel_size", 0.1)
+        learning_frames = inputs.get("learning_frames", 30)
         cluster_eps = inputs.get("cluster_eps", 0.3)
         min_cluster_points = inputs.get("min_cluster_points", 30)
         min_height = inputs.get("min_height", 0.8)
@@ -508,8 +512,12 @@ class DetectPeopleNode(NodeBase):
         # Get or create background model
         model_key = self.id
         if reset_background or model_key not in _background_models:
-            _background_models[model_key] = VoxelBackgroundModel(voxel_size=voxel_size)
-        bg_model = _background_models[model_key]
+            _background_models[model_key] = VoxelBackgroundModel(voxel_size=voxel_size, learning_frames=learning_frames)
+        bg_model = _background_models[model_key] 
+        
+        # Update parameters if changed
+        if bg_model.learning_frames != learning_frames:
+            bg_model.learning_frames = learning_frames
 
         # Update background and get foreground
         bg_model.update(pts)

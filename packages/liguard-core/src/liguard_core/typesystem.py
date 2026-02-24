@@ -7,7 +7,7 @@ Provides TypeDescriptor and factory functions for creating type specifications.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
@@ -153,14 +153,20 @@ class TypeDescriptor:
                 return True
             return False
         if self.kind == "list":
-            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+            if not self.element_type or not target.element_type:
+                return True
+            return self.element_type.is_assignable_to(target.element_type)
         if self.kind == "map":
-            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+            if not self.element_type or not target.element_type:
+                return True
+            return self.element_type.is_assignable_to(target.element_type)
         if self.kind == "option":
-            return bool(self.element_type) and bool(target.element_type) and self.element_type.is_assignable_to(target.element_type)
+            if not self.element_type or not target.element_type:
+                return True
+            return self.element_type.is_assignable_to(target.element_type)
         if self.kind == "record":
-            if not self.fields or not target.fields:
-                return False
+            if self.fields is None or target.fields is None:
+                return True
             for key, val in target.fields.items():
                 if key not in self.fields:
                     return False
@@ -246,7 +252,7 @@ def types_compatible(source: TypeDescriptor, target: TypeDescriptor) -> bool:
         return key_ok and val_ok
 
     if source.kind == "record":
-        if source.fields and target.fields:
+        if source.fields is not None and target.fields is not None:
             for fname, ftype in target.fields.items():
                 if fname not in source.fields:
                     return False
@@ -323,7 +329,7 @@ def t_record(fields: Dict[str, TypeDescriptor]) -> TypeDescriptor:
     return TypeDescriptor(kind="record", fields=fields)
 
 
-def t_tensor(dtype: str = "float32", shape: Optional[list[int]] = None) -> TypeDescriptor:
+def t_tensor(dtype: str = "float32", shape: Optional[List[int]] = None) -> TypeDescriptor:
     return TypeDescriptor(kind="tensor", metadata={"dtype": dtype, "shape": shape or []})
 
 

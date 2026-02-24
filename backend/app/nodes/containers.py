@@ -30,6 +30,8 @@ class MakeArrayNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         items: List[Any] = []
         for port in sorted(inputs.keys(), key=lambda name: int(name.split("_")[1]) if "_" in name and name.split("_")[1].isdigit() else 0):
+            if port == "control_in":
+                continue
             items.append(inputs.get(port))
         ctx.log(f"{self.id} make array ({len(items)} items)")
         return {"control_out": None, "array": items}
@@ -61,7 +63,7 @@ class AppendArrayNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         array = inputs.get("array") or []
         if not isinstance(array, list):
-            array = list(array) if array is not None else []
+            array = [array] if array is not None else []
         value = inputs.get("value")
         result = list(array) + [value]
         ctx.log(f"{self.id} append -> {len(result)} items")
@@ -95,7 +97,7 @@ class GetIndexNode(NodeBase):
         array = inputs.get("array") or []
         index = int(inputs.get("index") or 0)
         if not isinstance(array, list):
-            array = list(array) if array is not None else []
+            array = [array] if array is not None else []
         value = array[index] if 0 <= index < len(array) else None
         ctx.log(f"{self.id} get index {index} -> {value}")
         return {"control_out": None, "value": value}

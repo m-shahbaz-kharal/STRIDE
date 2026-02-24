@@ -29,5 +29,31 @@ def coerce_add(a: Any, b: Any) -> Tuple[Any, str]:
     return num_a + num_b, "number"
 
 
+def coerce_float(value: Any, default: float = 0.0) -> float:
+    """Safely coerce a value to a float, returning default if it fails."""
+    num = _to_number(value)
+    return float(num) if num is not None else default
+
+
+def coerce_int(value: Any, default: int = 0) -> int:
+    """Safely coerce a value to an integer, returning default if it fails."""
+    num = _to_number(value)
+    return int(num) if num is not None else default
+
+
+def coerce_bool(value: Any, default: bool = False) -> bool:
+    """Safely coerce a value to a boolean, handling string "false" / "0" correctly."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        val_str = value.strip().lower()
+        if val_str in ("false", "0", "no", "f"):
+            return False
+        return True
+    return bool(value)
+
+
 def coerce_number(value: Any) -> Optional[float]:
     return _to_number(value)

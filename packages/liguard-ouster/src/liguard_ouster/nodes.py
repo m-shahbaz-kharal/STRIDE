@@ -193,8 +193,10 @@ class OusterOpenSourceNode(NodeBase):
         _require_ouster()
         _require_numpy()
 
-        pcap_path = str(inputs.get("pcap_path", ""))
-        metadata_path = str(inputs.get("metadata_path", ""))
+        pcap_path = inputs.get("pcap_path")
+        pcap_path = str(pcap_path) if pcap_path is not None else ""
+        metadata_path = inputs.get("metadata_path")
+        metadata_path = str(metadata_path) if metadata_path is not None else ""
         if not pcap_path:
             raise ValueError("pcap_path is required")
         if not metadata_path:
@@ -292,8 +294,8 @@ class OusterGetFrameNode(NodeBase):
             raise ValueError("source must come from an Open Ouster Source node")
 
         lazy: _LazyScans = source_bundle["_lazy"]
-        frame_index = int(inputs.get("frame_index", 0))
-        max_points = int(inputs.get("max_points", 200000))
+        frame_index = int(inputs.get("frame_index") if inputs.get("frame_index") is not None else 0)
+        max_points = int(inputs.get("max_points") if inputs.get("max_points") is not None else 200000)
 
         num_frames = source_bundle.get("num_frames", lazy.cached_count)
         if frame_index < 0 or frame_index >= num_frames:

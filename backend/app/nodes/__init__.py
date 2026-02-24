@@ -100,6 +100,8 @@ from . import math_ops  # noqa: E402,F401
 from . import programming  # noqa: E402,F401
 from . import utilities  # noqa: E402,F401
 from . import display  # noqa: E402,F401
+from . import array_nodes  # noqa: E402,F401
+from . import debug_nodes  # noqa: E402,F401
 from . import sv_core        # noqa: E402,F401
 from . import sv_annotators  # noqa: E402,F401
 from . import sv_tools       # noqa: E402,F401

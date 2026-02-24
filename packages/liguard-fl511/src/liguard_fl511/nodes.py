@@ -428,8 +428,8 @@ FL511_RESOLVE_SPEC = NodeSpec(
 @register_node(FL511_RESOLVE_SPEC)
 class Fl511ResolveNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
-        camera_id = inputs.get("camera", 2130)
-        camera_id = int(camera_id)
+        camera_id = inputs.get("camera")
+        camera_id = int(camera_id if camera_id is not None else 2130)
         ctx.log(f"Resolving FL511 stream for camera {camera_id}")
         hls_url = _resolve_fl511_hls_url(camera_id)
         width, height = _probe_stream_resolution(hls_url)
@@ -478,14 +478,16 @@ class Fl511StartNode(NodeBase):
         camera_id = inputs.get("camera")
         if camera_id is not None:
             camera_id = int(camera_id)
+        else:
+            camera_id = 2130
+            
         if not hls_url:
-            camera_id = int(inputs.get("camera", 2130))
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
 
-        target_fps = int(inputs.get("fps", 15))
-        buffer_seconds = int(inputs.get("buffer_seconds", 4))
-        refresh_minutes = int(inputs.get("refresh_minutes", 4))
+        target_fps = int(inputs.get("fps") if inputs.get("fps") is not None else 15)
+        buffer_seconds = int(inputs.get("buffer_seconds") if inputs.get("buffer_seconds") is not None else 4)
+        refresh_minutes = int(inputs.get("refresh_minutes") if inputs.get("refresh_minutes") is not None else 4)
 
         stream_id = str(uuid.uuid4())[:8]
         stream = StreamResource(
@@ -547,10 +549,10 @@ class Fl511TickNode(NodeBase):
         if not stream or not isinstance(stream, StreamResource):
             raise ValueError("Invalid or missing input: stream")
         
-        timeout = float(inputs.get("timeout", 1.0))
-        jpeg_quality = int(inputs.get("quality", 85))
-        require_frame = bool(inputs.get("require_frame", True))
-        pace = bool(inputs.get("pace", True))
+        timeout = float(inputs.get("timeout") if inputs.get("timeout") is not None else 1.0)
+        jpeg_quality = int(inputs.get("quality") if inputs.get("quality") is not None else 85)
+        require_frame = bool(inputs.get("require_frame") if inputs.get("require_frame") is not None else True)
+        pace = bool(inputs.get("pace") if inputs.get("pace") is not None else True)
 
         frame = stream.latest_frame(timeout=timeout, pace=pace)
         if frame is None:

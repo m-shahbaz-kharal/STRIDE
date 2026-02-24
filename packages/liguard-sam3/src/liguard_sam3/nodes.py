@@ -109,9 +109,11 @@ class SAM3ConnectNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         _require_requests()
         
-        server_url = inputs.get("server_url", "http://localhost:8765")
-        model_type = inputs.get("model_type", "image")
-        timeout = int(inputs.get("timeout", 30))
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
+        model_type = inputs.get("model_type")
+        model_type = model_type if model_type is not None else "image"
+        timeout = int(inputs.get("timeout") if inputs.get("timeout") is not None else 30)
         
         ctx.log(f"Connecting to SAM3 server at {server_url}")
         
@@ -173,7 +175,8 @@ SAM3_IS_ALIVE_SPEC = NodeSpec(
 class SAM3IsAliveNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             return {"control_out": None, "session_id": "", "alive": False}
@@ -226,7 +229,8 @@ class SAM3SetPromptNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
         prompt = inputs.get("prompt", "")
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -283,8 +287,9 @@ class SAM3AddImageNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
         image = inputs.get("image")
-        batch = int(inputs.get("batch", 1))
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        batch = int(inputs.get("batch") if inputs.get("batch") is not None else 1)
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -348,8 +353,9 @@ SAM3_GET_OUTPUT_SPEC = NodeSpec(
 class SAM3GetOutputNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        frame_idx = int(inputs.get("frame_idx", 0))
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        frame_idx = int(inputs.get("frame_idx") if inputs.get("frame_idx") is not None else 0)
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -405,9 +411,10 @@ SAM3_VISUALIZE_SPEC = NodeSpec(
 class SAM3VisualizeNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        frame_idx = int(inputs.get("frame_idx", 0))
-        alpha = float(inputs.get("alpha", 0.5))
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        frame_idx = int(inputs.get("frame_idx") if inputs.get("frame_idx") is not None else 0)
+        alpha = float(inputs.get("alpha") if inputs.get("alpha") is not None else 0.5)
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             raise ValueError("No session_id provided")
@@ -457,7 +464,8 @@ SAM3_DISCONNECT_SPEC = NodeSpec(
 class SAM3DisconnectNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         session_id = inputs.get("session_id", "")
-        server_url = inputs.get("server_url", "http://localhost:8765")
+        server_url = inputs.get("server_url")
+        server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
             return {"control_out": None, "disconnected": False}

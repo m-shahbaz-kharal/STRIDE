@@ -630,7 +630,7 @@ export const Scene3DWidget: React.FC<Props> = ({ data }) => {
             const cp = Math.cos(c.ph), sp = Math.sin(c.ph), ct = Math.cos(c.th), st = Math.sin(c.th);
             const eye = [c.tx + c.d * st * cp, c.ty + c.d * ct * cp, c.tz + c.d * sp * c.zUp];
             const view = m4Look(eye, [c.tx, c.ty, c.tz], [0, 0, c.zUp]);
-            const proj = m4Persp(Math.PI / 4, w / h, c.d * 0.001, c.d * 10);
+            const proj = m4Persp(Math.PI / 4, w / h, 0.001, c.d * 10);
             const mvp = m4Mul(proj, view);
 
             // Draw point cloud
