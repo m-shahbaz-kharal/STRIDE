@@ -1,7 +1,7 @@
 """
-Node registry and discovery for LiGuard-Web.
+Node registry and discovery for STRIDE.
 
-This module bridges the liguard_core plugin system with the backend,
+This module bridges the stride_core plugin system with the backend,
 providing backwards-compatible exports and loading installed plugins.
 """
 
@@ -10,16 +10,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Type
 
-# Re-export base classes from liguard_core
-from liguard_core import (
+# Re-export base classes from stride_core
+from stride_core import (
     NodeBase, 
     ExecutionContext,
     register_node,
     NODE_REGISTRY as _CORE_REGISTRY,
     list_node_definitions as _core_list_definitions,
 )
-from liguard_core.plugin import load_all_plugins, discover_plugins
-from liguard_core.node_spec import NodeSpec
+from stride_core.plugin import load_all_plugins, discover_plugins
+from stride_core.node_spec import NodeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class NodeRegistration:
 
 # Create a backwards-compatible view into the core registry
 class _NodeRegistryProxy:
-    """Proxy that provides dict-like access to the liguard_core registry."""
+    """Proxy that provides dict-like access to the stride_core registry."""
     
     def __getitem__(self, key: str) -> NodeRegistration:
         entry = _CORE_REGISTRY.get(key)
@@ -108,8 +108,8 @@ from . import sv_tools       # noqa: E402,F401
 from . import ul_yolo        # noqa: E402,F401
 
 # Note: fl511 and sam3 are now loaded as plugins, not built-in nodes
-# from . import fl511  # Moved to liguard-fl511 plugin
-# from . import sam3   # Moved to liguard-sam3 plugin
+# from . import fl511  # Moved to stride-fl511 plugin
+# from . import sam3   # Moved to stride-sam3 plugin
 
 # =============================================================================
 # Load plugins from entry points

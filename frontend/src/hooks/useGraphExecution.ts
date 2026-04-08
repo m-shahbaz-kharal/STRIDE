@@ -551,6 +551,16 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     // Note: isInterrupting will be cleared when we receive completion events
   }, [executionId, flushPendingUpdates]);
 
+  // Clear isInterrupting after timeout if backend doesn't respond
+  useEffect(() => {
+    if (!isInterrupting) return;
+    const timeout = window.setTimeout(() => {
+      setIsInterrupting(false);
+      setActiveRuns(0);
+    }, 15000);
+    return () => clearTimeout(timeout);
+  }, [isInterrupting]);
+
   return {
     isConnected,
     isRunning: activeRuns > 0,

@@ -8,7 +8,7 @@
 import { useCallback, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
 import { BlueprintNodeData, TypeDescriptor } from '../types';
-import { getDownstreamNodes, getDependentNodes } from '../domain';
+import { getDownstreamNodes, getDependentNodes, getUpstreamNodes } from '../domain';
 
 interface UseExecutionOrchestratorProps {
   nodes: Node<BlueprintNodeData>[];
@@ -217,13 +217,17 @@ export const useExecutionOrchestrator = ({
         }
       );
 
+      const uiResetNodes = mode === 'selection'
+        ? getUpstreamNodes(Array.from(runNodes), edges)
+        : runNodes;
+
       setNodes((existing) =>
         existing.map((node) => ({
           ...node,
           data: {
             ...node.data,
-            executionStatus: runNodes.has(node.id) ? undefined : node.data.executionStatus,
-            executionDuration: runNodes.has(node.id) ? undefined : node.data.executionDuration,
+            executionStatus: uiResetNodes.has(node.id) ? undefined : node.data.executionStatus,
+            executionDuration: uiResetNodes.has(node.id) ? undefined : node.data.executionDuration,
           },
         }))
       );

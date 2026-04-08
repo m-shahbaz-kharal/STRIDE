@@ -1,5 +1,5 @@
 """
-Plugin discovery for LiGuard-Web.
+Plugin discovery for STRIDE.
 
 Provides utilities to discover and load plugins via entry points.
 """
@@ -17,10 +17,10 @@ except ImportError:
     from importlib_metadata import entry_points
 
 
-logger = logging.getLogger("liguard_core.plugin")
+logger = logging.getLogger("stride_core.plugin")
 
-# Entry point group for LiGuard plugins
-PLUGIN_ENTRY_POINT = "liguard.plugins"
+# Entry point group for STRIDE plugins
+PLUGIN_ENTRY_POINT = "stride.plugins"
 
 
 @dataclass
@@ -36,9 +36,9 @@ class PluginInfo:
 
 
 def discover_plugins() -> List[PluginInfo]:
-    """Discover all installed LiGuard plugins.
+    """Discover all installed STRIDE plugins.
     
-    Scans for packages that declare the 'liguard.plugins' entry point.
+    Scans for packages that declare the 'stride.plugins' entry point.
     
     Returns:
         List of PluginInfo objects for discovered plugins.
@@ -50,18 +50,18 @@ def discover_plugins() -> List[PluginInfo]:
         eps = entry_points()
         if hasattr(eps, 'select'):
             # Python 3.10+
-            liguard_eps = eps.select(group=PLUGIN_ENTRY_POINT)
+            stride_eps = eps.select(group=PLUGIN_ENTRY_POINT)
         elif hasattr(eps, 'get'):
             # Older API
-            liguard_eps = eps.get(PLUGIN_ENTRY_POINT, [])
+            stride_eps = eps.get(PLUGIN_ENTRY_POINT, [])
         else:
             # Dict-like access (Python 3.9)
-            liguard_eps = eps.get(PLUGIN_ENTRY_POINT, [])
+            stride_eps = eps.get(PLUGIN_ENTRY_POINT, [])
     except Exception as e:
         logger.warning(f"Error discovering plugins: {e}")
         return plugins
     
-    for ep in liguard_eps:
+    for ep in stride_eps:
         plugin = PluginInfo(
             name=ep.name,
             module=ep.value if hasattr(ep, 'value') else str(ep),
@@ -87,11 +87,11 @@ def load_plugin(plugin: PluginInfo) -> bool:
     try:
         eps = entry_points()
         if hasattr(eps, 'select'):
-            liguard_eps = list(eps.select(group=PLUGIN_ENTRY_POINT))
+            stride_eps = list(eps.select(group=PLUGIN_ENTRY_POINT))
         else:
-            liguard_eps = eps.get(PLUGIN_ENTRY_POINT, [])
+            stride_eps = eps.get(PLUGIN_ENTRY_POINT, [])
         
-        for ep in liguard_eps:
+        for ep in stride_eps:
             if ep.name == plugin.name:
                 # Load the entry point
                 register_func = ep.load()

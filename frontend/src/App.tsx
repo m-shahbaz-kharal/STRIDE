@@ -829,7 +829,7 @@ const App = () => {
         const sourceNode = nodeByIdLocal.get(edge.source);
         const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
         const targetInRunningSet = runningNodeIds.has(edge.target);
-        const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
+        const shouldAnimate = isRunning && !isInterrupting && targetInRunningSet && !sourceHasCachedOutput;
 
         const sourceType = sourceNode?.data.nodeType ?? "";
         const isLoopNode = sourceType === "core.control.for" || sourceType === "core.control.while";
@@ -873,7 +873,7 @@ const App = () => {
         };
       })
     );
-  }, [isRunning, nodeStatuses, runningNodeIds, nodes, setEdges]);
+  }, [isRunning, isInterrupting, nodeStatuses, runningNodeIds, nodes, setEdges]);
 
   // Clear running node set when execution completes
   useEffect(() => {

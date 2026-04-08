@@ -34,9 +34,9 @@ try:
 except ImportError:
     SELENIUM_AVAILABLE = False
 
-from liguard_core import register_node, NodeBase, ExecutionContext
-from liguard_core.node_spec import NodeSpec, PortSpec
-from liguard_core.typesystem import t_boolean, t_control, t_float, t_int, t_string, t_stream
+from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.node_spec import NodeSpec, PortSpec
+from stride_core.typesystem import t_boolean, t_control, t_float, t_int, t_string, t_stream
 
 
 def _require_numpy() -> None:

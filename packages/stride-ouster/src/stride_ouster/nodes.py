@@ -19,9 +19,9 @@ try:
 except ImportError:
     OUSTER_AVAILABLE = False
 
-from liguard_core import register_node, NodeBase, ExecutionContext
-from liguard_core.node_spec import NodeSpec, PortSpec
-from liguard_core.typesystem import t_any, t_control, t_float, t_int, t_pointcloud, t_string
+from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.node_spec import NodeSpec, PortSpec
+from stride_core.typesystem import t_any, t_control, t_float, t_int, t_pointcloud, t_string
 
 
 def _require_ouster() -> None:

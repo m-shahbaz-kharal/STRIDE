@@ -1,11 +1,11 @@
 """
-LiGuard-Web Backend Node Specification.
+STRIDE Backend Node Specification.
 
-This module re-exports the node specification classes from liguard-core for backwards compatibility.
-All spec definitions are now consolidated in liguard-core.
+This module re-exports the node specification classes from stride-core for backwards compatibility.
+All spec definitions are now consolidated in stride-core.
 """
 
-from liguard_core.node_spec import (
+from stride_core.node_spec import (
     NodeSpec,
     PortSpec,
 )

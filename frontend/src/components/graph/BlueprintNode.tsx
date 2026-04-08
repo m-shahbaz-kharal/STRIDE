@@ -148,7 +148,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   }, [id, allEdges, nodeInternals]);
 
   const executionStatusClass = getExecutionStatusClass(data.executionStatus);
-  const statusClass = executionStatusClass || (data.last_outputs ? "node-executed" : "");
+  const statusClass = executionStatusClass ||
+    (data.last_outputs && data.executionStatus !== "skipped" ? "node-executed" : "");
   const highlightClass = data.isHighlighted ? "node-highlighted" : "";
 
   const handleResizeStart = useCallback((corner: Corner, e: React.MouseEvent) => {

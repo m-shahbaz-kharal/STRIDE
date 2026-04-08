@@ -25,9 +25,9 @@ except ImportError:
     HAS_DEPS = False
     np = None
 
-from liguard_core import register_node, NodeBase, ExecutionContext
-from liguard_core.node_spec import NodeSpec, PortSpec
-from liguard_core.typesystem import (
+from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.node_spec import NodeSpec, PortSpec
+from stride_core.typesystem import (
     t_pointcloud, t_float, t_int, t_string, t_boolean, t_list, t_any, t_record, t_control
 )
 

@@ -1,8 +1,8 @@
 """
-liguard-core: Core interfaces for LiGuard-Web node plugins.
+stride-core: Core interfaces for STRIDE node plugins.
 
 This package provides the base classes and utilities needed to create
-LiGuard-Web node plugins.
+STRIDE node plugins.
 """
 
 from .node_base import NodeBase, ExecutionContext

@@ -1,5 +1,5 @@
 """
-Node registry for LiGuard-Web.
+Node registry for STRIDE.
 
 Provides the register_node decorator and registry utilities.
 """

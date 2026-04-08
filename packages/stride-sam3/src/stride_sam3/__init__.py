@@ -1,5 +1,5 @@
 """
-liguard-sam3: SAM3 integration plugin for LiGuard-Web.
+stride-sam3: SAM3 integration plugin for STRIDE.
 """
 
 from .nodes import (
@@ -21,7 +21,7 @@ PLUGIN_INFO = {
     "category": "AI",
     "description": "Segment Anything Model 3 integration - Unified nodes",
     "api_version": "2.0",
-    "author": "LiGuard-Web Team",
+    "author": "STRIDE Team",
 }
 
 

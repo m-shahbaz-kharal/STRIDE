@@ -1,11 +1,11 @@
 """
-LiGuard-Web Backend Node Base Classes.
+STRIDE Backend Node Base Classes.
 
-This module re-exports the base classes from liguard-core for backwards compatibility.
-All base class definitions are now consolidated in liguard-core.
+This module re-exports the base classes from stride-core for backwards compatibility.
+All base class definitions are now consolidated in stride-core.
 """
 
-from liguard_core import (
+from stride_core import (
     NodeBase,
     ExecutionContext,
 )

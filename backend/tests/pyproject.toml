@@ -1,6 +1,6 @@
 [project]
-name = "liguard-backend-tests"
-description = "Backend test suite for LiGuard-Web"
+name = "stride-backend-tests"
+description = "Backend test suite for STRIDE"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

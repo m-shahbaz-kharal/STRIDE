@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "liguard-fl511"
+name = "stride-ouster"
 version = "1.0.0"
-description = "FL511 Camera integration for LiGuard-Web"
+description = "Ouster LiDAR integration for STRIDE"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "LiGuard-Web Team" }
+    { name = "STRIDE Team" }
 ]
-keywords = ["liguard", "fl511", "camera", "streaming"]
+keywords = ["stride", "ouster", "lidar", "pointcloud"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -21,17 +21,16 @@ classifiers = [
 ]
 
 dependencies = [
-    "liguard-core>=1.0.0,<2.0.0",
+    "stride-core>=1.0.0,<2.0.0",
+    "ouster-sdk>=0.13.0",
     "numpy>=1.26",
-    "opencv-python>=4.8.0",
-    "selenium>=4.10.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov"]
 
-[project.entry-points."liguard.plugins"]
-fl511 = "liguard_fl511:register"
+[project.entry-points."stride.plugins"]
+ouster = "stride_ouster:register"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/liguard_fl511"]
+packages = ["src/stride_ouster"]

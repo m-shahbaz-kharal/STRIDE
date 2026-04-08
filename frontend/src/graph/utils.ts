@@ -48,6 +48,8 @@ export const getExecutionStatusClass = (status?: NodeExecutionStatus): string =>
       return "node-executed";
     case "error":
       return "node-error";
+    case "skipped":
+      return "node-skipped";
     default:
       return "";
   }

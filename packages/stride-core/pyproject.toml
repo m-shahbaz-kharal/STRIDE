@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "liguard-core"
+name = "stride-core"
 version = "1.0.0"
-description = "Core interfaces for LiGuard-Web node plugins"
+description = "Core interfaces for STRIDE node plugins"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "LiGuard-Web Team" }
+    { name = "STRIDE Team" }
 ]
-keywords = ["liguard", "nodes", "pipeline", "plugins"]
+keywords = ["stride", "nodes", "pipeline", "plugins"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -27,4 +27,4 @@ classifiers = [
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/liguard_core"]
+packages = ["src/stride_core"]

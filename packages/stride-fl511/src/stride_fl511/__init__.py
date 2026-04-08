@@ -1,5 +1,5 @@
 """
-liguard-fl511: FL511 Camera integration plugin for LiGuard-Web.
+stride-fl511: FL511 Camera integration plugin for STRIDE.
 """
 
 from .nodes import (
@@ -19,7 +19,7 @@ PLUGIN_INFO = {
     "category": "FL511 Camera",
     "description": "FL511 traffic camera streaming integration",
     "api_version": "1.0",
-    "author": "LiGuard-Web Team",
+    "author": "STRIDE Team",
 }
 
 

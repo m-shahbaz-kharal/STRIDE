@@ -36,7 +36,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     <div className="auth-screen">
       <div className="auth-container">
         <img src="/logo.png" alt="Urban Sentinel" className="auth-logo" />
-        <h2 className="auth-app-title">LiGuard DT</h2>
+        <h2 className="auth-app-title">STRIDE</h2>
         <div className="auth-panel">
           <div className="auth-header">
             <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>

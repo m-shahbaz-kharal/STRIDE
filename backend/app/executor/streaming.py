@@ -283,7 +283,13 @@ class StreamingExecutor:
         ))
 
         remaining_inputs: Dict[str, int] = {
-            node_id: len(self.input_map.get(node_id, {})) + len(self.control_inputs.get(node_id, []))
+            node_id: sum(
+                1 for link in self.input_map.get(node_id, {}).values()
+                if link.from_node in execution_set
+            ) + sum(
+                1 for parent, _ in self.control_inputs.get(node_id, [])
+                if parent in execution_set
+            )
             for node_id in execution_set
         }
         ready: deque[str] = deque([nid for nid, deg in remaining_inputs.items() if deg == 0])
@@ -390,6 +396,7 @@ class StreamingExecutor:
                                 node_id=skipped.node_id,
                                 node_type=skipped.node_type,
                                 status=NodeStatus.SKIPPED,
+                                logs=skipped.logs,
                                 level=skipped.level,
                                 progress=completed / total if total > 0 else 0,
                                 total_nodes=total,
@@ -559,6 +566,7 @@ class StreamingExecutor:
                         ))
 
                         if self.loop_handler.is_loop_node(node_id):
+                            self.node_status[node_id] = NodeStatus.RUNNING
                             loop_task = asyncio.create_task(_run_loop_task(node_id))
                             tasks[loop_task] = (node_id, None, "loop")
                             self.cancellation.register_running(node_id, loop_task)
@@ -730,7 +738,10 @@ class StreamingExecutor:
                                     from_cache=False,
                                 ))
                         status = self.node_status.get(node_id, NodeStatus.SKIPPED)
-                        if status != NodeStatus.COMPLETED:
+                        if status == NodeStatus.COMPLETED:
+                            _enqueue_dependents(node_id)
+                            _enqueue_loop_body_dependents(node_id)
+                        else:
                             status_to_use = NodeStatus.ERROR if status == NodeStatus.ERROR else NodeStatus.SKIPPED
                             reason = (
                                 f"Dependency '{node_id}' failed"
@@ -738,8 +749,6 @@ class StreamingExecutor:
                                 else f"Dependency '{node_id}' was interrupted"
                             )
                             await _propagate_failure(node_id, reason, status=status_to_use)
-                        _enqueue_dependents(node_id)
-                        _enqueue_loop_body_dependents(node_id)
                         continue
 
                     try:
@@ -787,7 +796,9 @@ class StreamingExecutor:
                             from_cache=result.from_cache,
                         ))
 
-                    if result.status != NodeStatus.COMPLETED:
+                    if result.status == NodeStatus.COMPLETED:
+                        _enqueue_dependents(node_id)
+                    else:
                         status = NodeStatus.ERROR if result.status == NodeStatus.ERROR else NodeStatus.SKIPPED
                         reason = (
                             f"Dependency '{result.node_id}' failed"
@@ -795,8 +806,6 @@ class StreamingExecutor:
                             else f"Dependency '{result.node_id}' was interrupted"
                         )
                         await _propagate_failure(result.node_id, reason, status=status)
-
-                    _enqueue_dependents(node_id)
 
                 await asyncio.sleep(0)
 

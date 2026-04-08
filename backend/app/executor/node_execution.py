@@ -168,6 +168,10 @@ class NodeExecutor:
             spec = port_specs.get(port)
             if spec and spec.default is not None:
                 inputs[port] = spec.default
+                continue
+
+            # 4. Explicit None for unconnected/defaultless ports
+            inputs[port] = None
 
         return inputs
 
@@ -231,10 +235,14 @@ class NodeExecutor:
 
             outputs = node.forward(inputs, ctx)
 
-            if set(outputs.keys()) != set(node.output_ports):
+            expected = set(node.output_ports)
+            actual = set(outputs.keys())
+            if not expected.issubset(actual):
                 raise GraphExecutionError(
-                    f"Node '{node_id}' output ports {node.output_ports} do not match produced {list(outputs.keys())}"
+                    f"Node '{node_id}' missing output ports: {expected - actual}"
                 )
+            # Trim to declared ports only
+            outputs = {k: outputs[k] for k in expected}
 
             end_time = time.perf_counter()
             duration_ms = (end_time - start_time) * 1000

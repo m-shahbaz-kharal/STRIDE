@@ -15,6 +15,7 @@ interface UseNodeExecutionSyncOptions {
     duration_ms?: number;
   }>;
   isRunning: boolean;
+  isInterrupting: boolean;
   runningNodeIds: Set<string>;
   setRunningNodeIds: (ids: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   highlightedNodeIds: string[];
@@ -32,6 +33,7 @@ export const useNodeExecutionSync = ({
   nodeStatuses,
   trace,
   isRunning,
+  isInterrupting,
   runningNodeIds,
   setRunningNodeIds,
   highlightedNodeIds,
@@ -99,7 +101,7 @@ export const useNodeExecutionSync = ({
         const sourceNode = nodeByIdLocal.get(edge.source);
         const sourceHasCachedOutput = Boolean(sourceNode?.data.last_outputs);
         const targetInRunningSet = runningNodeIds.has(edge.target);
-        const shouldAnimate = isRunning && targetInRunningSet && !sourceHasCachedOutput;
+        const shouldAnimate = isRunning && !isInterrupting && targetInRunningSet && !sourceHasCachedOutput;
 
         const sourceType = sourceNode?.data.nodeType ?? "";
         const isLoopNode = sourceType === "core.control.for" || sourceType === "core.control.while";
@@ -143,7 +145,7 @@ export const useNodeExecutionSync = ({
         };
       })
     );
-  }, [isRunning, nodeStatuses, runningNodeIds, nodes, setEdges]);
+  }, [isRunning, isInterrupting, nodeStatuses, runningNodeIds, nodes, setEdges]);
 
   // Clear running node set when execution completes
   useEffect(() => {

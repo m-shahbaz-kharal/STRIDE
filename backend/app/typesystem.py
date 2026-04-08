@@ -1,11 +1,11 @@
 """
-LiGuard-Web Backend Type System.
+STRIDE Backend Type System.
 
-This module re-exports the type system from liguard-core for backwards compatibility.
-All type definitions and utilities are now consolidated in liguard-core.
+This module re-exports the type system from stride-core for backwards compatibility.
+All type definitions and utilities are now consolidated in stride-core.
 """
 
-from liguard_core.typesystem import (
+from stride_core.typesystem import (
     # Type descriptor class
     TypeDescriptor,
     # Type compatibility check

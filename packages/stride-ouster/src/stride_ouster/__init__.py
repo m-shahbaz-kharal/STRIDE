@@ -1,5 +1,5 @@
 """
-liguard-ouster: Ouster LiDAR integration plugin for LiGuard-Web.
+stride-ouster: Ouster LiDAR integration plugin for STRIDE.
 """
 
 from .nodes import (
@@ -15,7 +15,7 @@ PLUGIN_INFO = {
     "category": "Ouster LiDAR",
     "description": "Ouster LiDAR data loading and point cloud extraction",
     "api_version": "1.0",
-    "author": "LiGuard-Web Team",
+    "author": "STRIDE Team",
 }
 
 

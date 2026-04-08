@@ -39,7 +39,7 @@ export interface GraphData {
   dashboard?: DashboardLayout;
 }
 
-const SESSION_KEY = "liguard_session";
+const SESSION_KEY = "stride_session";
 
 export const readSession = (): AuthSession | null => {
   const raw = localStorage.getItem(SESSION_KEY);

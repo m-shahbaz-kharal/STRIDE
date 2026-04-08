@@ -1,4 +1,4 @@
-# LiGuard-Web
+# STRIDE
 
 A visual node-graph runtime for creating data processing pipelines, inspired by
 Unreal Blueprints and ComfyUI. Features a React-based canvas editor, FastAPI backend,
@@ -10,7 +10,7 @@ and modular execution engine.
 - **Streaming Execution**: WebSocket-based streaming for live progress updates during graph runs
 - **Parallel Branch Execution**: Independent branches execute concurrently with proper error isolation
 - **Caching System**: Node-level caching with intelligent cache invalidation
-- **Extensible Node System**: Plugin-based node registration from `liguard-core` package
+- **Extensible Node System**: Plugin-based node registration from `stride-core` package
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ The frontend proxies API calls to `http://127.0.0.1:8000` automatically.
 ## Project Structure
 
 ```
-LiGuard-Web/
+STRIDE/
 ├── backend/
 │   ├── app/
 │   │   ├── engine/              # Graph analysis utilities
@@ -66,7 +66,7 @@ LiGuard-Web/
 │   │   └── App.tsx              # Main application
 │   └── public/
 └── packages/
-    └── liguard-core/            # Shared node definitions package
+    └── stride-core/            # Shared node definitions package
 ```
 
 

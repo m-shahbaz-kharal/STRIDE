@@ -1,5 +1,5 @@
 /**
- * Domain layer for LiGuard-Web frontend.
+ * Domain layer for STRIDE frontend.
  *
  * This module contains pure domain logic that is independent of React/UI concerns:
  * - Type descriptors and compatibility rules

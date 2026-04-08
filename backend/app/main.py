@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
-from liguard_fl511.nodes import get_active_stream
+from stride_fl511.nodes import get_active_stream
 from .db import init_db
 from .routers import auth as auth_router
 from .routers import graphs as graphs_router
@@ -32,7 +32,7 @@ def _json_serializer(obj: Any) -> Any:
     return str(obj)
 
 
-app = FastAPI(title="LiGuard DT Graph Runtime")
+app = FastAPI(title="STRIDE Graph Runtime")
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

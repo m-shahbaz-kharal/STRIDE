@@ -24,7 +24,7 @@ def normalize_type(raw_type: Any) -> Optional[TypeDescriptor]:
     Handles:
     - TypeDescriptor instances (returned as-is)
     - Dict payloads (parsed via from_dict)
-    - Objects with 'kind' attribute (liguard_core TypeDescriptor)
+    - Objects with 'kind' attribute (stride_core TypeDescriptor)
     - String type names (wrapped in TypeDescriptor)
     """
     if raw_type is None:
@@ -33,7 +33,7 @@ def normalize_type(raw_type: Any) -> Optional[TypeDescriptor]:
         return raw_type
     if isinstance(raw_type, dict):
         return TypeDescriptor.from_dict(raw_type)
-    # Handle liguard_core TypeDescriptor objects
+    # Handle stride_core TypeDescriptor objects
     kind = getattr(raw_type, "kind", None)
     if kind:
         # Already a compatible TypeDescriptor-like object

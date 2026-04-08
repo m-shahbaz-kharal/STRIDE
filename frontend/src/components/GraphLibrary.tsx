@@ -79,7 +79,7 @@ const GraphLibrary: React.FC<GraphLibraryProps> = ({
     <section className="graph-home">
       <div className="graph-home-header">
         <div>
-          <p className="graph-home-eyebrow">LiGuard DT</p>
+          <p className="graph-home-eyebrow">STRIDE</p>
           <h2>Graphs</h2>
           <p className="graph-home-subtitle">Create, edit, and manage your saved node graphs.</p>
         </div>

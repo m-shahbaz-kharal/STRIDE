@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "liguard-ouster"
+name = "stride-sam3"
 version = "1.0.0"
-description = "Ouster LiDAR integration for LiGuard-Web"
+description = "SAM3 (Segment Anything Model 3) integration for STRIDE"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "LiGuard-Web Team" }
+    { name = "STRIDE Team" }
 ]
-keywords = ["liguard", "ouster", "lidar", "pointcloud"]
+keywords = ["stride", "sam3", "segmentation", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -21,16 +21,23 @@ classifiers = [
 ]
 
 dependencies = [
-    "liguard-core>=1.0.0,<2.0.0",
-    "ouster-sdk>=0.13.0",
-    "numpy>=1.26",
+    "stride-core>=1.0.0,<2.0.0",
+    "requests>=2.25.0",
 ]
 
 [project.optional-dependencies]
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "numpy>=1.26",
+    "pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+]
 dev = ["pytest>=7.0", "pytest-cov"]
 
-[project.entry-points."liguard.plugins"]
-ouster = "liguard_ouster:register"
+[project.entry-points."stride.plugins"]
+sam3 = "stride_sam3:register"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/liguard_ouster"]
+packages = ["src/stride_sam3"]
