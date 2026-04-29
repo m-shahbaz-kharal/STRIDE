@@ -4144,6 +4144,150 @@ body {
   opacity: 1;
 }
 
+/* Phase 3 §7.4 — Inline node-error badge.
+   Sits in the node header next to the title. The chip is colour-coded
+   by NodeError category; click expands a popover with details and an
+   optional traceback (for INTERNAL_ERROR). */
+.node-error-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.node-error-badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--accent-red, #ef4444);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.node-error-badge.tone-input .node-error-badge-chip { color: #fb7185; background: rgba(251, 113, 133, 0.12); }
+.node-error-badge.tone-missing-dep .node-error-badge-chip { color: #f59e0b; background: rgba(245, 158, 11, 0.14); }
+.node-error-badge.tone-runtime .node-error-badge-chip { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.node-error-badge.tone-cancelled .node-error-badge-chip { color: #94a3b8; background: rgba(148, 163, 184, 0.16); }
+.node-error-badge.tone-internal .node-error-badge-chip { color: #c084fc; background: rgba(192, 132, 252, 0.14); }
+.node-error-badge.tone-neutral .node-error-badge-chip { color: var(--text-muted, #9ca3af); background: rgba(156, 163, 175, 0.12); }
+
+.node-error-badge-code {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.node-error-badge-summary {
+  font-weight: 500;
+  opacity: 0.85;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 140px;
+}
+
+.node-error-badge-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 320px;
+  max-width: 50vw;
+  background: var(--bg-elevated, #1e293b);
+  border: 1px solid var(--accent-red, #ef4444);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-primary, white);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 60;
+  line-height: 1.45;
+}
+
+.node-error-badge-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  color: var(--accent-red, #ef4444);
+}
+
+.node-error-badge-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.node-error-badge-dismiss:hover { color: var(--text-primary, white); }
+
+.node-error-badge-message {
+  color: var(--text-primary, white);
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.node-error-badge-port {
+  font-size: 11px;
+  color: var(--text-secondary, #cbd5e1);
+  margin-bottom: 6px;
+}
+
+.node-error-badge-port code {
+  background: rgba(251, 113, 133, 0.18);
+  border: 1px solid rgba(251, 113, 133, 0.3);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.node-error-badge-details summary,
+.node-error-badge-traceback summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-secondary, #cbd5e1);
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.node-error-badge-details pre,
+.node-error-badge-traceback pre {
+  font-size: 10.5px;
+  color: var(--text-secondary, #cbd5e1);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 6px 8px;
+  border-radius: 4px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 4px 0 0 0;
+}
+
+/* Phase 3 §7.4 — red outline on the offending input port. */
+.node-port.port-error .node-handle {
+  box-shadow: 0 0 0 2px var(--accent-red, #ef4444),
+              0 0 10px rgba(239, 68, 68, 0.5) !important;
+  background: var(--accent-red, #ef4444) !important;
+}
+
+.node-port.port-error .node-port-name,
+.node-port.port-error .port-type-text {
+  color: var(--accent-red, #ef4444);
+}
+
 /* Phase 3 §7.1 — Drag-from-port classification highlighting.
    Applied to .node-port and its inner .node-handle while the user is
    dragging a connection. The class encodes how the port relates to the

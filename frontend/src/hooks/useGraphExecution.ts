@@ -240,7 +240,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
                 outputs: {},
                 logs: data.logs ?? (data.error ? [`ERROR: ${data.error}`] : []),
                 error: data.error,
+                error_code: data.error_code,
                 error_details: data.error_details,
+                // Phase 2 §6.3 — structured payload propagated from the
+                // backend; Phase 3 §7.4 renders an inline badge from it.
+                error_payload: data.error_payload,
                 duration_ms: data.duration_ms,
                 level: data.level,
               },

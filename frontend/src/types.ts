@@ -241,6 +241,9 @@ export interface BlueprintNodeData {
   onRunSelection?: (nodeId: string) => void;
   onClearCache?: (nodeId: string) => void;
   onInterrupt?: (nodeId: string) => void;
+  // Phase 3 §7.4 — clears the inline error badge on this node.
+  // The badge re-appears on the next run if a fresh error fires.
+  onDismissError?: (nodeId: string) => void;
 
   onPortHover?: (info: { nodeId: string; port: string; direction: "input" | "output" } | null) => void;
   onInputValueChange?: (nodeId: string, port: string, value: string | number | boolean | null) => void;
@@ -251,6 +254,12 @@ export interface BlueprintNodeData {
   executionProgress?: number;
   executionDuration?: number;
   executionLogs?: string[];
+  // Phase 3 §7.4 — structured node-error payload (Phase 2 §6.3).
+  // The inline error badge consumes this and falls back to `executionLogs`
+  // when the backend hasn't emitted a structured NodeError.
+  errorPayload?: NodeErrorPayload;
+  // User-dismissed flag so the badge clears without a fresh run.
+  errorDismissed?: boolean;
   // Highlight state (for hover interactions from timeline/performance panels)
   isHighlighted?: boolean;
   // Hybrid execution model

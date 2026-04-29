@@ -428,6 +428,17 @@ const App = () => {
       }
     },
     onTogglePublish: handleTogglePublish,
+    // Phase 3 §7.4 — clear the inline error badge for this node. The
+    // badge re-appears if the next run produces a fresh node_error.
+    onDismissError: (nodeId: string) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, data: { ...n.data, errorDismissed: true } }
+            : n
+        )
+      );
+    },
     // PERF: Removed executionId and nodeMap from deps - accessed via refs now
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
@@ -788,13 +799,25 @@ const App = () => {
         const newOutputs = traceEntry?.outputs ?? node.data.last_outputs;
         const newLogs = traceEntry?.logs ?? node.data.executionLogs;
         const newDuration = traceEntry?.duration_ms;
+        // Phase 3 §7.4 — surface structured error payload to the node.
+        // Clear it when the node enters a non-error state (e.g. queued
+        // for a fresh run); preserve user-dismissal otherwise.
+        const newErrorPayload = traceEntry?.error_payload;
+        const isError = status === "error";
+        const isPreErrorTransition = status === "queued" || status === "running";
+        const errorPayload = isPreErrorTransition
+          ? undefined
+          : (isError ? newErrorPayload : node.data.errorPayload);
+        const errorDismissed = isPreErrorTransition ? false : node.data.errorDismissed;
 
         // PERF: Early bailout - skip if nothing actually changed for this node
         if (
           node.data.executionStatus === status &&
           node.data.executionDuration === newDuration &&
           node.data.last_outputs === newOutputs &&
-          node.data.executionLogs === newLogs
+          node.data.executionLogs === newLogs &&
+          node.data.errorPayload === errorPayload &&
+          node.data.errorDismissed === errorDismissed
         ) {
           return node;
         }
@@ -807,6 +830,8 @@ const App = () => {
             executionDuration: newDuration,
             last_outputs: newOutputs,
             executionLogs: newLogs,
+            errorPayload,
+            errorDismissed,
           },
         };
       })

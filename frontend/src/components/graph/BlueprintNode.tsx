@@ -3,6 +3,7 @@ import { Handle, NodeProps, Position, useReactFlow, useStore, useUpdateNodeInter
 
 import { usePopups } from "../../context/PopupContext";
 import { useConnectionDrag } from "../../context/ConnectionDragContext";
+import NodeErrorBadge from "../editor/NodeErrorBadge";
 import {
   BlueprintNodeData,
   NodeExecutionStatus,
@@ -433,6 +434,15 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
           <div className="node-name-tooltip" data-tooltip={data.nodeType}>
             <strong>{data.displayName}</strong>
           </div>
+          {/* Phase 3 §7.4 — inline error badge consuming Phase 2's
+              error_payload. Hidden once user dismisses; reappears on
+              the next run if the error fires again. */}
+          {data.errorPayload && !data.errorDismissed && (
+            <NodeErrorBadge
+              payload={data.errorPayload}
+              onDismiss={() => data.onDismissError?.(id)}
+            />
+          )}
         </div>
         <div className="node-header-right">
           {renderStatusChip(data.executionStatus)}
@@ -575,6 +585,12 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const { compatibility: dragCompat, tooltip: dragTooltip } =
               portConnectionState(port, "input", formatPortTypeLabel(portType));
             const compatClass = dragCompat === "neutral" ? "" : `port-compat-${dragCompat}`;
+            // Phase 3 §7.4 — outline the offending input port in red
+            // when the structured error_payload pinpoints this port.
+            const isErrorPort =
+              data.errorPayload?.port === port && !data.errorDismissed;
+            const errorPortClass = isErrorPort ? "port-error" : "";
+            const errorPortTooltip = isErrorPort ? data.errorPayload?.message : undefined;
             const inputValue = data.inputValues?.[port];
             const defaultValue = getInputDefault(port);
             const hasInputValue = Object.prototype.hasOwnProperty.call(data.inputValues ?? {}, port);
@@ -590,8 +606,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             return (
               <div
                 key={`in-${port}-${index}`}
-                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${isPublished ? "port-published-blocked" : ""} ${compatClass}`}
-                title={dragTooltip}
+                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${isPublished ? "port-published-blocked" : ""} ${compatClass} ${errorPortClass}`}
+                title={errorPortTooltip || dragTooltip}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
@@ -600,7 +616,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   position={Position.Left}
                   id={port}
                   isConnectable={!isPublished}
-                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${isPublished ? "handle-blocked" : ""} ${compatClass}`}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${isPublished ? "handle-blocked" : ""} ${compatClass} ${errorPortClass}`}
                   style={handleStyle}
                 >
                   {isControl && (
@@ -823,6 +839,8 @@ export default React.memo(BlueprintNode, (prevProps, nextProps) => {
   if (prevProps.data.last_outputs !== nextProps.data.last_outputs) return false;
   if (prevProps.data.highlightedPort !== nextProps.data.highlightedPort) return false;
   if (prevProps.data.cacheEnabled !== nextProps.data.cacheEnabled) return false;
+  if (prevProps.data.errorPayload !== nextProps.data.errorPayload) return false;
+  if (prevProps.data.errorDismissed !== nextProps.data.errorDismissed) return false;
 
   // Check for structural changes that affect handles
   if (prevProps.data.showControlPorts !== nextProps.data.showControlPorts) return false;
