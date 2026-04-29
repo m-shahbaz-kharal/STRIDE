@@ -11,6 +11,8 @@ interface UseKeyboardShortcutsOptions {
     onRunGraph?: () => void;
     onRunSelection?: () => void;
     onInterruptAll?: () => void;
+    // Phase 3 §7.2 — Ctrl+K / Cmd+K opens the NodeSearchPalette.
+    onOpenSearch?: () => void;
     canDuplicate?: boolean;
     canCopy?: boolean;
     canRunGraph?: boolean;
@@ -30,6 +32,7 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
         onRunGraph,
         onRunSelection,
         onInterruptAll,
+        onOpenSearch,
         canDuplicate = true,
         canCopy = true,
         canRunGraph = true,
@@ -39,13 +42,22 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            // Don't trigger shortcuts when typing in inputs or contenteditable elements
             const target = event.target as HTMLElement;
-            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
+            const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+
+            // Phase 3 §7.2 — Ctrl+K / Cmd+K *always* opens the search
+            // palette, even from inside a text input. Mirrors how
+            // VSCode / Linear / Notion handle their command palettes.
+            if (isCtrlOrCmd && event.key.toLowerCase() === "k") {
+                event.preventDefault();
+                onOpenSearch?.();
                 return;
             }
 
-            const isCtrlOrCmd = event.ctrlKey || event.metaKey;
+            // Don't trigger other shortcuts when typing.
+            if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
+                return;
+            }
 
             // Delete selected nodes and edges
             if (event.key === "Delete" || event.key === "Backspace") {
@@ -136,6 +148,7 @@ export const useKeyboardShortcuts = (options: UseKeyboardShortcutsOptions) => {
         onRunGraph,
         onRunSelection,
         onInterruptAll,
+        onOpenSearch,
         canDuplicate,
         canCopy,
         canRunGraph,

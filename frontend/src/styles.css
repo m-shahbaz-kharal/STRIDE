@@ -4622,6 +4622,20 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+/* Phase 3 §7.2 — NodeSearchPalette: small "matched field" badge so
+   the user knows when a hit came from a tag or the node-type id. */
+.match-field-badge {
+  font-size: 8.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(125, 211, 252, 0.16);
+  color: rgba(125, 211, 252, 0.9);
+  border: 1px solid rgba(125, 211, 252, 0.28);
+}
+
 .node-desc {
   font-size: 11px;
   color: var(--text-muted);

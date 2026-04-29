@@ -24,7 +24,7 @@ import LogPanel from "./components/LogPanel";
 import NodeInspector from "./components/NodeInspector";
 import NodePalette from "./components/NodePalette";
 import DashboardView from "./components/dashboard/DashboardView";
-import SmartConnectModal from "./components/SmartConnectModal";
+import NodeSearchPalette from "./components/editor/NodeSearchPalette";
 import AppHeader from "./components/layout/AppHeader";
 import ConnectionToast from "./components/ConnectionToast";
 import SmartConnectLine from "./components/SmartConnectLine";
@@ -1463,6 +1463,23 @@ const App = () => {
 
   // ========== Keyboard shortcuts ==========
 
+  // Phase 3 §7.2 — open the NodeSearchPalette without a source so it
+  // acts as a Ctrl+K command palette. Anchor at viewport centre.
+  const handleOpenSearch = useCallback(() => {
+    if (headerTab !== "graph-editor" || jsonViewEnabled) return;
+    const screenPosition = {
+      x: Math.floor(window.innerWidth / 2 - 170),
+      y: Math.floor(window.innerHeight / 3),
+    };
+    const flowPosition = reactFlowInstance
+      ? reactFlowInstance.screenToFlowPosition({
+        x: screenPosition.x + 170,
+        y: screenPosition.y + 60,
+      })
+      : { x: 0, y: 0 };
+    openSmartConnect(screenPosition, flowPosition, null as any, undefined);
+  }, [headerTab, jsonViewEnabled, openSmartConnect, reactFlowInstance]);
+
   useKeyboardShortcuts({
     onDelete: handleDeleteSelected,
     onSelectAll: handleSelectAll,
@@ -1474,6 +1491,7 @@ const App = () => {
     onRunGraph: () => handleRunGraph("full"),
     onRunSelection: () => handleRunGraph("selection"),
     onInterruptAll: handleInterruptAll,
+    onOpenSearch: handleOpenSearch,
     canDuplicate: selectedNodeIds.length > 0,
     canCopy: selectedNodeIds.length > 0,
     canRunGraph: nodes.length > 0 && !isRunning && !jsonViewEnabled,
@@ -1670,11 +1688,19 @@ const App = () => {
 
   const handleSmartConnectSelect = useCallback(
     (nodeType: NodeTypeDefinition) => {
-      if (!smartConnectMenu.source) return;
-
       takeSnapshot();
 
       const { flowPosition, source } = smartConnectMenu;
+
+      // Phase 3 §7.2 — Ctrl+K (no source) just creates the node at the
+      // anchor flow position. No auto-wiring needed.
+      if (!source) {
+        const newNode = createNodeFromType(nodeType, flowPosition, nodeHandlers);
+        setNodes((nds) => nds.concat(newNode));
+        closeSmartConnect();
+        return;
+      }
+
       const compatiblePort = findCompatiblePortForSmartConnect(nodeType, source);
       if (!compatiblePort) {
         showConnectionMessage("No compatible ports found for this node");
@@ -2468,14 +2494,22 @@ const App = () => {
             reactFlowInstance={reactFlowInstance}
           />
 
-          <SmartConnectModal
+          <NodeSearchPalette
             isOpen={smartConnectMenu.isOpen}
             position={smartConnectMenu.position}
             onClose={closeSmartConnect}
             onSelect={handleSmartConnectSelect}
             nodeTypes={smartConnectNodeTypes}
-            sourceHandleType={smartConnectMenu.source?.type}
-            sourcePortKind={smartConnectMenu.sourcePortKind}
+            source={smartConnectMenu.source ? {
+              ...smartConnectMenu.source,
+              portType: smartConnectMenu.source.nodeId && smartConnectMenu.source.handleId
+                ? getPortTypeForHandle(
+                  smartConnectMenu.source.nodeId,
+                  smartConnectMenu.source.handleId,
+                  smartConnectMenu.source.type
+                )
+                : undefined,
+            } : null}
           />
         </div>
        </ConnectionDragProvider>

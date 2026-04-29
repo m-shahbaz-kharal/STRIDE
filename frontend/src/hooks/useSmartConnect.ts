@@ -30,7 +30,9 @@ export const useSmartConnect = ({
     const openSmartConnect = useCallback((
         screenPosition: { x: number; y: number },
         flowPosition: { x: number; y: number },
-        source: { nodeId: string; handleId: string; type: "source" | "target" },
+        // `null` means "general node search" (Ctrl+K) with no
+        // type-filtered source. Phase 3 §7.2.
+        source: { nodeId: string; handleId: string; type: "source" | "target" } | null,
         sourcePortType?: TypeDescriptor
     ) => {
         setSmartConnectMenu({
