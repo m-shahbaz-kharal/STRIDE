@@ -38,6 +38,7 @@ import AppDialog from "./components/AppDialog";
 import { useGraphExecution } from "./hooks/useGraphExecution";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useNodeLibrary } from "./hooks/useNodeLibrary";
+import { useConverterIndex } from "./hooks/useConverterIndex";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { useConnectionValidation } from "./hooks/useConnectionValidation";
 import { useConnectionToast } from "./hooks/useConnectionToast";
@@ -162,6 +163,10 @@ const App = () => {
   // Node library hook
   const { nodeLibrary } = useNodeLibrary();
 
+  // Converter index — Phase 5 §4.7. Empty until the fetch completes,
+  // then drives "insert converter" suggestions on invalid edges.
+  const { index: converterIndex } = useConverterIndex();
+
 
 
   // Panel resize hook
@@ -234,9 +239,11 @@ const App = () => {
     getHandleRole,
     normalizeConnection,
     validateConnection,
+    findConverter,
   } = useConnectionValidation({
     nodes,
     connectStartParams,
+    converterIndex,
   });
 
   // Smart connect hook
@@ -1616,6 +1623,91 @@ const App = () => {
 
   // ========== Connection handling ==========
 
+  // Phase 5 §4.7 — insert a converter node that bridges an invalid edge.
+  //
+  // Given a source/target pair and the converter spec the index returned,
+  // this picks the converter's first input/output ports, places the new
+  // node between the existing nodes, and wires source -> converter ->
+  // target. Falls back gracefully if the spec has no ports or the
+  // converter's node type isn't in the loaded library.
+  const insertConverterBetween = useCallback(
+    (
+      converterNodeType: string,
+      source: { nodeId: string; handleId: string },
+      target: { nodeId: string; handleId: string },
+    ): boolean => {
+      const definition = nodeLibrary.find((n) => n.node_type === converterNodeType);
+      if (!definition) return false;
+      // Ignore control_in/out when picking the data port; the convention
+      // is that the first non-control port is the value carrier.
+      const inputs = (definition.input_ports || []).filter((p) => p !== "control_in");
+      const outputs = (definition.output_ports || []).filter((p) => p !== "control_out");
+      const inputPort = inputs[0];
+      const outputPort = outputs[0];
+      if (!inputPort || !outputPort) return false;
+
+      const sourceNode = nodeMap.get(source.nodeId);
+      const targetNode = nodeMap.get(target.nodeId);
+      if (!sourceNode || !targetNode) return false;
+
+      const midX = (sourceNode.position.x + targetNode.position.x) / 2;
+      const midY = (sourceNode.position.y + targetNode.position.y) / 2;
+      const newNode = createNodeFromType(definition, { x: midX, y: midY }, nodeHandlers);
+
+      takeSnapshot();
+      setNodes((existing) => existing.concat(newNode));
+      const sourceType = getPortTypeForHandle(source.nodeId, source.handleId, "source");
+      const targetType = getPortTypeForHandle(target.nodeId, target.handleId, "target");
+      const upstreamColor = getPortTypeColor(sourceType);
+      const downstreamColor = getPortTypeColor(targetType);
+
+      setEdges((existing) => {
+        // Drop any prior edge into the same target port; React Flow's
+        // single-incoming convention keeps the graph deterministic.
+        const filtered = existing.filter(
+          (edge) => !(edge.target === target.nodeId && edge.targetHandle === target.handleId)
+        );
+        const upstream = addEdge(
+          {
+            source: source.nodeId,
+            sourceHandle: source.handleId,
+            target: newNode.id,
+            targetHandle: inputPort,
+            type: "default",
+            animated: false,
+            style: { stroke: upstreamColor, strokeWidth: 2 },
+            data: { kind: "data" as const },
+          },
+          filtered,
+        );
+        return addEdge(
+          {
+            source: newNode.id,
+            sourceHandle: outputPort,
+            target: target.nodeId,
+            targetHandle: target.handleId,
+            type: "default",
+            animated: false,
+            style: { stroke: downstreamColor, strokeWidth: 2 },
+            data: { kind: "data" as const },
+          },
+          upstream,
+        );
+      });
+      return true;
+    },
+    [
+      nodeLibrary,
+      nodeMap,
+      createNodeFromType,
+      nodeHandlers,
+      setNodes,
+      setEdges,
+      takeSnapshot,
+      getPortTypeForHandle,
+    ],
+  );
+
   const handleConnect = useCallback(
     (connection: Parameters<typeof addEdge>[0]) => {
       if (!connection.sourceHandle || !connection.targetHandle) return;
@@ -1627,6 +1719,39 @@ const App = () => {
         setConnectionLineDash,
       });
       if (!validation.valid) {
+        // Phase 5 §4.7: when the type system rejects but a converter
+        // bridges the gap, offer a one-click "Insert <converter>" CTA.
+        if (
+          validation.classification === "convertible" &&
+          validation.suggestedConverter &&
+          normalized.source &&
+          normalized.sourceHandle &&
+          normalized.target &&
+          normalized.targetHandle
+        ) {
+          const conv = validation.suggestedConverter;
+          const sourceRef = {
+            nodeId: normalized.source,
+            handleId: normalized.sourceHandle,
+          };
+          const targetRef = {
+            nodeId: normalized.target,
+            handleId: normalized.targetHandle,
+          };
+          showConnectionMessage(
+            `${validation.reason || "Type mismatch"} — insert ${conv.display_name}?`,
+            {
+              tone: "info",
+              action: {
+                label: `Insert ${conv.display_name}`,
+                run: () => {
+                  insertConverterBetween(conv.node_type, sourceRef, targetRef);
+                },
+              },
+            },
+          );
+          return;
+        }
         showConnectionMessage(validation.reason || "These connectors cannot be linked");
         return;
       }
@@ -1700,7 +1825,17 @@ const App = () => {
       }
       setConnectionLineIsInvalid(false);
     },
-    [edges, getPortTypeForHandle, normalizeConnection, setEdges, setNodes, showConnectionMessage, takeSnapshot, validateConnection]
+    [
+      edges,
+      getPortTypeForHandle,
+      insertConverterBetween,
+      normalizeConnection,
+      setEdges,
+      setNodes,
+      showConnectionMessage,
+      takeSnapshot,
+      validateConnection,
+    ]
   );
 
   const isValidConnection = useCallback(

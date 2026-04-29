@@ -2,6 +2,11 @@ import { useCallback, useMemo } from "react";
 import { Node } from "reactflow";
 import { BlueprintNodeData, TypeDescriptor } from "../types";
 import { escapeId, formatPortTypeLabel, getPortTypeColor } from "../graph/utils";
+import {
+    ConverterIndex,
+    ConverterSpec,
+    emptyConverterIndex,
+} from "../api/converters";
 
 interface ConnectionValidationResult {
     valid: boolean;
@@ -9,6 +14,10 @@ interface ConnectionValidationResult {
     sourceType?: TypeDescriptor;
     targetType?: TypeDescriptor;
     classification?: PortCompatibility;
+    // Phase 5 §4.7: when classification === "convertible" and a single
+    // registered converter bridges the gap, this is the cheapest
+    // candidate. The UI uses it to render an "insert converter" button.
+    suggestedConverter?: ConverterSpec;
 }
 
 // Phase 3 §7.1: per-target classification used to drive port highlighting
@@ -41,12 +50,18 @@ interface UseConnectionValidationProps {
         handleId: string | null;
         handleType: "source" | "target" | null;
     } | null;
+    // Phase 5 §4.7: optional converter index. Defaults to an empty index
+    // so callers that haven't fetched `/api/converters` yet still get
+    // sensible behaviour (cross-kind pairs simply remain "incompatible").
+    converterIndex?: ConverterIndex;
 }
 
 export const useConnectionValidation = ({
     nodes,
     connectStartParams,
+    converterIndex,
 }: UseConnectionValidationProps) => {
+    const converters = converterIndex ?? emptyConverterIndex();
     const nodeMap = useMemo(
         () => new Map(nodes.map((node) => [node.id, node])),
         [nodes]
@@ -128,16 +143,13 @@ export const useConnectionValidation = ({
         [normalizeType]
     );
 
-    // Phase 3 §7.1: classify how a *target* port relates to a *source*
-    // port, *given* both are direction-correct (output → input). We treat
-    // anything that `arePortTypesCompatible` accepts as "compatible". The
-    // narrower bucket "convertible" is reserved for same-kind pairs whose
-    // subtype metadata cannot be unified — i.e. the connection would need
-    // an explicit conversion node before it becomes valid.
+    // Phase 3 §7.1 + Phase 5 §4.7: classify how a *target* port relates
+    // to a *source* port (direction-correct, output → input).
     //
-    // Cross-kind pairs are "incompatible" until `stride-converters` ships
-    // a converter index in Phase 5. At that point this function will also
-    // consult the converter registry; see TODO at end of file.
+    // - "compatible":   directly assignable per `arePortTypesCompatible`.
+    // - "convertible":  same-kind subtype narrowing _or_ a registered
+    //                   converter bridges source.kind → target.kind.
+    // - "incompatible": no registered conversion path.
     const classifyAssignment = useCallback(
         (
             sourceType: TypeDescriptor | string | undefined,
@@ -169,9 +181,30 @@ export const useConnectionValidation = ({
                 }
             }
 
+            // Cross-kind: if a registered converter goes source.kind →
+            // target.kind, the connection is reachable via a single hop.
+            if (src.kind !== tgt.kind) {
+                if (converters.best(src.kind, tgt.kind)) {
+                    return "convertible";
+                }
+            }
+
             return "incompatible";
         },
-        [arePortTypesCompatible, normalizeType]
+        [arePortTypesCompatible, normalizeType, converters]
+    );
+
+    const findConverter = useCallback(
+        (
+            sourceType: TypeDescriptor | string | undefined,
+            targetType: TypeDescriptor | string | undefined
+        ): ConverterSpec | undefined => {
+            const src = normalizeType(sourceType);
+            const tgt = normalizeType(targetType);
+            if (src.kind === tgt.kind) return undefined;
+            return converters.best(src.kind, tgt.kind);
+        },
+        [converters, normalizeType]
     );
 
     const getPortTypeForHandle = useCallback(
@@ -391,6 +424,11 @@ export const useConnectionValidation = ({
                 ? "compatible"
                 : classifyAssignment(sourceType, targetType);
 
+            const suggestedConverter =
+                classification === "convertible"
+                    ? findConverter(sourceType, targetType)
+                    : undefined;
+
             return {
                 valid: compatible,
                 reason: compatible
@@ -399,11 +437,13 @@ export const useConnectionValidation = ({
                 sourceType,
                 targetType,
                 classification,
+                suggestedConverter,
             };
         },
         [
             arePortTypesCompatible,
             classifyAssignment,
+            findConverter,
             getHandleRole,
             getPortTypeForHandle,
             normalizeConnection,
@@ -509,6 +549,7 @@ export const useConnectionValidation = ({
         getHandleRoleFromDom,
         normalizeConnection,
         validateConnection,
+        findConverter,
     };
 };
 
@@ -541,7 +582,8 @@ export const classifyAssignmentPure = (
     return "incompatible";
 };
 
-// TODO(Phase 5 / stride-converters): once the converter index is built,
-// `classifyAssignment` should also return "convertible" for cross-kind
-// pairs that have a registered converter, and "compatible" for free
-// (zero-cost) implicit conversions per §4.2 of the design doc.
+// Phase 5 §4.7: cross-kind "convertible" classification now flows
+// through the runtime converter index (see `useConnectionValidation`
+// constructor argument `converterIndex`). The pure variant
+// (`classifyAssignmentPure`) above is kept for unit tests and tooling
+// that doesn't have access to the React-side fetched index.

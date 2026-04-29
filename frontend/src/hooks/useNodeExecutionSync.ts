@@ -1,6 +1,22 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Node, Edge } from "reactflow";
-import { BlueprintNodeData } from "../types";
+import { BlueprintNodeData, NodeExecutionStatus } from "../types";
+
+const NODE_EXECUTION_STATUSES: ReadonlySet<NodeExecutionStatus> = new Set<NodeExecutionStatus>([
+  "pending",
+  "queued",
+  "running",
+  "completed",
+  "skipped",
+  "error",
+]);
+
+const toExecutionStatus = (raw: string | undefined): NodeExecutionStatus | undefined => {
+  if (raw === undefined) return undefined;
+  return NODE_EXECUTION_STATUSES.has(raw as NodeExecutionStatus)
+    ? (raw as NodeExecutionStatus)
+    : undefined;
+};
 
 interface UseNodeExecutionSyncOptions {
   nodes: Node<BlueprintNodeData>[];
@@ -60,7 +76,7 @@ export const useNodeExecutionSync = ({
 
     setNodes((existing) =>
       existing.map((node) => {
-        const status = nodeStatuses.get(node.id);
+        const status = toExecutionStatus(nodeStatuses.get(node.id));
         const traceEntry = latestTraceByNode.get(node.id);
         const newOutputs = traceEntry?.outputs ?? node.data.last_outputs;
         const newLogs = traceEntry?.logs ?? node.data.executionLogs;

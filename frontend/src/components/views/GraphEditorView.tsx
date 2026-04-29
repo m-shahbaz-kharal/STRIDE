@@ -21,6 +21,7 @@ import TypeAwareConnectionLine from "../graph/TypeAwareConnectionLine";
 import ConnectionToast from "../ConnectionToast";
 import { BlueprintNodeData, NodeTypeDefinition } from "../../types";
 import { APP_HEADER_HEIGHT } from "../../graph/utils";
+import { ConnectionToastMessage } from "../../hooks/useConnectionToast";
 
 interface GraphEditorViewProps {
   visible: boolean;
@@ -42,7 +43,7 @@ interface GraphEditorViewProps {
   connectionLineColor?: string;
   connectionLineIsInvalid: boolean;
   connectionLineDash?: string;
-  connectionMessage: string | null;
+  connectionMessage: ConnectionToastMessage | null;
   snapToGrid: boolean;
   setSnapToGrid: (value: boolean) => void;
   actualLeftWidth: number;

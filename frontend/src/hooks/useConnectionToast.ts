@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Phase 5 §4.7 — connection toast can carry an actionable button (e.g.
+// "Insert <converter>") on top of the plain text message. The action is
+// optional; when present, clicking it dismisses the toast.
+export interface ConnectionToastAction {
+    label: string;
+    run: () => void;
+}
+
+export interface ConnectionToastMessage {
+    text: string;
+    tone: "error" | "info";
+    action?: ConnectionToastAction;
+}
+
 interface UseConnectionToastResult {
-    message: { text: string; tone: "error" | "info" } | null;
-    showMessage: (text: string, tone?: "error" | "info") => void;
+    message: ConnectionToastMessage | null;
+    showMessage: (
+        text: string,
+        toneOrOptions?: "error" | "info" | { tone?: "error" | "info"; action?: ConnectionToastAction },
+    ) => void;
     clearMessage: () => void;
 }
 
-export const useConnectionToast = (duration: number = 1800): UseConnectionToastResult => {
-    const [message, setMessage] = useState<{ text: string; tone: "error" | "info" } | null>(null);
+export const useConnectionToast = (duration: number = 4000): UseConnectionToastResult => {
+    const [message, setMessage] = useState<ConnectionToastMessage | null>(null);
     const timeoutRef = useRef<number | null>(null);
 
     // Cleanup timeout on unmount
@@ -19,20 +36,39 @@ export const useConnectionToast = (duration: number = 1800): UseConnectionToastR
         };
     }, []);
 
-    const showMessage = useCallback((text: string, tone: "error" | "info" = "error") => {
-        if (timeoutRef.current) {
-            window.clearTimeout(timeoutRef.current);
-        }
-        setMessage({ text, tone });
-        timeoutRef.current = window.setTimeout(() => setMessage(null), duration);
-    }, [duration]);
-
     const clearMessage = useCallback(() => {
         if (timeoutRef.current) {
             window.clearTimeout(timeoutRef.current);
         }
         setMessage(null);
     }, []);
+
+    const showMessage = useCallback<UseConnectionToastResult["showMessage"]>(
+        (text, toneOrOptions) => {
+            if (timeoutRef.current) {
+                window.clearTimeout(timeoutRef.current);
+            }
+            const opts =
+                toneOrOptions && typeof toneOrOptions === "object"
+                    ? toneOrOptions
+                    : { tone: (toneOrOptions ?? "error") as "error" | "info" };
+            const tone = opts.tone ?? "error";
+            const action = opts.action;
+            // Wrap the action so a click also dismisses the toast.
+            const wrappedAction = action
+                ? {
+                      label: action.label,
+                      run: () => {
+                          clearMessage();
+                          action.run();
+                      },
+                  }
+                : undefined;
+            setMessage({ text, tone, action: wrappedAction });
+            timeoutRef.current = window.setTimeout(() => setMessage(null), duration);
+        },
+        [duration, clearMessage]
+    );
 
     return {
         message,
