@@ -1,7 +1,7 @@
 import React from "react";
 import { DashboardWidget, BlueprintNodeData } from "../../types";
 import { Node } from "reactflow";
-import { resolveVisualizer } from "../../visualizers/registry";
+import { CompositeVisualizer } from "../../visualizers/registry";
 
 interface DashboardWidgetContentProps {
     widget: DashboardWidget;
@@ -94,17 +94,28 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
         case "panel":
             return <div style={{ width: '100%', height: '100%', background: 'var(--bg-surface)', borderRadius: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}></div>;
         case "bound-output": {
-            // Phase 0 refactor: dispatch through the visualizer registry.
-            // The registry mirrors the previous if/else chain exactly — image
-            // string → <img>, StreamResource → live frame, Scene3D / PointCloud
-            // → their dedicated widgets, everything else → JSON dump.
-            // See frontend/src/visualizers/registry.ts.
-            const spec = resolveVisualizer("*", value);
-            // The "*" fallback (JSON dump) always matches, so spec is never null
-            // in practice; the null branch is defensive.
-            if (!spec) return null;
-            const Vis = spec.Component;
-            return <Vis value={value} label={widget.label} />;
+            // Phase 4: dispatch through the visualizer registry, with optional
+            // composition overlays. CompositeVisualizer picks the host
+            // visualizer for the primary value and threads overlays through
+            // (e.g. image + detections2d + keypoints rendered as one).
+            // See docs/architecture/unified-type-system-and-ux.md §8.
+            const overlays: unknown[] = [];
+            if (widget.composition?.overlays?.length) {
+                for (const o of widget.composition.overlays) {
+                    let ov: unknown = null;
+                    const fromOutputs = outputs[o.nodeId];
+                    if (fromOutputs && (fromOutputs as Record<string, any>)[o.portName] !== undefined) {
+                        ov = (fromOutputs as Record<string, any>)[o.portName];
+                    } else {
+                        const ovNode = nodes.find((n) => n.id === o.nodeId);
+                        if (ovNode?.data.last_outputs) {
+                            ov = ovNode.data.last_outputs[o.portName];
+                        }
+                    }
+                    if (ov !== undefined && ov !== null) overlays.push(ov);
+                }
+            }
+            return <CompositeVisualizer value={value} overlays={overlays} label={widget.label} />;
         }
         case "bound-input":
             if (!widget.label) {

@@ -297,6 +297,13 @@ export interface DashboardWidget {
   style?: Record<string, unknown>;
   parentId?: string; // For nesting in containers
   inputType?: TypeKind; // For bound inputs, the expected type
+
+  // Phase 4 §8.4: composition — render multiple bindings as a single overlay
+  // (e.g. an image as primary plus detections2d/keypoints/mask overlays).
+  // The primary binding is `(nodeId, portName)`; overlays add more.
+  composition?: {
+    overlays: Array<{ nodeId: string; portName: string }>;
+  };
 }
 
 
