@@ -820,6 +820,60 @@ const App = () => {
     return map;
   }, [nodes]);
 
+  // Phase 3 §7.3 — re-validate every existing edge against the current
+  // port-type maps. Edges that became invalid (e.g. because a Cast
+  // node's `target_type` parameter changed) get `data.invalid = true`
+  // and a reason string; CustomEdge renders a red `!` badge. The user
+  // can fix or delete; we never auto-delete.
+  //
+  // Per Phase 3 spec: "full recompute is fine for now; debounced
+  // incremental can come later." So we just rebuild on every nodes or
+  // edges change; setEdges with bail-out keeps it cheap.
+  const portTypeFingerprint = useMemo(() => {
+    // Hash only the bits that affect validation so the effect doesn't
+    // re-run on every position drag.
+    return nodes.map((n) =>
+      `${n.id}:${JSON.stringify(n.data.input_port_types || {})}|${JSON.stringify(n.data.output_port_types || {})}`
+    ).join("\n");
+  }, [nodes]);
+
+  useEffect(() => {
+    if (edges.length === 0) return;
+    const invalidMap = revalidateEdges(edges as any);
+    setEdges((existing) =>
+      existing.map((edge) => {
+        const entry = invalidMap.get(edge.id);
+        const wasInvalid = (edge.data as any)?.invalid === true;
+        if (entry) {
+          if (
+            wasInvalid &&
+            (edge.data as any)?.invalidReason === entry.reason &&
+            (edge.data as any)?.invalidClass === entry.classification
+          ) {
+            return edge;
+          }
+          return {
+            ...edge,
+            data: {
+              ...(edge.data || {}),
+              invalid: true,
+              invalidReason: entry.reason,
+              invalidClass: entry.classification,
+            },
+          };
+        }
+        if (wasInvalid) {
+          const { invalid: _i, invalidReason: _r, invalidClass: _c, ...rest } = (edge.data || {}) as Record<string, unknown>;
+          return { ...edge, data: rest };
+        }
+        return edge;
+      })
+    );
+    // Intentionally depend only on the fingerprint, not `nodes`/`edges`
+    // identity, so a position drag doesn't trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portTypeFingerprint, revalidateEdges, setEdges]);
+
   // Update edges for running state
   // PERF: Build node lookup inside effect to avoid dependency on nodeById map identity
   useEffect(() => {
