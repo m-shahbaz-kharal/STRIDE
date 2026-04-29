@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-yolo"
+version = "0.1.0"
+description = "YOLO (v8 / v11) detection, segmentation, and pose nodes for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    # Heavy deep-learning dependency.  Already a backend-level dep, so this is
+    # mostly a documentation hint — the package still imports lazily.
+    "ultralytics>=8.3",
+]
+
+[project.entry-points."stride.plugins"]
+yolo = "stride_yolo:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_yolo"]

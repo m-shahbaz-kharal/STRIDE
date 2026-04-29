@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-pcdet"
+version = "0.1.0"
+description = "3D LIDAR object detectors (PointPillars, CenterPoint, SECOND, PV-RCNN) for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# OpenPCDet and mmdet3d both have very heavy build deps (CUDA-compiled
+# extensions, spconv, etc.) and aren't trivially pip-installable on
+# Windows.  Document the install steps in the README; nodes import these
+# lazily and raise a clear error at forward() time when missing.
+openpcdet = [
+    "torch>=2.0",
+]
+mmdet3d = [
+    "torch>=2.0",
+]
+
+[project.entry-points."stride.plugins"]
+pcdet = "stride_pcdet:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_pcdet"]

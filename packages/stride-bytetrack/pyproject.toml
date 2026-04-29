@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-bytetrack"
+version = "0.1.0"
+description = "ByteTrack 2D multi-object tracking node for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    # `supervision` ships a high-quality, well-maintained ByteTrack port
+    # that's pip-installable on every platform.
+    "supervision>=0.25",
+]
+
+[project.entry-points."stride.plugins"]
+bytetrack = "stride_bytetrack:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_bytetrack"]

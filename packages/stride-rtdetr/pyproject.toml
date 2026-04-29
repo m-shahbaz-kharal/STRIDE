@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-rtdetr"
+version = "0.1.0"
+description = "RT-DETR real-time transformer detector node for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "ultralytics>=8.3",
+]
+
+[project.entry-points."stride.plugins"]
+rtdetr = "stride_rtdetr:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_rtdetr"]

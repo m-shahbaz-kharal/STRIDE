@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-depth-anything"
+version = "0.1.0"
+description = "Depth Anything V2 monocular depth estimation node for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    # Heavy DL deps — installed lazily via uv at backend sync time.
+    "transformers>=4.40",
+    "torch>=2.0",
+    "pillow>=10.0",
+]
+
+[project.entry-points."stride.plugins"]
+depth_anything = "stride_depth_anything:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_depth_anything"]

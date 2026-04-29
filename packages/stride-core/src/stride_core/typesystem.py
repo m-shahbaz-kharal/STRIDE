@@ -12,7 +12,13 @@ from typing import Any, Dict, List, Optional
 
 PRIMITIVES = {"int", "float", "string", "boolean", "null"}
 CONTAINERS = {"list", "map", "record", "tuple", "option"}
-FLEXIBLE = {"any", "unknown", "tensor", "control", "stream", "point", "box", "mask", "session", "pointcloud", "bbox3d", "region3d", "scene3d"}
+FLEXIBLE = {
+    "any", "unknown", "tensor", "control", "stream",
+    "point", "box", "mask", "session",
+    "pointcloud", "bbox3d", "region3d", "scene3d",
+    "image", "bbox2d", "detections2d", "detections3d", "depthmap",
+    "track2d", "track3d", "keypoints",
+}
 
 
 @dataclass(frozen=True)
@@ -379,3 +385,103 @@ def t_region3d() -> TypeDescriptor:
 def t_scene3d() -> TypeDescriptor:
     """A 3D scene for visualization (point cloud + boxes + regions)."""
     return TypeDescriptor(kind="scene3d")
+
+
+# =============================================================================
+# Image / 2D Detection Types
+# =============================================================================
+#
+# Convention used across STRIDE image packages:
+#
+# - An *image* is a base64-encoded data URL string (e.g.
+#   "data:image/jpeg;base64,...") matching what `core.image.load` produces.
+#   The `image` kind below is a marker for that — values are still strings on
+#   the wire, but the type label conveys "this string is an image".
+#
+# - A *bbox2d* is a record describing a single 2D detection result:
+#       {
+#           "x1": float, "y1": float, "x2": float, "y2": float,  # absolute pixel coords
+#           "confidence": float,
+#           "class_id": int,
+#           "class_name": str,
+#           "track_id": int (optional, set by trackers),
+#       }
+#   Coordinates are absolute pixel coordinates (top-left origin).
+#
+# - A *detections2d* is a record bundling a list of bbox2d with image metadata:
+#       {
+#           "_type": "Detections2D",
+#           "image_width": int,
+#           "image_height": int,
+#           "boxes": [bbox2d, ...],
+#           "image": str (optional base64 thumbnail),
+#       }
+#
+# - A *depthmap* is a record describing a per-pixel depth result:
+#       {
+#           "_type": "DepthMap",
+#           "width": int, "height": int,
+#           "depth_b64": str (float32 packed),
+#           "min_depth": float, "max_depth": float,
+#           "image": str (optional colorized base64 visualization),
+#       }
+#
+# - A *keypoints* record bundles per-instance keypoint sets, e.g. body pose:
+#       {
+#           "_type": "Keypoints",
+#           "instances": [
+#               {"keypoints": [[x, y, score], ...], "bbox": bbox2d (optional)}
+#           ],
+#       }
+#
+# These conventions are used by stride-yolo, stride-rtdetr, stride-mediapipe,
+# stride-depth-anything, stride-bytetrack, stride-clip, and the *-pcdet 3D
+# detectors. New packages should reuse them.
+
+
+def t_image() -> TypeDescriptor:
+    """A 2D image (carried as a base64 data URL string in practice)."""
+    return TypeDescriptor(kind="image")
+
+
+def t_bbox2d() -> TypeDescriptor:
+    """A 2D bounding box with class label and confidence."""
+    return t_record({
+        "x1": t_float(),
+        "y1": t_float(),
+        "x2": t_float(),
+        "y2": t_float(),
+        "confidence": t_float(),
+        "class_id": t_int(),
+        "class_name": t_string(),
+    })
+
+
+def t_detections2d() -> TypeDescriptor:
+    """A bundle of 2D detections with source image metadata."""
+    return TypeDescriptor(kind="detections2d")
+
+
+def t_detections3d() -> TypeDescriptor:
+    """A bundle of 3D detections (boxes + scores + class labels)."""
+    return TypeDescriptor(kind="detections3d")
+
+
+def t_depthmap() -> TypeDescriptor:
+    """A per-pixel depth map."""
+    return TypeDescriptor(kind="depthmap")
+
+
+def t_track2d() -> TypeDescriptor:
+    """A tracked 2D detection (bbox2d + persistent track id)."""
+    return TypeDescriptor(kind="track2d")
+
+
+def t_track3d() -> TypeDescriptor:
+    """A tracked 3D detection (bbox3d + persistent track id)."""
+    return TypeDescriptor(kind="track3d")
+
+
+def t_keypoints() -> TypeDescriptor:
+    """A set of keypoints (e.g. body pose, hands, face landmarks)."""
+    return TypeDescriptor(kind="keypoints")

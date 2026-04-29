@@ -26,6 +26,13 @@ dependencies = [
     "stride-fl511",
     "stride-ouster",
     "stride-people",
+    "stride-yolo",
+    "stride-rtdetr",
+    "stride-mediapipe",
+    "stride-depth-anything",
+    "stride-pcdet",
+    "stride-bytetrack",
+    "stride-clip",
 ]
 
 [tool.uv.sources]
@@ -34,6 +41,13 @@ stride-sam3 = { path = "../packages/stride-sam3", editable = true }
 stride-fl511 = { path = "../packages/stride-fl511", editable = true }
 stride-ouster = { path = "../packages/stride-ouster", editable = true }
 stride-people = { path = "../packages/stride-people", editable = true }
+stride-yolo = { path = "../packages/stride-yolo", editable = true }
+stride-rtdetr = { path = "../packages/stride-rtdetr", editable = true }
+stride-mediapipe = { path = "../packages/stride-mediapipe", editable = true }
+stride-depth-anything = { path = "../packages/stride-depth-anything", editable = true }
+stride-pcdet = { path = "../packages/stride-pcdet", editable = true }
+stride-bytetrack = { path = "../packages/stride-bytetrack", editable = true }
+stride-clip = { path = "../packages/stride-clip", editable = true }
 
 [dependency-groups]
 dev = [

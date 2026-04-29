@@ -8,7 +8,12 @@ STRIDE node plugins.
 from .node_base import NodeBase, ExecutionContext
 from .node_spec import NodeSpec, PortSpec
 from .registry import register_node, NODE_REGISTRY, get_node, list_node_types, list_node_definitions
-from .typesystem import TypeDescriptor, t_control, t_float, t_int
+from .typesystem import (
+    TypeDescriptor,
+    t_control, t_float, t_int, t_string, t_boolean, t_any, t_list, t_record,
+    t_image, t_bbox2d, t_detections2d, t_detections3d, t_depthmap,
+    t_track2d, t_track3d, t_keypoints, t_pointcloud, t_bbox3d,
+)
 from .plugin import discover_plugins, PluginInfo
 
 __version__ = "1.0.0"
@@ -32,6 +37,21 @@ __all__ = [
     "t_control",
     "t_float",
     "t_int",
+    "t_string",
+    "t_boolean",
+    "t_any",
+    "t_list",
+    "t_record",
+    "t_image",
+    "t_bbox2d",
+    "t_detections2d",
+    "t_detections3d",
+    "t_depthmap",
+    "t_track2d",
+    "t_track3d",
+    "t_keypoints",
+    "t_pointcloud",
+    "t_bbox3d",
     # Plugins
     "discover_plugins",
     "PluginInfo",
