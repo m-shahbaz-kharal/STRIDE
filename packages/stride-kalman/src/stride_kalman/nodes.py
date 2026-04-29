@@ -6,8 +6,9 @@ greedy Hungarian assignment on Mahalanobis or Euclidean centroid
 distance.  Pattern matches AB3DMOT (Weng & Kitani, IROS 2020) — the
 canonical baseline for 3D MOT on KITTI/nuScenes.
 
-Stateful — maintains one tracker per node id.  Pass `reset=True` to
-clear state (e.g. when restarting a stream).
+Phase 2: tracker state lives on the ExecutionContext (per-run, per-node).
+Two consecutive runs always start with a fresh state — no cross-run ID
+leakage. ``reset=True`` still forces a fresh state mid-run.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ except ImportError:
     linear_sum_assignment = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list,
@@ -31,9 +33,14 @@ from stride_core.typesystem import (
 )
 
 
+_TRACKER_STATE_KEY = "kalman3d.state"
+
+
 def _require_deps() -> None:
     if not HAS_DEPS:
-        raise RuntimeError("numpy and scipy are required for the Kalman tracker")
+        raise NodeMissingDependencyError(
+            "numpy and scipy are required for the Kalman tracker"
+        )
 
 
 class _KalmanTrack:
@@ -107,13 +114,17 @@ KALMAN3D_SPEC = NodeSpec(
         PortSpec(name="boxes", type=t_list(t_bbox3d()), required=True,
                  description="3D bounding-box detections from a 3D detector"),
         PortSpec(name="max_distance", type=t_float(), required=False, default=2.0,
-                 description="Max centroid distance (m) for association"),
+                 description="Max centroid distance (m) for association",
+                 constraints={"min": 0.0}),
         PortSpec(name="max_age", type=t_int(), required=False, default=10,
-                 description="Drop a track after this many frames without update"),
+                 description="Drop a track after this many frames without update",
+                 constraints={"min": 0}),
         PortSpec(name="min_hits", type=t_int(), required=False, default=2,
-                 description="Suppress brand-new tracks until they have this many hits"),
+                 description="Suppress brand-new tracks until they have this many hits",
+                 constraints={"min": 0}),
         PortSpec(name="dt", type=t_float(), required=False, default=0.1,
-                 description="Time delta between frames (s)"),
+                 description="Time delta between frames (s)",
+                 constraints={"min": 0.0}),
         PortSpec(name="reset", type=t_boolean(), required=False, default=False),
     ],
     outputs=[
@@ -124,10 +135,6 @@ KALMAN3D_SPEC = NodeSpec(
     ],
     cache_policy="disabled",
 )
-
-
-# Per-node tracker state
-_TRACKER_STATES: Dict[str, Dict[str, Any]] = {}
 
 
 @register_node(KALMAN3D_SPEC)
@@ -154,10 +161,13 @@ class Kalman3DTrackerNode(NodeBase):
             dt = 0.1
         reset = bool(inputs.get("reset", False))
 
-        # Per-node state
-        if reset or self.id not in _TRACKER_STATES:
-            _TRACKER_STATES[self.id] = {"tracks": [], "next_id": 1}
-        state = _TRACKER_STATES[self.id]
+        # Phase 2: state lives on the per-run ExecutionContext rather than a
+        # module-level dict. Two consecutive runs always start fresh, and
+        # ``reset=True`` still rebuilds mid-run.
+        bucket = ctx.node_resources.setdefault(self.id, {})
+        if reset or _TRACKER_STATE_KEY not in bucket:
+            bucket[_TRACKER_STATE_KEY] = {"tracks": [], "next_id": 1}
+        state = bucket[_TRACKER_STATE_KEY]
 
         # Predict step for all existing tracks
         for trk in state["tracks"]:
