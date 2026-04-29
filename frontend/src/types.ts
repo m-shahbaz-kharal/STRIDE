@@ -103,6 +103,19 @@ export type NodeExecutionStatus =
   | "skipped"
   | "error";
 
+// Phase 2 §6.3: structured payload that the runtime emits for every typed
+// NodeError. Phase 2 plumbs the field through; Phase 3 will render it as an
+// inline node badge with disclosure tooltips.
+export interface NodeErrorPayload {
+  code: string;
+  message: string;
+  node_id?: string;
+  node_type?: string;
+  port?: string | null;
+  details?: Record<string, unknown>;
+  stack_trace?: string;
+}
+
 export interface ExecutionTraceEntry {
   node_id: string;
   type: string;
@@ -110,7 +123,9 @@ export interface ExecutionTraceEntry {
   outputs: Record<string, unknown>;
   logs: string[];
   error?: string;
+  error_code?: string;
   error_details?: string;  // Full stacktrace for debugging
+  error_payload?: NodeErrorPayload;  // Structured NodeError payload (Phase 2)
   duration_ms?: number;
   level?: number;
   from_cache?: boolean;
@@ -180,6 +195,7 @@ export interface ExecutionEvent {
   error?: string;
   error_code?: string;
   error_details?: string;  // Full stacktrace for debugging
+  error_payload?: NodeErrorPayload;  // Structured NodeError payload (Phase 2 §6.3)
   level?: number;
   progress?: number;
   total_nodes?: number;

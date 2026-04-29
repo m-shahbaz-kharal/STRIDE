@@ -333,6 +333,18 @@ class StreamingExecutor:
                         progress_state["completed"] += 1
                         completed = progress_state["completed"]
                         total = progress_state["total"]
+                    dep_payload = (
+                        {
+                            "code": "dependency_failed",
+                            "message": reason,
+                            "node_id": dep,
+                            "node_type": result.node_type,
+                            "port": None,
+                            "details": {"upstream_node_id": failed_id},
+                        }
+                        if status == NodeStatus.ERROR
+                        else None
+                    )
                     await event_queue.put(ExecutionEvent(
                         event_type="node_error" if status == NodeStatus.ERROR else "node_skipped",
                         execution_id=self.execution_id,
@@ -342,6 +354,7 @@ class StreamingExecutor:
                         status=status,
                         error=reason if status == NodeStatus.ERROR else None,
                         error_code="dependency_failed" if status == NodeStatus.ERROR else "dependency_skipped",
+                        error_payload=dep_payload,
                         duration_ms=0.0,
                         level=result.level,
                         progress=completed / total if total > 0 else 0,
@@ -487,6 +500,7 @@ class StreamingExecutor:
                                     error=result.error,
                                     error_code=result.error_code,
                                     error_details=result.error_details,
+                                    error_payload=result.error_payload,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
                                     progress=completed / total if total > 0 else 0,
@@ -592,6 +606,8 @@ class StreamingExecutor:
                                 status=NodeStatus.ERROR,
                                 error=result.error,
                                 error_code=result.error_code,
+                                error_details=result.error_details,
+                                error_payload=result.error_payload,
                                 duration_ms=result.duration_ms,
                                 level=result.level,
                                 progress=completed / total if total > 0 else 0,
@@ -730,6 +746,7 @@ class StreamingExecutor:
                                     error=result.error,
                                     error_code=result.error_code,
                                     error_details=result.error_details,
+                                    error_payload=result.error_payload,
                                     duration_ms=result.duration_ms,
                                     level=result.level,
                                     progress=completed / total if total > 0 else 0,
@@ -771,6 +788,8 @@ class StreamingExecutor:
                             status=NodeStatus.ERROR,
                             error=result.error,
                             error_code=result.error_code,
+                            error_details=result.error_details,
+                            error_payload=result.error_payload,
                             duration_ms=result.duration_ms,
                             level=result.level,
                             progress=completed / total if total > 0 else 0,
@@ -1062,6 +1081,8 @@ class StreamingExecutor:
                             status=NodeStatus.ERROR,
                             error=result.error,
                             error_code=result.error_code,
+                            error_details=result.error_details,
+                            error_payload=result.error_payload,
                             duration_ms=result.duration_ms,
                             level=result.level,
                             progress=completed / total if total > 0 else 0,
@@ -1146,6 +1167,8 @@ class StreamingExecutor:
                         status=NodeStatus.ERROR,
                         error=result.error,
                         error_code=result.error_code,
+                        error_details=result.error_details,
+                        error_payload=result.error_payload,
                         duration_ms=result.duration_ms,
                         level=result.level,
                         progress=completed / total if total > 0 else 0,
@@ -1304,6 +1327,8 @@ class StreamingExecutor:
                         status=NodeStatus.ERROR,
                         error=result.error,
                         error_code=result.error_code,
+                        error_details=result.error_details,
+                        error_payload=result.error_payload,
                         duration_ms=result.duration_ms,
                         level=result.level,
                         progress=completed / total if total > 0 else 0,

@@ -51,6 +51,7 @@ class NodeExecutionResult:
     error: Optional[str] = None
     error_code: Optional[str] = None
     error_details: Optional[str] = None  # Full stacktrace for debugging
+    error_payload: Optional[Dict[str, Any]] = None  # Structured NodeError payload (Phase 2 §6.3)
     level: int = 0  # Topological level for parallel execution
     from_cache: bool = False  # Whether result came from cache
     branch_id: Optional[str] = None  # Branch this node belongs to (hybrid execution)
@@ -74,6 +75,7 @@ class ExecutionEvent:
     error: Optional[str] = None
     error_code: Optional[str] = None
     error_details: Optional[str] = None  # Full stacktrace for debugging
+    error_payload: Optional[Dict[str, Any]] = None  # Structured NodeError payload (Phase 2 §6.3)
     level: Optional[int] = None
     progress: Optional[float] = None  # 0.0 to 1.0
     total_nodes: Optional[int] = None

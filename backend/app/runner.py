@@ -108,6 +108,11 @@ class GraphExecutor:
         self._variables: Dict[str, Any] = {}
         self._shared_metadata: Dict[str, Any] = {}
         self._resources: List[Tuple[str, Any]] = []
+        # Phase 2: per-run lifecycle bookkeeping. Both dicts are owned here
+        # and shared with every NodeExecutor created during the run so
+        # prepare/forward/teardown observe the same state.
+        self._node_resources_state: Dict[str, Dict[str, Any]] = {}
+        self._prepared_nodes: Set[str] = set()
         self.execution_trace: List[NodeExecutionResult] = []
         self.outputs: Dict[str, Any] = {}
 
@@ -192,10 +197,20 @@ class GraphExecutor:
         self._resources.clear()
         self._skipped_branches.clear()
         self._cancellation.reset()
+        # Phase 2: stateful trackers / model sessions must not leak across
+        # runs. Both dicts are owned by the runner and shared with the
+        # NodeExecutor; clearing here is the single source of truth.
+        self._node_resources_state.clear()
+        self._prepared_nodes.clear()
         self._node_status = {node_id: NodeStatus.PENDING for node_id in self.nodes}
 
     def _cleanup_resources(self, target_node_id: Optional[str] = None) -> None:
-        """Close and cleanup any registered resources."""
+        """Close and cleanup any registered resources.
+
+        Phase 2: when called for whole-run cleanup (``target_node_id=None``),
+        also runs ``teardown(ctx)`` for every node that completed ``prepare``
+        in this run, then drops per-node ctx-acquired resources.
+        """
         to_close: List[Tuple[str, Any]] = []
         remaining: List[Tuple[str, Any]] = []
         with self._state_lock:
@@ -213,6 +228,13 @@ class GraphExecutor:
                 except Exception:
                     pass
 
+        # Phase 2: whole-run teardown of prepared nodes. Single-node cleanup
+        # (target_node_id) keeps the existing semantics — those resources are
+        # the legacy ctx.register_resource path.
+        if target_node_id is None:
+            executor = self._create_node_executor()
+            executor.teardown_prepared_nodes()
+
     def _create_node_executor(self) -> NodeExecutor:
         """Create a NodeExecutor instance with current state."""
         return NodeExecutor(
@@ -229,6 +251,8 @@ class GraphExecutor:
             resources=self._resources,
             state_lock=self._state_lock,
             force_no_cache=self._force_no_cache,
+            node_resources_state=self._node_resources_state,
+            prepared_nodes=self._prepared_nodes,
         )
 
     def _finalize_node_result(

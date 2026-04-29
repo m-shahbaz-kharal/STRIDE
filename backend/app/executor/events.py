@@ -239,6 +239,7 @@ class ExecutionEventEmitter:
             error=result.error,
             error_code=error_code or result.error_code,
             error_details=result.error_details,
+            error_payload=result.error_payload,
             duration_ms=result.duration_ms,
             level=result.level,
             progress=self.get_progress(),
