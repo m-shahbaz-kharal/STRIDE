@@ -35,23 +35,34 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import (
+    NodeInputError,
+    NodeMissingDependencyError,
+    NodeNetworkError,
+)
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import t_boolean, t_control, t_float, t_int, t_string, t_stream
 
 
 def _require_numpy() -> None:
     if not NUMPY_AVAILABLE:
-        raise RuntimeError("numpy is not installed. Please install it with: pip install numpy")
+        raise NodeMissingDependencyError(
+            "numpy is not installed. Please install it with: pip install numpy"
+        )
 
 
 def _require_cv2() -> None:
     if not CV2_AVAILABLE:
-        raise RuntimeError("OpenCV is not installed. Please install it with: pip install opencv-python")
+        raise NodeMissingDependencyError(
+            "OpenCV is not installed. Please install it with: pip install opencv-python"
+        )
 
 
 def _require_selenium() -> None:
     if not SELENIUM_AVAILABLE:
-        raise RuntimeError("Selenium is not installed. Please install it with: pip install selenium")
+        raise NodeMissingDependencyError(
+            "Selenium is not installed. Please install it with: pip install selenium"
+        )
 
 
 def _resolve_fl511_hls_url(camera_id: int) -> str:
@@ -92,7 +103,7 @@ def _resolve_fl511_hls_url(camera_id: int) -> str:
                 continue
 
         if not hls_url:
-            raise RuntimeError(f"Could not resolve stream URL for camera {camera_id}")
+            raise NodeNetworkError(f"Could not resolve stream URL for camera {camera_id}")
         return hls_url
     finally:
         driver.quit()
@@ -124,6 +135,12 @@ def _probe_stream_resolution(hls_url: str) -> Tuple[int, int]:
     return 704, 480
 
 
+# Process-wide registry of currently-live streams. This is *not* a
+# cross-run cache — entries are added when a stream starts and removed
+# the moment its `close()` runs (driven by the executor's run-scoped
+# resource teardown). The HTTP endpoint at
+# ``/api/streams/{stream_id}/frame`` needs to find a live stream by ID
+# from outside the executor scope, which is why the map is process-wide.
 ACTIVE_STREAMS: Dict[str, "StreamResource"] = {}
 
 
@@ -151,7 +168,7 @@ class StreamResource:
     ) -> None:
         _require_numpy()
         if not shutil.which("ffmpeg"):
-            raise RuntimeError("ffmpeg not found in PATH. Please install ffmpeg.")
+            raise NodeMissingDependencyError("ffmpeg not found in PATH. Please install ffmpeg.")
 
         self.stream_id = stream_id
         self.hls_url = hls_url
@@ -480,7 +497,7 @@ class Fl511StartNode(NodeBase):
             camera_id = int(camera_id)
         else:
             camera_id = 2130
-            
+
         if not hls_url:
             ctx.log(f"Resolving FL511 stream for camera {camera_id}")
             hls_url = _resolve_fl511_hls_url(camera_id)
@@ -490,18 +507,22 @@ class Fl511StartNode(NodeBase):
         refresh_minutes = int(inputs.get("refresh_minutes") if inputs.get("refresh_minutes") is not None else 4)
 
         stream_id = str(uuid.uuid4())[:8]
-        stream = StreamResource(
-            stream_id,
-            str(hls_url),
-            target_fps,
-            buffer_seconds,
-            camera_id=camera_id,
-            refresh_minutes=refresh_minutes,
-        )
 
-        # Register the stream resource so it gets cleaned up automatically
-        if hasattr(ctx, "register_resource"):
-            ctx.register_resource(stream)
+        def _factory() -> "StreamResource":
+            return StreamResource(
+                stream_id,
+                str(hls_url),
+                target_fps,
+                buffer_seconds,
+                camera_id=camera_id,
+                refresh_minutes=refresh_minutes,
+            )
+
+        # Phase 5: streams are run-scoped and intentionally cross-node:
+        # `fl511.connect` produces them, `fl511.get_frame` consumes them
+        # within the same run, and the executor closes the resource at
+        # run end (which removes it from ACTIVE_STREAMS).
+        stream = ctx.acquire_run_resource(f"stride_fl511:stream:{stream_id}", _factory)
 
         ctx.log(f"Connected stream {stream_id} at {stream.width}x{stream.height}")
         return {
@@ -547,8 +568,8 @@ class Fl511TickNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         stream = inputs.get("stream")
         if not stream or not isinstance(stream, StreamResource):
-            raise ValueError("Invalid or missing input: stream")
-        
+            raise NodeInputError("Invalid or missing input: stream", port="stream")
+
         timeout = float(inputs.get("timeout") if inputs.get("timeout") is not None else 1.0)
         jpeg_quality = int(inputs.get("quality") if inputs.get("quality") is not None else 85)
         require_frame = bool(inputs.get("require_frame") if inputs.get("require_frame") is not None else True)
@@ -559,8 +580,8 @@ class Fl511TickNode(NodeBase):
             if require_frame:
                 diagnostics = stream.diagnostics()
                 if diagnostics:
-                    raise TimeoutError(f"No frame available within {timeout}s. {diagnostics}")
-                raise TimeoutError(f"No frame available within {timeout}s")
+                    raise NodeNetworkError(f"No frame available within {timeout}s. {diagnostics}")
+                raise NodeNetworkError(f"No frame available within {timeout}s")
             return {
                 "control_out": None,
                 "image": None,
@@ -573,7 +594,7 @@ class Fl511TickNode(NodeBase):
         _require_cv2()
         ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ok:
-            raise RuntimeError("Failed to encode frame")
+            raise NodeNetworkError("Failed to encode frame")
         image_data = base64.b64encode(buffer).decode("utf-8")
         image_url = f"data:image/jpeg;base64,{image_data}"
         # ctx.log(f"Fetched frame from stream {stream.stream_id}")
@@ -612,8 +633,14 @@ class Fl511StopNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
         stream = inputs.get("stream")
         if not stream or not isinstance(stream, StreamResource):
-            raise ValueError("Invalid or missing input: stream")
-            
-        stream.close()
+            raise NodeInputError("Invalid or missing input: stream", port="stream")
+
+        # Release the run-scoped resource so the executor doesn't close
+        # it a second time at run end.
+        ctx.release_run_resource(f"stride_fl511:stream:{stream.stream_id}")
+        # Also call close() directly in case the resource was acquired
+        # outside the run-resource path (defensive — close() is idempotent).
+        if stream.stream_id in ACTIVE_STREAMS:
+            stream.close()
         ctx.log(f"Disconnected stream {stream.stream_id}")
         return {"control_out": None, "stopped": True}

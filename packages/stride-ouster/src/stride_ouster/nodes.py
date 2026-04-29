@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 import threading
 from typing import Any, Dict, List, Optional
@@ -20,20 +21,25 @@ except ImportError:
     OUSTER_AVAILABLE = False
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import (
+    NodeFileNotFoundError,
+    NodeInputError,
+    NodeMissingDependencyError,
+)
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import t_any, t_control, t_float, t_int, t_pointcloud, t_string
 
 
 def _require_ouster() -> None:
     if not OUSTER_AVAILABLE:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "ouster-sdk is not installed. Please install it with: pip install ouster-sdk"
         )
 
 
 def _require_numpy() -> None:
     if not NUMPY_AVAILABLE:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "numpy is not installed. Please install it with: pip install numpy"
         )
 
@@ -198,9 +204,15 @@ class OusterOpenSourceNode(NodeBase):
         metadata_path = inputs.get("metadata_path")
         metadata_path = str(metadata_path) if metadata_path is not None else ""
         if not pcap_path:
-            raise ValueError("pcap_path is required")
+            raise NodeInputError("pcap_path is required", port="pcap_path")
         if not metadata_path:
-            raise ValueError("metadata_path is required")
+            raise NodeInputError("metadata_path is required", port="metadata_path")
+        if not os.path.isfile(pcap_path):
+            raise NodeFileNotFoundError(f"pcap file not found: {pcap_path}", port="pcap_path")
+        if not os.path.isfile(metadata_path):
+            raise NodeFileNotFoundError(
+                f"metadata file not found: {metadata_path}", port="metadata_path",
+            )
 
         ctx.log(f"Opening Ouster source: {pcap_path}")
         t0 = time.time()
@@ -289,9 +301,11 @@ class OusterGetFrameNode(NodeBase):
 
         source_bundle = inputs.get("source")
         if not source_bundle or not isinstance(source_bundle, dict):
-            raise ValueError("Invalid or missing input: source")
+            raise NodeInputError("Invalid or missing input: source", port="source")
         if source_bundle.get("_type") != "OusterSource":
-            raise ValueError("source must come from an Open Ouster Source node")
+            raise NodeInputError(
+                "source must come from an Open Ouster Source node", port="source",
+            )
 
         lazy: _LazyScans = source_bundle["_lazy"]
         frame_index = int(inputs.get("frame_index") if inputs.get("frame_index") is not None else 0)
@@ -299,8 +313,9 @@ class OusterGetFrameNode(NodeBase):
 
         num_frames = source_bundle.get("num_frames", lazy.cached_count)
         if frame_index < 0 or frame_index >= num_frames:
-            raise ValueError(
-                f"frame_index {frame_index} out of range [0, {num_frames - 1}]"
+            raise NodeInputError(
+                f"frame_index {frame_index} out of range [0, {num_frames - 1}]",
+                port="frame_index",
             )
 
         t0 = time.time()
