@@ -10,7 +10,7 @@ from urllib.request import urlopen
 from . import register_node
 from .base import ExecutionContext, NodeBase
 from ..node_spec import NodeSpec, PortSpec
-from ..typesystem import t_boolean, t_control, t_string
+from ..typesystem import t_boolean, t_control, t_image, t_string
 
 
 # ============================================================================
@@ -23,7 +23,7 @@ LOAD_IMAGE_SPEC = NodeSpec(
     display_name="Load Image",
     category="Images",
     summary="Load an image from file or URL.",
-    description="Reads an image from a local file path or URL and returns it as a base64 encoded string.",
+    description="Reads an image from a local file path or URL and returns it as a base64 encoded data URL string carrying the canonical image record.",
     icon="image",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
@@ -31,7 +31,10 @@ LOAD_IMAGE_SPEC = NodeSpec(
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
-        PortSpec(name="image", type=t_string()),
+        # The output is the base64 data URL string; the type is `image`
+        # (kind, with subtype="data_url") so downstream image consumers
+        # — yolo, mediapipe, depth-anything, etc. — accept it.
+        PortSpec(name="image", type=t_image(subtype="data_url")),
     ],
 )
 
@@ -93,7 +96,7 @@ SAVE_IMAGE_SPEC = NodeSpec(
     icon="save",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="image", type=t_string().with_nullable(True), required=True),  # base64
+        PortSpec(name="image", type=t_image().with_nullable(True), required=True),
         PortSpec(name="file_path", type=t_string(), required=True, default=""),
     ],
     outputs=[
