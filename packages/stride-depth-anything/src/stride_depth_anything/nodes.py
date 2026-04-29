@@ -47,6 +47,7 @@ except ImportError:
     AutoModelForDepthEstimation = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_string, t_image, t_depthmap,
@@ -54,34 +55,30 @@ from stride_core.typesystem import (
 from stride_core.image_utils import decode_image_to_numpy, encode_numpy_to_image
 
 
-_MODEL_CACHE: Dict[str, Any] = {}
-
-
 def _require_deps() -> None:
     if not HAS_NUMPY or not HAS_CV2 or not HAS_PIL:
-        raise RuntimeError("numpy, opencv-python, and pillow are required for depth-anything nodes")
+        raise NodeMissingDependencyError("numpy, opencv-python, and pillow are required for depth-anything nodes")
     if not HAS_TORCH:
-        raise RuntimeError("torch not installed (pip install torch)")
+        raise NodeMissingDependencyError("torch not installed (pip install torch)")
     if not HAS_TRANSFORMERS:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "transformers not installed (pip install transformers). "
             "Depth Anything V2 weights are auto-downloaded by HF on first use."
         )
 
 
-def _load_model(checkpoint: str, device: str) -> "tuple[Any, Any, str]":
-    cache_key = f"{checkpoint}|{device}"
-    cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
+def _load_model(ctx: ExecutionContext, checkpoint: str, device: str) -> "tuple[Any, Any, str]":
+    """Get-or-create a depth-anything (processor, model, device) bundle on the run-scoped registry."""
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    cache_key = f"stride_depth_anything:{checkpoint}|{device}"
 
-    processor = AutoImageProcessor.from_pretrained(checkpoint)
-    model = AutoModelForDepthEstimation.from_pretrained(checkpoint).to(device).eval()
-    _MODEL_CACHE[cache_key] = (processor, model, device)
-    return processor, model, device
+    def _factory() -> "tuple[Any, Any, str]":
+        processor = AutoImageProcessor.from_pretrained(checkpoint)
+        model = AutoModelForDepthEstimation.from_pretrained(checkpoint).to(device).eval()
+        return (processor, model, device)
+
+    return ctx.acquire_run_resource(cache_key, _factory)
 
 
 DEPTH_ANYTHING_SPEC = NodeSpec(
@@ -150,7 +147,7 @@ class DepthAnythingNode(NodeBase):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
 
-        processor, model, used_device = _load_model(checkpoint, device)
+        processor, model, used_device = _load_model(ctx, checkpoint, device)
 
         with torch.no_grad():
             inputs_t = processor(images=pil_img, return_tensors="pt").to(used_device)

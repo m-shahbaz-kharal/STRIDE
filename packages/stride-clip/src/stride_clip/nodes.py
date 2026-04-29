@@ -47,38 +47,37 @@ except ImportError:
     CLIPProcessor = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
-    t_any, t_control, t_float, t_int, t_list, t_string, t_image, t_record,
+    t_control, t_float, t_int, t_list, t_string, t_image, t_record,
 )
 from stride_core.image_utils import decode_image_to_numpy
 
 
-_MODEL_CACHE: Dict[str, Any] = {}
-
-
 def _require_deps() -> None:
     if not HAS_NUMPY or not HAS_CV2 or not HAS_PIL:
-        raise RuntimeError("numpy, opencv-python, and pillow are required for CLIP nodes")
+        raise NodeMissingDependencyError("numpy, opencv-python, and pillow are required for CLIP nodes")
     if not HAS_TORCH:
-        raise RuntimeError("torch not installed (pip install torch)")
+        raise NodeMissingDependencyError("torch not installed (pip install torch)")
     if not HAS_TRANSFORMERS:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "transformers not installed (pip install transformers)."
         )
 
 
-def _load_model(checkpoint: str, device: str):
-    cache_key = f"{checkpoint}|{device}"
-    cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
+def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
+    """Get-or-create a (processor, model, device) bundle on the run-scoped registry."""
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    processor = CLIPProcessor.from_pretrained(checkpoint)
-    model = CLIPModel.from_pretrained(checkpoint).to(device).eval()
-    _MODEL_CACHE[cache_key] = (processor, model, device)
-    return processor, model, device
+    cache_key = f"stride_clip:{checkpoint}|{device}"
+
+    def _factory():
+        processor = CLIPProcessor.from_pretrained(checkpoint)
+        model = CLIPModel.from_pretrained(checkpoint).to(device).eval()
+        return (processor, model, device)
+
+    return ctx.acquire_run_resource(cache_key, _factory)
 
 
 def _bgr_to_pil(bgr: "np.ndarray") -> "Image.Image":
@@ -156,7 +155,7 @@ class CLIPClassifyNode(NodeBase):
         bgr = decode_image_to_numpy(image_str)
         pil = _bgr_to_pil(bgr)
 
-        processor, model, used_device = _load_model(checkpoint, device)
+        processor, model, used_device = _load_model(ctx, checkpoint, device)
 
         with torch.no_grad():
             batch = processor(text=prompts, images=pil, return_tensors="pt", padding=True).to(used_device)
@@ -229,7 +228,7 @@ class CLIPEmbedNode(NodeBase):
         bgr = decode_image_to_numpy(image_str)
         pil = _bgr_to_pil(bgr)
 
-        processor, model, used_device = _load_model(checkpoint, device)
+        processor, model, used_device = _load_model(ctx, checkpoint, device)
 
         with torch.no_grad():
             inp = processor(images=pil, return_tensors="pt").to(used_device)

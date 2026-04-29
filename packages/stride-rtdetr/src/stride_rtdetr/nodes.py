@@ -33,6 +33,7 @@ except ImportError:
     RTDETR = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -43,33 +44,32 @@ from stride_core.image_utils import (
 )
 
 
-_MODEL_CACHE: Dict[str, Any] = {}
-
-
 def _require_deps() -> None:
     if not HAS_NUMPY:
-        raise RuntimeError("numpy not installed")
+        raise NodeMissingDependencyError("numpy not installed")
     if not HAS_CV2:
-        raise RuntimeError("opencv-python not installed")
+        raise NodeMissingDependencyError("opencv-python not installed")
     if not HAS_ULTRA:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "ultralytics not installed (pip install ultralytics) — "
             "RTDETR is shipped as part of the ultralytics package."
         )
 
 
-def _load_model(weights: str, device: str) -> Any:
-    key = f"{weights}|{device}"
-    model = _MODEL_CACHE.get(key)
-    if model is None:
+def _load_model(ctx: ExecutionContext, weights: str, device: str) -> Any:
+    """Get-or-create an RT-DETR model on the run-scoped resource registry."""
+    key = f"stride_rtdetr:{weights}|{device}"
+
+    def _factory() -> Any:
         model = RTDETR(weights)
         if device:
             try:
                 model.to(device)
             except Exception:
                 pass
-        _MODEL_CACHE[key] = model
-    return model
+        return model
+
+    return ctx.acquire_run_resource(key, _factory)
 
 
 RTDETR_DETECT_SPEC = NodeSpec(
@@ -130,7 +130,7 @@ class RTDETRDetectNode(NodeBase):
         img = decode_image_to_numpy(image_str)
         h, w = img.shape[:2]
 
-        model = _load_model(weights, device)
+        model = _load_model(ctx, weights, device)
         results = model.predict(img, conf=conf, imgsz=imgsz, verbose=False)
         names = getattr(model, "names", {}) or {}
 

@@ -108,11 +108,15 @@ class GraphExecutor:
         self._variables: Dict[str, Any] = {}
         self._shared_metadata: Dict[str, Any] = {}
         self._resources: List[Tuple[str, Any]] = []
-        # Phase 2: per-run lifecycle bookkeeping. Both dicts are owned here
+        # Phase 2: per-run lifecycle bookkeeping. All dicts are owned here
         # and shared with every NodeExecutor created during the run so
         # prepare/forward/teardown observe the same state.
         self._node_resources_state: Dict[str, Dict[str, Any]] = {}
         self._prepared_nodes: Set[str] = set()
+        # Phase 5: per-run, cross-node resource registry (shared model
+        # caches, live FL511 streams, etc.). Released by the executor's
+        # teardown step at run end.
+        self._run_resources_state: Dict[str, Any] = {}
         self.execution_trace: List[NodeExecutionResult] = []
         self.outputs: Dict[str, Any] = {}
 
@@ -202,6 +206,8 @@ class GraphExecutor:
         # NodeExecutor; clearing here is the single source of truth.
         self._node_resources_state.clear()
         self._prepared_nodes.clear()
+        # Phase 5: also reset the run-scoped resource registry.
+        self._run_resources_state.clear()
         self._node_status = {node_id: NodeStatus.PENDING for node_id in self.nodes}
 
     def _cleanup_resources(self, target_node_id: Optional[str] = None) -> None:
@@ -253,6 +259,7 @@ class GraphExecutor:
             force_no_cache=self._force_no_cache,
             node_resources_state=self._node_resources_state,
             prepared_nodes=self._prepared_nodes,
+            run_resources_state=self._run_resources_state,
         )
 
     def _finalize_node_result(

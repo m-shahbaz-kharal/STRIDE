@@ -47,6 +47,7 @@ except ImportError:
     AutoProcessor = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -57,29 +58,27 @@ from stride_core.image_utils import (
 )
 
 
-_MODEL_CACHE: Dict[str, Any] = {}
-
-
 def _require_deps() -> None:
     if not HAS_NUMPY or not HAS_CV2 or not HAS_PIL:
-        raise RuntimeError("numpy, opencv-python, and pillow are required")
+        raise NodeMissingDependencyError("numpy, opencv-python, and pillow are required")
     if not HAS_TORCH:
-        raise RuntimeError("torch not installed")
+        raise NodeMissingDependencyError("torch not installed")
     if not HAS_TRANSFORMERS:
-        raise RuntimeError("transformers not installed (pip install transformers)")
+        raise NodeMissingDependencyError("transformers not installed (pip install transformers)")
 
 
-def _load_model(checkpoint: str, device: str):
-    cache_key = f"{checkpoint}|{device}"
-    cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
+def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
+    """Get-or-create a Grounding DINO (processor, model, device) bundle on the run-scoped registry."""
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    processor = AutoProcessor.from_pretrained(checkpoint)
-    model = AutoModelForZeroShotObjectDetection.from_pretrained(checkpoint).to(device).eval()
-    _MODEL_CACHE[cache_key] = (processor, model, device)
-    return processor, model, device
+    cache_key = f"stride_grounding_dino:{checkpoint}|{device}"
+
+    def _factory():
+        processor = AutoProcessor.from_pretrained(checkpoint)
+        model = AutoModelForZeroShotObjectDetection.from_pretrained(checkpoint).to(device).eval()
+        return (processor, model, device)
+
+    return ctx.acquire_run_resource(cache_key, _factory)
 
 
 GROUNDING_DINO_SPEC = NodeSpec(
@@ -167,7 +166,7 @@ class GroundingDinoNode(NodeBase):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(rgb)
 
-        processor, model, used_device = _load_model(checkpoint, device)
+        processor, model, used_device = _load_model(ctx, checkpoint, device)
 
         # Grounding DINO expects lowercase text ending with a period per phrase
         text = text_prompt.lower().strip()

@@ -22,7 +22,7 @@ All three nodes share the same input/output convention:
 from __future__ import annotations
 
 import base64
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 try:
     import numpy as np  # type: ignore
@@ -46,9 +46,10 @@ except ImportError:
     YOLO = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
-    t_any, t_boolean, t_control, t_float, t_int, t_list, t_record, t_string,
+    t_boolean, t_control, t_float, t_int, t_list, t_string,
     t_image, t_bbox2d, t_detections2d, t_keypoints,
 )
 from stride_core.image_utils import (
@@ -59,32 +60,34 @@ from stride_core.image_utils import (
 )
 
 
-# Module-level model cache so we don't reload the same .pt for every frame.
-_MODEL_CACHE: Dict[str, Any] = {}
-
-
 def _require_deps() -> None:
     if not HAS_NUMPY:
-        raise RuntimeError("numpy not installed (pip install numpy)")
+        raise NodeMissingDependencyError("numpy not installed (pip install numpy)")
     if not HAS_CV2:
-        raise RuntimeError("opencv-python not installed (pip install opencv-python)")
+        raise NodeMissingDependencyError("opencv-python not installed (pip install opencv-python)")
     if not HAS_ULTRA:
-        raise RuntimeError("ultralytics not installed (pip install ultralytics)")
+        raise NodeMissingDependencyError("ultralytics not installed (pip install ultralytics)")
 
 
-def _load_model(weights: str, device: str) -> Any:
-    """Load (or fetch from cache) a YOLO model for the given weights file."""
-    cache_key = f"{weights}|{device}"
-    model = _MODEL_CACHE.get(cache_key)
-    if model is None:
+def _load_model(ctx: ExecutionContext, weights: str, device: str) -> Any:
+    """Get-or-create a YOLO model on the run-scoped resource registry.
+
+    Multiple YOLO nodes in the same graph that reference the same
+    weights/device pair share a single model instance for the lifetime
+    of the run; the executor releases all run resources on teardown.
+    """
+    cache_key = f"stride_yolo:{weights}|{device}"
+
+    def _factory() -> Any:
         model = YOLO(weights)
         if device:
             try:
                 model.to(device)
             except Exception:
                 pass
-        _MODEL_CACHE[cache_key] = model
-    return model
+        return model
+
+    return ctx.acquire_run_resource(cache_key, _factory)
 
 
 def _coerce_int(value: Any, fallback: int) -> int:
@@ -172,7 +175,7 @@ class YoloDetectNode(NodeBase):
         img = decode_image_to_numpy(image_str)
         h, w = img.shape[:2]
 
-        model = _load_model(weights, device)
+        model = _load_model(ctx, weights, device)
         results = model.predict(img, conf=conf, iou=iou, imgsz=imgsz, verbose=False)
 
         names = getattr(model, "names", {}) or {}
@@ -286,7 +289,7 @@ class YoloSegmentNode(NodeBase):
         img = decode_image_to_numpy(image_str)
         h, w = img.shape[:2]
 
-        model = _load_model(weights, device)
+        model = _load_model(ctx, weights, device)
         results = model.predict(img, conf=conf, iou=iou, imgsz=imgsz, verbose=False)
         names = getattr(model, "names", {}) or {}
 
@@ -402,7 +405,7 @@ class YoloPoseNode(NodeBase):
         img = decode_image_to_numpy(image_str)
         h, w = img.shape[:2]
 
-        model = _load_model(weights, device)
+        model = _load_model(ctx, weights, device)
         results = model.predict(img, conf=conf, iou=iou, imgsz=imgsz, verbose=False)
         names = getattr(model, "names", {}) or {}
 

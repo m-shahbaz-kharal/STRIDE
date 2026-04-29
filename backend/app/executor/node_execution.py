@@ -91,6 +91,7 @@ class NodeExecutor:
         force_no_cache: Set[str],
         node_resources_state: Optional[Dict[str, Dict[str, Any]]] = None,
         prepared_nodes: Optional[Set[str]] = None,
+        run_resources_state: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize the node executor.
 
@@ -129,6 +130,11 @@ class NodeExecutor:
             node_resources_state if node_resources_state is not None else {}
         )
         self.prepared_nodes: Set[str] = prepared_nodes if prepared_nodes is not None else set()
+        # Phase 5: per-run, cross-node resource registry. Released en masse
+        # in teardown_prepared_nodes() at run end.
+        self.run_resources_state: Dict[str, Any] = (
+            run_resources_state if run_resources_state is not None else {}
+        )
 
     def can_cache(self, node_id: str) -> bool:
         """Check if a node's outputs can be cached.
@@ -446,6 +452,10 @@ class NodeExecutor:
         node_resources = getattr(self, "node_resources_state", None)
         if node_resources is not None:
             ctx.node_resources = node_resources
+        # Phase 5: run-scoped (cross-node) resources, also held by the runner.
+        run_resources = getattr(self, "run_resources_state", None)
+        if run_resources is not None:
+            ctx.run_resources = run_resources
 
         def _register_resource(r: Any) -> None:
             with self.state_lock:
@@ -579,6 +589,19 @@ class NodeExecutor:
                         close()
                     except Exception:
                         pass
+
+        # Phase 5: release every run-scoped resource (model sessions,
+        # streaming workers shared across nodes, …) at run end.
+        for key in list(self.run_resources_state.keys()):
+            resource = self.run_resources_state.pop(key, None)
+            if resource is None:
+                continue
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
 
     def make_interrupted_result(self, node_id: str) -> "NodeExecutionResult":
         """Create a result for an interrupted node.

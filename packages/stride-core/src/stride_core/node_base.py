@@ -47,6 +47,11 @@ class ExecutionContext:
     variables: Dict[str, Any] = field(default_factory=dict)
     resources: List[Any] = field(default_factory=list)
     node_resources: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Phase 5: per-run, *cross-node* resource registry. Stateful resources
+    # that intentionally outlive a single node's prepare/teardown but
+    # die at run end (e.g. live FL511 streams, shared image models)
+    # live here. Keyed by an opaque string the producer chooses.
+    run_resources: Dict[str, Any] = field(default_factory=dict)
     _interrupted: bool = field(default=False, repr=False)
 
     # These are injected by the executor at runtime
@@ -129,6 +134,44 @@ class ExecutionContext:
             return
         for nid in list(self.node_resources.keys()):
             self.release_all_node_resources(nid)
+
+    def acquire_run_resource(
+        self,
+        key: str,
+        factory: Callable[[], Any],
+    ) -> Any:
+        """Get-or-create a per-run, *cross-node* resource.
+
+        Unlike ``acquire_node_resource`` (per-node), the resource lives
+        on a run-wide registry so multiple nodes within the same run can
+        share it (e.g. a model session referenced by several converter
+        nodes, or a live stream produced by ``fl511.connect`` and
+        consumed by ``fl511.get_frame``). The executor releases all
+        run resources at run end.
+        """
+        if key not in self.run_resources:
+            self.run_resources[key] = factory()
+        return self.run_resources[key]
+
+    def release_run_resource(self, key: str) -> None:
+        """Release a run-scoped resource immediately.
+
+        Calls ``.close()`` on it if available; no-op if absent.
+        """
+        if key not in self.run_resources:
+            return
+        resource = self.run_resources.pop(key)
+        close = getattr(resource, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def release_all_run_resources(self) -> None:
+        """Release every run-scoped resource. Used by the executor at run end."""
+        for key in list(self.run_resources.keys()):
+            self.release_run_resource(key)
 
     @property
     def is_interrupted(self) -> bool:
