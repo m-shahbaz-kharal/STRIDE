@@ -297,19 +297,22 @@ describe('hasCycle', () => {
   });
 
   it('should detect cycle in larger graph', () => {
-    //     b -> e
-    //    /      \
-    // a          f
-    //    \      /
-    //     c -> d (with d -> b creating cycle)
+    //     b -> e -> d (with d -> b creating cycle)
+    //    /
+    // a
+    //    \
+    //     c -> d -> f
+    // The original spec listed `d -> b` as a cycle but b couldn't
+    // reach d through any path; the cycle never closed. Adding
+    // `e -> d` makes b → e → d → b a real cycle.
     const edges = [
       makeEdge('a', 'b'),
       makeEdge('a', 'c'),
       makeEdge('b', 'e'),
       makeEdge('c', 'd'),
       makeEdge('d', 'f'),
-      makeEdge('e', 'f'),
-      makeEdge('d', 'b'), // Cycle!
+      makeEdge('e', 'd'),
+      makeEdge('d', 'b'), // Closes the b → e → d → b cycle.
     ];
     expect(hasCycle(['a', 'b', 'c', 'd', 'e', 'f'], edges)).toBe(true);
   });

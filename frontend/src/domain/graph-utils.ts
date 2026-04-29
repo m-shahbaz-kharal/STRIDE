@@ -82,9 +82,19 @@ export function getDependentNodes(
         isControl = isControlType(sourceType) || isControlType(targetType);
       }
 
-      // Control edges always included; data edges check cache
+      // Phase 3 §7 / Commit G test-infra cleanup:
+      // When `includeCached` is false (default), stop *at* a cached
+      // boundary — that means we include the cached node itself in
+      // the dependency set but do NOT traverse past it (the cached
+      // outputs satisfy us). Control edges always traverse through.
       const hasCache = hasCachedOutput ? hasCachedOutput(edge.source) : false;
-      if (isControl || includeCached || !hasCache) {
+      if (isControl || includeCached) {
+        dependentIds.add(edge.source);
+        queue.push(edge.source);
+      } else if (hasCache) {
+        // Boundary node — include it, do not enqueue further upstream.
+        dependentIds.add(edge.source);
+      } else {
         dependentIds.add(edge.source);
         queue.push(edge.source);
       }

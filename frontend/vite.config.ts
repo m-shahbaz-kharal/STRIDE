@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -23,5 +24,15 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  // Phase 3 — vitest config. Co-located with vite.config so the
+  // test runner reuses the same plugin/path resolution as dev/build.
+  // jsdom because we render React components in tests.
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    css: false,
   },
 });

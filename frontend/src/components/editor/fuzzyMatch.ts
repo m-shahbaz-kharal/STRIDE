@@ -45,17 +45,22 @@ export const fuzzyMatch = (query: string, candidate: string): FuzzyMatchResult =
   const q = query.toLowerCase();
   const c = candidate.toLowerCase();
 
+  // Length penalty (small): if two candidates tie on the rule-based
+  // score, the shorter one ranks higher. Capped so long names that
+  // match well still win over short noise.
+  const lengthPenalty = Math.min(c.length, 50);
+
   // Fast path — exact / prefix.
   if (q === c) return { score: 1000, positions: Array.from({ length: c.length }, (_, i) => i) };
   if (c.startsWith(q)) {
-    return { score: 900, positions: Array.from({ length: q.length }, (_, i) => i) };
+    return { score: 900 - lengthPenalty * 0.5, positions: Array.from({ length: q.length }, (_, i) => i) };
   }
   if (c.includes(q)) {
     const start = c.indexOf(q);
     const positions = Array.from({ length: q.length }, (_, i) => start + i);
     // Prefer matches that start at a word boundary.
     const boundaryBonus = isWordBoundary(candidate, start) ? 200 : 0;
-    return { score: 700 + boundaryBonus, positions };
+    return { score: 700 + boundaryBonus - lengthPenalty * 0.5, positions };
   }
 
   // Subsequence walk.
