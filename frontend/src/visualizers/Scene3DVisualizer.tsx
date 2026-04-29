@@ -1,8 +1,7 @@
 /**
- * Scene3DVisualizer — the powerful 3D viewer (Phase 4 headline deliverable).
+ * Scene3DVisualizer — the powerful 3D viewer.
  *
- * Replaces the previous custom WebGL ``Scene3DWidget`` and ``PointCloudWidget``
- * with a single ``@react-three/fiber`` viewer that supports:
+ * A single ``@react-three/fiber`` viewer for every 3-D wire payload. Supports:
  *
  *   - Orbit / pan / zoom controls (drei ``<OrbitControls />``).
  *   - Point cloud rendering via a custom shader material with selectable

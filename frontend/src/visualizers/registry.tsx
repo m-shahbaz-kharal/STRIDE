@@ -14,9 +14,6 @@
  *     ``bbox3d`` / ``region3d`` → Scene3DVisualizer (the R3F powerhouse)
  *   - everything else → JSON dump fallback
  *
- * The legacy custom-WebGL ``Scene3DWidget`` and ``PointCloudWidget`` are
- * removed in this phase — Scene3DVisualizer fully supersedes both.
- *
  * Reference: docs/architecture/unified-type-system-and-ux.md §8 (visualizer
  * registry) and §8.4 (composition).
  */
