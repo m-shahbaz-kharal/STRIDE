@@ -60,14 +60,12 @@ except ImportError:
     HAS_PCDET = False
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
-    t_any, t_boolean, t_control, t_float, t_int, t_list, t_pointcloud,
-    t_record, t_string, t_bbox3d, t_detections3d,
+    t_control, t_float, t_int, t_list, t_pointcloud,
+    t_string, t_bbox3d, t_detections3d,
 )
-
-
-_MODEL_CACHE: Dict[str, Any] = {}
 
 
 def _decode_pointcloud(cloud: Dict[str, Any]) -> "np.ndarray":
@@ -103,10 +101,10 @@ def _decode_pointcloud(cloud: Dict[str, Any]) -> "np.ndarray":
 
 
 def _ensure_backend() -> str:
-    """Pick a backend or raise RuntimeError with install instructions."""
+    """Pick a backend or raise NodeMissingDependencyError with install instructions."""
     if HAS_PCDET and HAS_TORCH:
         return "pcdet"
-    raise RuntimeError(
+    raise NodeMissingDependencyError(
         "No 3D detector backend installed. This node wraps OpenPCDet / "
         "mmdet3d, which require CUDA-compiled extensions. Install one of:\n"
         "  - OpenPCDet (recommended): see "
@@ -116,40 +114,44 @@ def _ensure_backend() -> str:
     )
 
 
-def _load_pcdet_model(config_path: str, weights: str, device: str) -> Tuple[Any, Any]:
-    """Build a pcdet model + dataset template from a config/weights pair."""
-    cache_key = f"{config_path}|{weights}|{device}"
-    cached = _MODEL_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    cfg_from_yaml_file(config_path, cfg)
+def _load_pcdet_model(
+    ctx: ExecutionContext,
+    config_path: str,
+    weights: str,
+    device: str,
+) -> Tuple[Any, Any]:
+    """Get-or-create a (pcdet model, dataset template) bundle on the run-scoped registry."""
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    cache_key = f"stride_pcdet:{config_path}|{weights}|{device}"
 
-    # Minimal dataset template providing class_names + point_feature_encoder
-    class _SingleFrameDataset(DatasetTemplate):
-        def __init__(self):
-            super().__init__(
-                dataset_cfg=cfg.DATA_CONFIG,
-                class_names=cfg.CLASS_NAMES,
-                training=False,
-                root_path=None,
-                logger=None,
-            )
+    def _factory() -> Tuple[Any, Any]:
+        cfg_from_yaml_file(config_path, cfg)
 
-        def __len__(self):  # pragma: no cover - never iterated
-            return 0
+        # Minimal dataset template providing class_names + point_feature_encoder.
+        class _SingleFrameDataset(DatasetTemplate):
+            def __init__(self):
+                super().__init__(
+                    dataset_cfg=cfg.DATA_CONFIG,
+                    class_names=cfg.CLASS_NAMES,
+                    training=False,
+                    root_path=None,
+                    logger=None,
+                )
 
-        def __getitem__(self, idx):  # pragma: no cover - never indexed
-            raise StopIteration
+            def __len__(self):  # pragma: no cover - never iterated
+                return 0
 
-    dataset = _SingleFrameDataset()
-    model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=dataset)
-    model.load_params_from_file(filename=weights, logger=None, to_cpu=(device == "cpu"))
-    model.to(device).eval()
-    _MODEL_CACHE[cache_key] = (model, dataset)
-    return model, dataset
+            def __getitem__(self, idx):  # pragma: no cover - never indexed
+                raise StopIteration
+
+        dataset = _SingleFrameDataset()
+        model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=dataset)
+        model.load_params_from_file(filename=weights, logger=None, to_cpu=(device == "cpu"))
+        model.to(device).eval()
+        return (model, dataset)
+
+    return ctx.acquire_run_resource(cache_key, _factory)
 
 
 def _run_pcdet_inference(
@@ -248,7 +250,7 @@ def _shared_forward(
     detector_label: str,
 ) -> Dict[str, Any]:
     if not HAS_NUMPY:
-        raise RuntimeError("numpy not installed")
+        raise NodeMissingDependencyError("numpy not installed")
 
     cloud = inputs.get("point_cloud")
     if not cloud:
@@ -263,19 +265,19 @@ def _shared_forward(
     device = inputs.get("device") or ""
 
     if not config_path or not weights:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             f"{detector_label}: `config_path` and `weights` are required. "
             "See the package README for installation + checkpoint URLs."
         )
 
     backend = _ensure_backend()
     if backend != "pcdet":  # pragma: no cover - only path implemented
-        raise RuntimeError(f"unsupported backend {backend!r}")
+        raise NodeMissingDependencyError(f"unsupported backend {backend!r}")
 
     pts = _decode_pointcloud(cloud)
     ctx.log(f"{detector_label}: {len(pts)} points → {config_path}")
 
-    model, dataset = _load_pcdet_model(config_path, weights, device)
+    model, dataset = _load_pcdet_model(ctx, config_path, weights, device)
     boxes = _run_pcdet_inference(model, dataset, pts, score_threshold, device)
 
     detections_record = {

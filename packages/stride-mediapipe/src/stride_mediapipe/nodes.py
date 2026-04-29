@@ -48,15 +48,13 @@ except ImportError:
     _mp_vision = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeMissingDependencyError, NodeFileNotFoundError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
     t_image, t_keypoints,
 )
 from stride_core.image_utils import decode_image_to_numpy, encode_numpy_to_image
-
-
-_DETECTORS: Dict[str, Any] = {}
 
 
 # Official Google-hosted task bundle URLs.  These are the canonical
@@ -83,7 +81,7 @@ def _ensure_task_file(task_key: str, override_path: str = "") -> str:
     """Resolve a task bundle: prefer caller-supplied path, else download."""
     if override_path:
         if not os.path.exists(override_path):
-            raise FileNotFoundError(f"model file not found: {override_path}")
+            raise NodeFileNotFoundError(f"model file not found: {override_path}")
         return override_path
 
     if task_key not in _TASK_URLS:
@@ -121,9 +119,9 @@ def _ensure_task_file(task_key: str, override_path: str = "") -> str:
 
 def _require_deps() -> None:
     if not HAS_NUMPY or not HAS_CV2:
-        raise RuntimeError("numpy and opencv-python are required for MediaPipe nodes")
+        raise NodeMissingDependencyError("numpy and opencv-python are required for MediaPipe nodes")
     if not HAS_MP:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "mediapipe not installed. Install with: pip install mediapipe"
         )
 
@@ -171,22 +169,27 @@ POSE_SPEC = NodeSpec(
 )
 
 
-def _build_pose(complexity: int, num_poses: int, min_conf: float, model_path: str) -> Any:
-    key = f"pose|{complexity}|{num_poses}|{min_conf}|{model_path}"
-    det = _DETECTORS.get(key)
-    if det is not None:
-        return det
-    task_key = {0: "pose_lite", 1: "pose_full", 2: "pose_heavy"}.get(complexity, "pose_full")
-    path = _ensure_task_file(task_key, model_path)
-    options = _mp_vision.PoseLandmarkerOptions(
-        base_options=_mp_tasks.BaseOptions(model_asset_path=path),
-        running_mode=_mp_vision.RunningMode.IMAGE,
-        num_poses=int(num_poses),
-        min_pose_detection_confidence=float(min_conf),
-    )
-    det = _mp_vision.PoseLandmarker.create_from_options(options)
-    _DETECTORS[key] = det
-    return det
+def _build_pose(
+    ctx: ExecutionContext,
+    complexity: int,
+    num_poses: int,
+    min_conf: float,
+    model_path: str,
+) -> Any:
+    key = f"stride_mediapipe:pose|{complexity}|{num_poses}|{min_conf}|{model_path}"
+
+    def _factory() -> Any:
+        task_key = {0: "pose_lite", 1: "pose_full", 2: "pose_heavy"}.get(complexity, "pose_full")
+        path = _ensure_task_file(task_key, model_path)
+        options = _mp_vision.PoseLandmarkerOptions(
+            base_options=_mp_tasks.BaseOptions(model_asset_path=path),
+            running_mode=_mp_vision.RunningMode.IMAGE,
+            num_poses=int(num_poses),
+            min_pose_detection_confidence=float(min_conf),
+        )
+        return _mp_vision.PoseLandmarker.create_from_options(options)
+
+    return ctx.acquire_run_resource(key, _factory)
 
 
 @register_node(POSE_SPEC)
@@ -203,7 +206,7 @@ class MediaPipePoseNode(NodeBase):
         annotate = bool(inputs.get("annotate", True))
         model_path = inputs.get("model_path") or ""
 
-        det = _build_pose(complexity, num_poses, min_conf, model_path)
+        det = _build_pose(ctx, complexity, num_poses, min_conf, model_path)
 
         bgr = decode_image_to_numpy(image_str)
         h, w = bgr.shape[:2]
@@ -277,21 +280,25 @@ HANDS_SPEC = NodeSpec(
 )
 
 
-def _build_hands(max_hands: int, min_conf: float, model_path: str) -> Any:
-    key = f"hands|{max_hands}|{min_conf}|{model_path}"
-    det = _DETECTORS.get(key)
-    if det is not None:
-        return det
-    path = _ensure_task_file("hands", model_path)
-    options = _mp_vision.HandLandmarkerOptions(
-        base_options=_mp_tasks.BaseOptions(model_asset_path=path),
-        running_mode=_mp_vision.RunningMode.IMAGE,
-        num_hands=int(max_hands),
-        min_hand_detection_confidence=float(min_conf),
-    )
-    det = _mp_vision.HandLandmarker.create_from_options(options)
-    _DETECTORS[key] = det
-    return det
+def _build_hands(
+    ctx: ExecutionContext,
+    max_hands: int,
+    min_conf: float,
+    model_path: str,
+) -> Any:
+    key = f"stride_mediapipe:hands|{max_hands}|{min_conf}|{model_path}"
+
+    def _factory() -> Any:
+        path = _ensure_task_file("hands", model_path)
+        options = _mp_vision.HandLandmarkerOptions(
+            base_options=_mp_tasks.BaseOptions(model_asset_path=path),
+            running_mode=_mp_vision.RunningMode.IMAGE,
+            num_hands=int(max_hands),
+            min_hand_detection_confidence=float(min_conf),
+        )
+        return _mp_vision.HandLandmarker.create_from_options(options)
+
+    return ctx.acquire_run_resource(key, _factory)
 
 
 @register_node(HANDS_SPEC)
@@ -307,7 +314,7 @@ class MediaPipeHandsNode(NodeBase):
         annotate = bool(inputs.get("annotate", True))
         model_path = inputs.get("model_path") or ""
 
-        det = _build_hands(max_hands, min_conf, model_path)
+        det = _build_hands(ctx, max_hands, min_conf, model_path)
 
         bgr = decode_image_to_numpy(image_str)
         h, w = bgr.shape[:2]
@@ -379,21 +386,25 @@ FACE_SPEC = NodeSpec(
 )
 
 
-def _build_face(max_faces: int, min_conf: float, model_path: str) -> Any:
-    key = f"face|{max_faces}|{min_conf}|{model_path}"
-    det = _DETECTORS.get(key)
-    if det is not None:
-        return det
-    path = _ensure_task_file("face", model_path)
-    options = _mp_vision.FaceLandmarkerOptions(
-        base_options=_mp_tasks.BaseOptions(model_asset_path=path),
-        running_mode=_mp_vision.RunningMode.IMAGE,
-        num_faces=int(max_faces),
-        min_face_detection_confidence=float(min_conf),
-    )
-    det = _mp_vision.FaceLandmarker.create_from_options(options)
-    _DETECTORS[key] = det
-    return det
+def _build_face(
+    ctx: ExecutionContext,
+    max_faces: int,
+    min_conf: float,
+    model_path: str,
+) -> Any:
+    key = f"stride_mediapipe:face|{max_faces}|{min_conf}|{model_path}"
+
+    def _factory() -> Any:
+        path = _ensure_task_file("face", model_path)
+        options = _mp_vision.FaceLandmarkerOptions(
+            base_options=_mp_tasks.BaseOptions(model_asset_path=path),
+            running_mode=_mp_vision.RunningMode.IMAGE,
+            num_faces=int(max_faces),
+            min_face_detection_confidence=float(min_conf),
+        )
+        return _mp_vision.FaceLandmarker.create_from_options(options)
+
+    return ctx.acquire_run_resource(key, _factory)
 
 
 @register_node(FACE_SPEC)
@@ -409,7 +420,7 @@ class MediaPipeFaceMeshNode(NodeBase):
         annotate = bool(inputs.get("annotate", True))
         model_path = inputs.get("model_path") or ""
 
-        det = _build_face(max_faces, min_conf, model_path)
+        det = _build_face(ctx, max_faces, min_conf, model_path)
 
         bgr = decode_image_to_numpy(image_str)
         h, w = bgr.shape[:2]

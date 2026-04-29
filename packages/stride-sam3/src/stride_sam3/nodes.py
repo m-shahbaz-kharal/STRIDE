@@ -27,29 +27,35 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import (
+    NodeMissingDependencyError,
+    NodeNetworkError,
+)
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
-    t_any, t_boolean, t_control, t_float, t_int, 
+    t_any, t_boolean, t_control, t_float, t_int,
     t_list, t_string,
 )
 
 
 def _require_requests() -> None:
     if not REQUESTS_AVAILABLE:
-        raise RuntimeError("requests library not installed. Please install with: pip install requests")
+        raise NodeMissingDependencyError(
+            "requests library not installed. Please install with: pip install requests"
+        )
 
 
 def _make_request(
     server_url: str,
-    method: str, 
-    endpoint: str, 
+    method: str,
+    endpoint: str,
     json_data: Optional[Dict] = None,
     timeout: int = 30
 ) -> Dict[str, Any]:
     """Make a request to the SAM3 server."""
     _require_requests()
     url = f"{server_url.rstrip('/')}/{endpoint.lstrip('/')}"
-    
+
     try:
         if method.upper() == "GET":
             response = requests.get(url, timeout=timeout)
@@ -59,20 +65,20 @@ def _make_request(
             response = requests.delete(url, timeout=timeout)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
-        
+
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.Timeout:
-        raise TimeoutError(f"Request to {url} timed out after {timeout}s")
-    except requests.exceptions.ConnectionError:
-        raise ConnectionError(f"Could not connect to SAM3 server at {server_url}")
+    except requests.exceptions.Timeout as exc:
+        raise NodeNetworkError(f"Request to {url} timed out after {timeout}s") from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise NodeNetworkError(f"Could not connect to SAM3 server at {server_url}") from exc
     except requests.exceptions.HTTPError as e:
         error_detail = ""
         try:
             error_detail = e.response.json().get("detail", str(e))
         except Exception:
             error_detail = str(e)
-        raise RuntimeError(f"SAM3 server error: {error_detail}")
+        raise NodeNetworkError(f"SAM3 server error: {error_detail}") from e
 
 
 # =============================================================================
