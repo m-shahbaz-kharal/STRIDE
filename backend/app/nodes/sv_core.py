@@ -68,6 +68,10 @@ SV_IMAGE_DECODE_SPEC = NodeSpec(
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        # t_any: emits an in-process numpy ndarray (BGR), not the
+        # canonical `image` record. The supervision pipeline uses
+        # ndarrays end-to-end; the cross-process wire form is
+        # produced by sv.image.encode below.
         PortSpec(name="image", type=t_any()),
     ],
 )
@@ -93,6 +97,9 @@ SV_IMAGE_ENCODE_SPEC = NodeSpec(
     description="Encodes a BGR numpy array back into a base64 PNG data-URL string.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        # t_any: consumes an in-process numpy ndarray (BGR) produced by
+        # sv.image.decode or any sv annotator. No record-shaped image
+        # is convertible to a numpy array at the type level.
         PortSpec(name="image", type=t_any(), required=True),
     ],
     outputs=[
@@ -126,12 +133,18 @@ SV_DETECTIONS_CREATE_SPEC = NodeSpec(
     description="Creates a supervision Detections object from xyxy bounding boxes, optional confidence scores, and optional class IDs.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
-        PortSpec(name="xyxy", type=t_any(), required=True),
-        PortSpec(name="confidence", type=t_any(), required=False, default=None),
-        PortSpec(name="class_id", type=t_any(), required=False, default=None),
+        PortSpec(name="xyxy", type=t_list(t_list(t_float())), required=True),
+        PortSpec(name="confidence", type=t_list(t_float()).with_nullable(True),
+                 required=False, default=None),
+        PortSpec(name="class_id", type=t_list(t_int()).with_nullable(True),
+                 required=False, default=None),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        # t_any: emits an in-process supervision.Detections object,
+        # opaque to the wire format. Annotator nodes consume it via
+        # the same in-process ref. Phase-2 conversion to t_detections2d
+        # would require sv.Detections -> record marshalling.
         PortSpec(name="detections", type=t_any()),
     ],
 )
@@ -169,12 +182,14 @@ SV_DETECTIONS_FILTER_SPEC = NodeSpec(
     description="Filters a Detections object by minimum confidence threshold and/or a list of allowed class IDs.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        # t_any: see sv.detections.create — opaque sv.Detections handle.
         PortSpec(name="detections", type=t_any(), required=True),
         PortSpec(name="min_confidence", type=t_float(), required=False, default=0.0),
         PortSpec(name="class_ids", type=t_string(), required=False, default=""),
     ],
     outputs=[
         PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        # t_any: same opaque sv.Detections handle, sliced.
         PortSpec(name="detections", type=t_any()),
     ],
 )
@@ -214,6 +229,7 @@ SV_DETECTIONS_COUNT_SPEC = NodeSpec(
     description="Returns the count of detections and basic statistics (min/max/mean confidence).",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        # t_any: opaque sv.Detections handle (see sv.detections.create).
         PortSpec(name="detections", type=t_any(), required=True),
     ],
     outputs=[
@@ -250,6 +266,7 @@ SV_DETECTIONS_LABELS_SPEC = NodeSpec(
     description="Creates label strings from detections, optionally mapping class IDs to names and appending confidence scores.",
     inputs=[
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        # t_any: opaque sv.Detections handle (see sv.detections.create).
         PortSpec(name="detections", type=t_any(), required=True),
         PortSpec(name="class_names", type=t_string(), required=False, default=""),
         PortSpec(name="show_confidence", type=t_float(), required=False, default=1.0),
