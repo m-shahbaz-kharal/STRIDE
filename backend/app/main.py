@@ -225,23 +225,30 @@ def serialize_event(event) -> str:
 async def websocket_run_graph(websocket: WebSocket):
     """WebSocket endpoint for streaming graph execution."""
     await websocket.accept()
-    
+
     # Lock to ensure thread-safe writes to the websocket
     send_lock = asyncio.Lock()
-    
+
+    # Track executors created by this socket so we can cancel them if the
+    # connection drops or is forcefully closed.
+    active_executors: set[str] = set()
+
     async def handle_request(payload: Dict[str, Any]):
+        graph_executor: GraphExecutor | None = None
         try:
             graph_definition = payload.get("graph", payload)
             options = payload.get("options", {})
             graph_executor = GraphExecutor(graph_definition, options=options)
-            
+            active_executors.add(graph_executor.execution_id)
+
             async for event in graph_executor.run_streaming():
                 message = serialize_event(event)
                 try:
                     async with send_lock:
                         await websocket.send_text(message)
                 except Exception:
-                    # Connection likely closed
+                    # Connection likely closed - propagate cancellation to executor
+                    graph_executor._cancellation.cancel_all()
                     break
                     
             final_result = {
@@ -283,9 +290,14 @@ async def websocket_run_graph(websocket: WebSocket):
                     await websocket.send_text(json.dumps(error_response))
             except Exception:
                 pass
+        except asyncio.CancelledError:
+            # Connection dropped or task was cancelled - propagate to executor
+            if graph_executor is not None:
+                graph_executor._cancellation.cancel_all()
+            raise
         except Exception as exc:
             error_response = {
-                "event_type": "error", 
+                "event_type": "error",
                 "error": f"Unexpected error: {str(exc)}",
             }
             try:
@@ -293,26 +305,42 @@ async def websocket_run_graph(websocket: WebSocket):
                     await websocket.send_text(json.dumps(error_response))
             except Exception:
                 pass
+        finally:
+            if graph_executor is not None:
+                active_executors.discard(graph_executor.execution_id)
 
     # Keep track of active tasks to prevent garbage collection
     background_tasks = set()
-    
+
+    def _cancel_active_executors() -> None:
+        """Signal cancellation to every executor still running on this socket."""
+        for execution_id in list(active_executors):
+            try:
+                GraphExecutor.cancel_execution(execution_id)
+            except Exception:
+                pass
+
     try:
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
-            
+
             # Create a background task for each request to allow concurrency
             task = asyncio.create_task(handle_request(payload))
             background_tasks.add(task)
             task.add_done_callback(background_tasks.discard)
-                
+
     except WebSocketDisconnect:
-        # Cancel all running tasks when connection drops
+        # Tell every executor on this socket to stop, then cancel the
+        # asyncio tasks running them. The executor's finally block will
+        # tear down resources cleanly.
+        _cancel_active_executors()
         for task in background_tasks:
             task.cancel()
     except Exception:
-        pass
+        _cancel_active_executors()
+        for task in background_tasks:
+            task.cancel()
 
 
 if __name__ == "__main__":

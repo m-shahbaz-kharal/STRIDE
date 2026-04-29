@@ -47,9 +47,9 @@ class CancellationController:
     def reset(self) -> None:
         """Reset all cancellation state for a new execution run."""
         self._cancel_all.clear()
-        self._cancelled_nodes.clear()
         self._interruption_time = None
         with self._state_lock:
+            self._cancelled_nodes.clear()
             self._running_tasks = {}
             self._running_processes = {}
             self._loop_body_nodes = {}
@@ -85,16 +85,17 @@ class CancellationController:
         Args:
             node_id: ID of the node to cancel
         """
-        self._cancelled_nodes.add(node_id)
+        with self._state_lock:
+            self._cancelled_nodes.add(node_id)
+            body_nodes = set(self._loop_body_nodes.get(node_id, set()))
+            # If this is a loop node, cascade cancellation to all body nodes
+            for body_id in body_nodes:
+                self._cancelled_nodes.add(body_id)
+
         self._cancel_running_processes(target=node_id)
         self.cancel_running_tasks(target=node_id)
 
-        # If this is a loop node, cascade cancellation to all body nodes
-        with self._state_lock:
-            body_nodes = self._loop_body_nodes.get(node_id, set())
-
         for body_id in body_nodes:
-            self._cancelled_nodes.add(body_id)
             self._cancel_running_processes(target=body_id)
             self.cancel_running_tasks(target=body_id)
 
@@ -117,13 +118,13 @@ class CancellationController:
         if self._cancel_all.is_set():
             return True
         if node_id is not None:
-            if node_id in self._cancelled_nodes:
-                return True
-            # Also check if this node's parent loop is cancelled
             with self._state_lock:
+                if node_id in self._cancelled_nodes:
+                    return True
+                # Also check if this node's parent loop is cancelled
                 parent_loop = self._body_to_loop.get(node_id)
-            if parent_loop and parent_loop in self._cancelled_nodes:
-                return True
+                if parent_loop and parent_loop in self._cancelled_nodes:
+                    return True
         return False
 
     def register_running(self, node_id: str, fut: asyncio.Future) -> None:

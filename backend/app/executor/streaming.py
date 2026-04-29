@@ -827,7 +827,6 @@ class StreamingExecutor:
                     self._thread_pool.shutdown(wait=False)
                 self._thread_pool = None
             self.cleanup_resources()
-            self.unregister_execution()
 
             if max_parallelism == 0 and executed_count > 0:
                 max_parallelism = 1
@@ -840,6 +839,10 @@ class StreamingExecutor:
                 completed = progress_state["completed"]
                 total = progress_state["total"]
 
+            # Emit complete BEFORE unregistering so a cancel API call that
+            # races with completion either succeeds (and is a harmless no-op
+            # because we're done) or returns 404 *after* the UI has already
+            # received the terminal event - never the other way around.
             await event_queue.put(ExecutionEvent(
                 event_type="complete",
                 execution_id=self.execution_id,
@@ -848,6 +851,8 @@ class StreamingExecutor:
                 total_nodes=total,
                 completed_nodes=completed,
             ))
+
+            self.unregister_execution()
 
             await event_queue.put(None)
 
@@ -915,6 +920,12 @@ class StreamingExecutor:
         idx_iter = iter(indices) if indices is not None else iter(range(0))
 
         while True:
+            # Yield to the event loop every iteration so HTTP cancel
+            # requests, websocket sends, and other async work get scheduled
+            # even when the loop body is empty/synchronous. Without this a
+            # tight while-True loop with no body monopolises the event loop
+            # and the cancel endpoint can't be served.
+            await asyncio.sleep(0)
             if self._should_interrupt(node_id):
                 loop_interrupted = True
                 break

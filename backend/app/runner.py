@@ -161,8 +161,10 @@ class GraphExecutor:
             executor = cls._active_executions.get(execution_id)
         if not executor:
             return False
+        # Just signal cancellation. The executor's finally block performs
+        # resource cleanup. Calling _cleanup_resources() here would race with
+        # nodes currently using those resources and could close them mid-read.
         executor._cancellation.cancel_all()
-        executor._cleanup_resources()
         return True
 
     @classmethod
@@ -171,8 +173,11 @@ class GraphExecutor:
             executor = cls._active_executions.get(execution_id)
         if not executor:
             return False
+        # Signal node-level cancellation; the streaming loop will pick it up
+        # and finalize the node. Cleaning the resource is deferred to the
+        # node's own finalization path (or the executor's finally block) to
+        # avoid races with the worker thread still using it.
         executor._cancellation.cancel_node(node_id)
-        executor._cleanup_resources(node_id)
         return True
 
     def _reset_execution_state(self) -> None:
@@ -622,9 +627,12 @@ class GraphExecutor:
 
     def run(self) -> Dict[str, Any]:
         """Execute the graph synchronously (legacy interface)."""
+        # Register so /api/executions/{id}/cancel can target this run too.
+        self._register_execution(self)
         try:
             return self._run_internal()
         finally:
+            self._unregister_execution(self.execution_id)
             self._cleanup_resources()
 
     async def run_async(self) -> Dict[str, Any]:

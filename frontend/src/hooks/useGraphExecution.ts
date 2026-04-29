@@ -223,6 +223,9 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           break;
 
         case "node_error":
+          // Flush pending updates so this error appears in the right order
+          // relative to streaming completed/skipped events.
+          flushPendingUpdates();
           if (data.node_id) {
             setNodeStatuses((prev) => {
               const newMap = new Map(prev);
@@ -246,6 +249,11 @@ export function useGraphExecution(): UseGraphExecutionReturn {
           if (data.error) {
             setError(data.error);
             setErrorCode(data.error_code ?? null);
+          }
+          // Backend emits node-level progress on errors too; honour it so the
+          // progress bar doesn't freeze when nodes fail.
+          if (data.progress !== undefined) {
+            setProgress(data.progress);
           }
           break;
 
@@ -406,6 +414,9 @@ export function useGraphExecution(): UseGraphExecutionReturn {
   const runGraph = useCallback((payload: GraphPayload, runNodeIds: string[] = []) => {
     setActiveRuns((prev) => prev + 1);
     setError(null);
+    // Starting a new run cancels any lingering "interrupting" state from a
+    // previous stop attempt - the new run is what should drive UI feedback.
+    setIsInterrupting(false);
 
     // Only clear previous results if this is a full graph run
     if (runNodeIds.length === 0) {
@@ -514,6 +525,28 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     (status) => status === "running" || status === "queued"
   );
 
+  // Force the UI back to an idle state. Used when we know no execution is
+  // actually running on the backend (e.g. cancel returned 404 for everyone,
+  // or the WebSocket is gone).
+  const resetToIdle = useCallback(() => {
+    flushPendingUpdates();
+    setNodeStatuses((prev) => {
+      const updated = new Map(prev);
+      for (const [nodeId, status] of updated) {
+        if (status === "running" || status === "queued") {
+          updated.set(nodeId, "skipped");
+        }
+      }
+      return updated;
+    });
+    setCurrentNodeId(null);
+    setExecutionId(null);
+    setIsInterrupting(false);
+    setActiveRuns(0);
+    activeRunRef.current = false;
+    activeExecutionIdsRef.current.clear();
+  }, [flushPendingUpdates]);
+
   // Stop/Cancel all active executions
   const stop = useCallback(async () => {
     const ids = Array.from(activeExecutionIdsRef.current);
@@ -521,7 +554,12 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       ids.push(executionId);
     }
 
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      // Nothing to cancel on the backend, but the UI may still think a run
+      // is happening (e.g. WebSocket dropped events). Force-reset state.
+      resetToIdle();
+      return;
+    }
 
     // Set interrupting state immediately for responsive UI feedback
     setIsInterrupting(true);
@@ -529,37 +567,46 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     // Immediately flush any pending updates to show current state
     flushPendingUpdates();
 
-    // Mark all currently running/queued nodes as "interrupting" visually
-    setNodeStatuses((prev) => {
-      const updated = new Map(prev);
-      for (const [nodeId, status] of updated) {
-        if (status === "running" || status === "queued") {
-          // Keep as running but the isInterrupting flag will show visual feedback
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const response = await fetch(`/api/executions/${id}/cancel`, { method: "POST" });
+          // 404 means the execution already finished; treat as success and
+          // forget about it so we don't keep waiting on phantom events.
+          if (response.status === 404) {
+            activeExecutionIdsRef.current.delete(id);
+            return { id, status: "missing" as const };
+          }
+          if (!response.ok) {
+            return { id, status: "error" as const };
+          }
+          return { id, status: "ok" as const };
+        } catch (e) {
+          console.error(`Failed to cancel execution ${id}:`, e);
+          return { id, status: "error" as const };
         }
-      }
-      return updated;
-    });
+      })
+    );
 
-    await Promise.all(ids.map(async (id) => {
-      try {
-        await fetch(`/api/executions/${id}/cancel`, { method: "POST" });
-      } catch (e) {
-        console.error(`Failed to cancel execution ${id}:`, e);
-      }
-    }));
+    // If every cancel call returned 404 the backend has nothing running -
+    // don't sit on the spinner waiting for events that will never arrive.
+    if (results.length > 0 && results.every((r) => r.status === "missing")) {
+      resetToIdle();
+    }
 
     // Note: isInterrupting will be cleared when we receive completion events
-  }, [executionId, flushPendingUpdates]);
+  }, [executionId, flushPendingUpdates, resetToIdle]);
 
-  // Clear isInterrupting after timeout if backend doesn't respond
+  // Safety net: if backend never tells us the run finished, force-reset after
+  // a timeout. Keep this short enough that users don't stare at a spinner,
+  // long enough that slow nodes finishing gracefully still get a chance.
   useEffect(() => {
     if (!isInterrupting) return;
     const timeout = window.setTimeout(() => {
-      setIsInterrupting(false);
-      setActiveRuns(0);
-    }, 15000);
+      resetToIdle();
+    }, 5000);
     return () => clearTimeout(timeout);
-  }, [isInterrupting]);
+  }, [isInterrupting, resetToIdle]);
 
   return {
     isConnected,

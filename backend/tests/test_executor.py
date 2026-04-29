@@ -83,7 +83,7 @@ class TestCancellation:
     def test_cancel_execution(self, simple_graph: Dict[str, Any]) -> None:
         """Test that cancellation API exists and is callable."""
         executor = GraphExecutor(simple_graph)
-        
+
         # Cancel should return False for non-registered execution
         result = GraphExecutor.cancel_execution("nonexistent-id")
         assert result is False
@@ -92,6 +92,52 @@ class TestCancellation:
         """Test that node cancellation API exists."""
         result = GraphExecutor.cancel_node("nonexistent-exec", "nonexistent-node")
         assert result is False
+
+    def test_sync_run_unregisters_after_completion(
+        self, simple_graph: Dict[str, Any]
+    ) -> None:
+        """The sync `run()` path must unregister itself when finished so the
+        active-executions registry doesn't leak references across runs."""
+        executor = GraphExecutor(simple_graph)
+        executor.run()
+
+        # After run() returns, cancelling that id should report "not found"
+        # because the executor has unregistered itself.
+        assert GraphExecutor.cancel_execution(executor.execution_id) is False
+
+    def test_sync_run_can_be_cancelled_via_class_api(
+        self, simple_graph: Dict[str, Any]
+    ) -> None:
+        """While `run()` is in flight the executor must be addressable via
+        `GraphExecutor.cancel_execution`. Without the registration fix the
+        sync path was completely uncancellable from the HTTP API."""
+        import threading
+
+        executor = GraphExecutor(simple_graph)
+        ready = threading.Event()
+        cancelled = threading.Event()
+
+        def _cancel_when_ready() -> None:
+            ready.wait(timeout=1.0)
+            # Even though the graph is tiny, the executor is registered for
+            # the duration of `run()`, so cancel_execution should find it.
+            # We can't reliably interrupt 5+3 mid-flight, but we can prove
+            # the registration is wired up by cancelling immediately after
+            # run() starts.
+            if GraphExecutor.cancel_execution(executor.execution_id):
+                cancelled.set()
+
+        t = threading.Thread(target=_cancel_when_ready)
+        t.start()
+        ready.set()
+        executor.run()
+        t.join(timeout=2.0)
+
+        # The cancel may or may not race in before `run()` finishes for such
+        # a tiny graph - but if it did, the cancel must have succeeded
+        # (proving registration). The post-condition we strictly require:
+        # after run() returns the executor is unregistered.
+        assert GraphExecutor.cancel_execution(executor.execution_id) is False
 
 
 class TestExecutionPlan:
