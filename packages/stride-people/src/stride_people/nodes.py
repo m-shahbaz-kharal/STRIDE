@@ -28,41 +28,9 @@ except ImportError:
 from stride_core import register_node, NodeBase, ExecutionContext
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
-    t_pointcloud, t_float, t_int, t_string, t_boolean, t_list, t_any, t_record, t_control
+    t_pointcloud, t_float, t_int, t_string, t_boolean, t_list, t_any,
+    t_record, t_control, t_bbox3d, t_region3d, t_scene3d,
 )
-
-
-# =============================================================================
-# Type factories for new types
-# =============================================================================
-
-def t_bbox3d():
-    """3D bounding box: center, size, id, optional velocity."""
-    return t_record({
-        "id": t_int(),
-        "center": t_list(t_float()),  # [x, y, z]
-        "size": t_list(t_float()),    # [w, h, d]
-    })
-
-
-def t_region3d():
-    """Occupancy region: center, size, name."""
-    return t_record({
-        "name": t_string(),
-        "center": t_list(t_float()),
-        "size": t_list(t_float()),
-    })
-
-
-def t_scene3d():
-    """Combined scene for visualization."""
-    return t_record({
-        "_type": t_string(),
-        "point_cloud": t_pointcloud(),
-        "boxes": t_list(t_bbox3d()),
-        "regions": t_list(t_region3d()),
-        "occupancy": t_list(t_int()),
-    })
 
 
 # =============================================================================
