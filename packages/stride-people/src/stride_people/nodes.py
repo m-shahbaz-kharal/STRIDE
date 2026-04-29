@@ -437,9 +437,11 @@ VISUALIZE_SPEC = NodeSpec(
 # Node Implementations
 # =============================================================================
 
-# Global state for stateful components
-_background_models: Dict[str, VoxelBackgroundModel] = {}
-_trackers: Dict[str, SimpleTracker] = {}
+# Phase 2: stateful components live on the per-run ExecutionContext rather
+# than module-level dicts. The keys below namespace them inside
+# ctx.node_resources[self.id].
+_BG_MODEL_KEY = "people.background_model"
+_TRACKER_KEY = "people.tracker"
 
 
 @register_node(DETECT_SPEC)
@@ -477,12 +479,14 @@ class DetectPeopleNode(NodeBase):
         enable_tracking = inputs.get("enable_tracking", True)
         reset_background = inputs.get("reset_background", False)
 
-        # Get or create background model
-        model_key = self.id
-        if reset_background or model_key not in _background_models:
-            _background_models[model_key] = VoxelBackgroundModel(voxel_size=voxel_size, learning_frames=learning_frames)
-        bg_model = _background_models[model_key] 
-        
+        # Phase 2: per-run state lives on the ExecutionContext.
+        bucket = ctx.node_resources.setdefault(self.id, {})
+        if reset_background or _BG_MODEL_KEY not in bucket:
+            bucket[_BG_MODEL_KEY] = VoxelBackgroundModel(
+                voxel_size=voxel_size, learning_frames=learning_frames
+            )
+        bg_model = bucket[_BG_MODEL_KEY]
+
         # Update parameters if changed
         if bg_model.learning_frames != learning_frames:
             bg_model.learning_frames = learning_frames
@@ -532,9 +536,9 @@ class DetectPeopleNode(NodeBase):
 
         # Tracking
         if enable_tracking:
-            if model_key not in _trackers:
-                _trackers[model_key] = SimpleTracker()
-            tracker = _trackers[model_key]
+            if _TRACKER_KEY not in bucket:
+                bucket[_TRACKER_KEY] = SimpleTracker()
+            tracker = bucket[_TRACKER_KEY]
             boxes = tracker.update(boxes)
         else:
             # Assign sequential IDs
