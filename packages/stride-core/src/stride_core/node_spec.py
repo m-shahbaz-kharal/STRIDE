@@ -1,5 +1,5 @@
 """
-Node specification classes for LiGuard-Web.
+Node specification classes for STRIDE.
 """
 
 from __future__ import annotations
@@ -12,17 +12,37 @@ from .typesystem import TypeDescriptor, t_any
 
 @dataclass
 class PortSpec:
-    """Specification for an input or output port."""
-    
+    """Specification for an input or output port.
+
+    Phase 2 adds the optional ``constraints`` field — a declarative
+    vocabulary that ``NodeBase.validate_inputs`` enforces server-side and
+    that the frontend will eventually consume to render bounded widgets
+    (sliders, enums, file pickers).
+
+    Constraint vocabulary (see §5.3 of the design doc):
+
+    * ``{"min": float, "max": float}`` — numeric range.
+    * ``{"enum": [v1, v2, ...]}`` — value must be one of the choices.
+    * ``{"pattern": "regex"}`` — string must match the regex.
+    * ``{"length_min": int, "length_max": int}`` — string / list length.
+    * ``{"extensions": ["jpg", "png"]}`` — file-path extension whitelist.
+    * ``{"presets": [{"label": "...", "value": ...}]}`` — UI-only hint.
+
+    All keys are optional and may be combined. ``None`` (the default) means
+    no declarative constraints — the node enforces its own checks via
+    ``validate_inputs``.
+    """
+
     name: str
     type: TypeDescriptor = field(default_factory=t_any)
     required: bool = True
     default: Any = None
     description: str = ""
     ui: Dict[str, Any] = field(default_factory=dict)
+    constraints: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "name": self.name,
             "type": self.type.to_dict(),
             "required": self.required,
@@ -30,12 +50,15 @@ class PortSpec:
             "description": self.description,
             "ui": self.ui,
         }
+        if self.constraints:
+            d["constraints"] = dict(self.constraints)
+        return d
 
 
 @dataclass
 class NodeSpec:
     """Complete specification for a node type."""
-    
+
     type: str
     version: str = "1.0.0"
     display_name: str = ""
@@ -48,7 +71,7 @@ class NodeSpec:
     outputs: List[PortSpec] = field(default_factory=list)
     stability: str = "stable"
     cache_policy: str = "auto"
-    
+
     # Plugin metadata
     plugin_name: Optional[str] = None
     api_version: str = "1.0"
@@ -76,4 +99,3 @@ class NodeSpec:
             "input_port_types": {p.name: p.type.to_dict() for p in self.inputs},
             "output_port_types": {p.name: p.type.to_dict() for p in self.outputs},
         }
-
