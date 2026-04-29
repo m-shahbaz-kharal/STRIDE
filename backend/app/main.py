@@ -84,6 +84,42 @@ async def get_node_definitions() -> list[Dict[str, Any]]:
     return list_node_definitions()
 
 
+@app.get("/api/converters")
+async def get_converters() -> Dict[str, Any]:
+    """Index of every registered ``convert.*`` node.
+
+    The frontend fetches this once at app start to build a single-hop
+    lookup ``Map<from_kind, Map<to_kind, ConverterSpec[]>>`` it then
+    consults during connection drag to surface "insert converter"
+    suggestions for invalid edges. See design doc §4.7.
+    """
+    converters = []
+    for spec in list_node_definitions():
+        node_type = spec.get("node_type") or spec.get("type")
+        if not isinstance(node_type, str) or not node_type.startswith("convert."):
+            continue
+        meta = spec.get("metadata") or {}
+        from_kind = meta.get("convert_from")
+        to_kind = meta.get("convert_to")
+        if not from_kind or not to_kind:
+            continue
+        converters.append({
+            "node_type": node_type,
+            "display_name": spec.get("display_name") or node_type,
+            "from_kind": from_kind,
+            "to_kind": to_kind,
+            "cost": meta.get("cost", 5),
+            "suggested": bool(meta.get("suggested", True)),
+            "summary": spec.get("summary", ""),
+            "category": spec.get("category", "Convert"),
+            "icon": spec.get("icon", ""),
+            "input_ports": spec.get("input_ports") or [],
+            "output_ports": spec.get("output_ports") or [],
+        })
+    converters.sort(key=lambda c: (c["from_kind"], c["to_kind"], c["cost"], c["node_type"]))
+    return {"converters": converters}
+
+
 @app.post("/api/run-graph")
 async def run_graph(payload: Dict[str, Any]) -> Response:
     """Execute graph synchronously (legacy endpoint)."""
