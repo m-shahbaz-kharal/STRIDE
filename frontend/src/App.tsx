@@ -30,6 +30,7 @@ import ConnectionToast from "./components/ConnectionToast";
 import SmartConnectLine from "./components/SmartConnectLine";
 import { ChevronLeft, ChevronRight, CopyIcon, DeleteIcon } from "./components/Icons";
 import { PopupProvider } from "./context/PopupContext";
+import { ConnectionDragProvider, ConnectionDragInfo } from "./context/ConnectionDragContext";
 import AuthScreen from "./components/AuthScreen";
 import GraphLibrary from "./components/GraphLibrary";
 import JsonEditor from "./components/JsonEditor";
@@ -227,6 +228,8 @@ const App = () => {
   const {
     nodeMap,
     arePortTypesCompatible,
+    classifyPortForDrag,
+    revalidateEdges,
     getPortTypeForHandle,
     getHandleRole,
     normalizeConnection,
@@ -2022,9 +2025,23 @@ const App = () => {
     return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Phase 3 §7.1 — broadcast the active connection drag so every
+  // BlueprintNode can decorate its ports without a `nodes` rebuild.
+  const connectionDragInfo: ConnectionDragInfo | null = useMemo(() => {
+    if (!connectStartParams?.nodeId || !connectStartParams.handleId || !connectStartParams.handleType) {
+      return null;
+    }
+    return {
+      nodeId: connectStartParams.nodeId,
+      handleId: connectStartParams.handleId,
+      handleType: connectStartParams.handleType,
+    };
+  }, [connectStartParams]);
+
   return (
     <PopupProvider>
       <ReactFlowProvider>
+       <ConnectionDragProvider drag={connectionDragInfo} classifyPort={classifyPortForDrag}>
         <div className="app-shell">
           <HomeView
             graphs={graphs}
@@ -2461,6 +2478,7 @@ const App = () => {
             sourcePortKind={smartConnectMenu.sourcePortKind}
           />
         </div>
+       </ConnectionDragProvider>
       </ReactFlowProvider>
     </PopupProvider>
   );

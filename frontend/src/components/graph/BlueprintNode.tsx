@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Handle, NodeProps, Position, useReactFlow, useStore, useUpdateNodeInternals, Edge } from "reactflow";
 
 import { usePopups } from "../../context/PopupContext";
+import { useConnectionDrag } from "../../context/ConnectionDragContext";
 import {
   BlueprintNodeData,
   NodeExecutionStatus,
@@ -123,6 +124,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
   );
 
   const { showLogsPopup } = usePopups();
+  const { drag: connectionDrag, classifyPort } = useConnectionDrag();
   const updateNodeInternals = useUpdateNodeInternals();
 
   // Notify React Flow when handles change (ports added/removed/toggled)
@@ -228,6 +230,50 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
       return isOutputConnected(port);
     },
     [data.executionMode, data.showControlPorts, data.hoverControlPorts, isCoreControlNode, isInputConnected, isOutputConnected]
+  );
+
+  // Phase 3 §7.1 — classify each port relative to the active drag and
+  // produce a CSS modifier + tooltip the renderer applies as a class.
+  // Returns { compatibility, tooltip } where compatibility is one of
+  // "compatible" | "convertible" | "incompatible" | "neutral". The
+  // renderer maps these to halo / dim / grey-out CSS.
+  const portConnectionState = useCallback(
+    (
+      port: string,
+      direction: "input" | "output",
+      portTypeLabel: string,
+    ) => {
+      // Don't decorate the port the user actually grabbed — leave it as-is.
+      if (
+        connectionDrag &&
+        connectionDrag.nodeId === id &&
+        connectionDrag.handleId === port
+      ) {
+        return { compatibility: "neutral" as const, tooltip: undefined };
+      }
+
+      const compatibility = classifyPort(id, port, direction);
+      if (compatibility === "neutral" || !connectionDrag) {
+        return { compatibility, tooltip: undefined };
+      }
+
+      const dragRole = connectionDrag.handleType;
+      const dragNodeId = connectionDrag.nodeId;
+      const dragHandle = connectionDrag.handleId;
+      const dragLabel = `${dragNodeId}.${dragHandle}`;
+      const candidateLabel = `${id}.${port}`;
+      const arrow = dragRole === "source"
+        ? `${dragLabel} → ${candidateLabel}`
+        : `${candidateLabel} → ${dragLabel}`;
+
+      const tooltip = compatibility === "compatible"
+        ? `Direct connection — ${arrow} (${portTypeLabel})`
+        : compatibility === "convertible"
+          ? `Subtype narrowing — drop to insert converter (${arrow})`
+          : `Incompatible: ${arrow}`;
+      return { compatibility, tooltip };
+    },
+    [classifyPort, connectionDrag, id]
   );
 
   const getConnectedOutput = useCallback(
@@ -525,6 +571,10 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "input";
             const isConnected = isInputConnected(port);
+            // Phase 3 §7.1 — drag-time classification for this input.
+            const { compatibility: dragCompat, tooltip: dragTooltip } =
+              portConnectionState(port, "input", formatPortTypeLabel(portType));
+            const compatClass = dragCompat === "neutral" ? "" : `port-compat-${dragCompat}`;
             const inputValue = data.inputValues?.[port];
             const defaultValue = getInputDefault(port);
             const hasInputValue = Object.prototype.hasOwnProperty.call(data.inputValues ?? {}, port);
@@ -540,7 +590,8 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             return (
               <div
                 key={`in-${port}-${index}`}
-                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${isPublished ? "port-published-blocked" : ""}`}
+                className={`node-port node-port-input ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${isPublished ? "port-published-blocked" : ""} ${compatClass}`}
+                title={dragTooltip}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "input" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
@@ -549,7 +600,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   position={Position.Left}
                   id={port}
                   isConnectable={!isPublished}
-                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${isPublished ? "handle-blocked" : ""}`}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${isPublished ? "handle-blocked" : ""} ${compatClass}`}
                   style={handleStyle}
                 >
                   {isControl && (
@@ -694,10 +745,15 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
             const showControlLabel = isControl && port !== "control_in" && port !== "control_out";
             const isHighlighted = data.highlightedPort?.port === port && data.highlightedPort?.direction === "output";
             const controlLabel = port.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            // Phase 3 §7.1 — drag-time classification for this output.
+            const { compatibility: dragCompatOut, tooltip: dragTooltipOut } =
+              portConnectionState(port, "output", formatPortTypeLabel(portType));
+            const compatClassOut = dragCompatOut === "neutral" ? "" : `port-compat-${dragCompatOut}`;
             return (
               <div
                 key={`out-${port}-${index}`}
-                className={`node-port node-port-output ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""}`}
+                className={`node-port node-port-output ${isControl ? "control-port" : ""} ${isHighlighted ? "port-highlighted" : ""} ${compatClassOut}`}
+                title={dragTooltipOut}
                 onMouseEnter={() => data.onPortHover?.({ nodeId: id, port, direction: "output" })}
                 onMouseLeave={() => data.onPortHover?.(null)}
               >
@@ -734,7 +790,7 @@ const BlueprintNode = ({ id, data }: NodeProps<BlueprintNodeData>) => {
                   type="source"
                   position={Position.Right}
                   id={port}
-                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""}`}
+                  className={`node-handle ${isControl ? "control-handle" : ""} ${isHighlighted ? "handle-highlighted" : ""} ${compatClassOut}`}
                   style={handleStyle}
                 >
                   {isControl && (

@@ -4144,6 +4144,53 @@ body {
   opacity: 1;
 }
 
+/* Phase 3 §7.1 — Drag-from-port classification highlighting.
+   Applied to .node-port and its inner .node-handle while the user is
+   dragging a connection. The class encodes how the port relates to the
+   currently-grabbed source: full-colour pulse for compatible, dim
+   dashed outline for convertible, greyed-out for incompatible. */
+.node-port.port-compat-compatible .node-handle {
+  box-shadow: 0 0 0 2px var(--handle-color, var(--accent-blue)),
+              0 0 12px var(--handle-color, var(--accent-blue)) !important;
+  animation: stride-port-pulse 1.4s ease-in-out infinite;
+}
+
+.node-port.port-compat-convertible .node-handle {
+  box-shadow: 0 0 0 1px var(--handle-color, var(--accent-yellow)) !important;
+  outline: 1px dashed var(--handle-color, var(--accent-yellow));
+  outline-offset: 2px;
+  opacity: 0.75;
+}
+
+.node-port.port-compat-convertible .node-port-label-group .port-type-text {
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+
+.node-port.port-compat-incompatible {
+  opacity: 0.32;
+  filter: grayscale(0.85);
+}
+
+.node-port.port-compat-incompatible .node-handle {
+  background: var(--text-muted, #6b7280) !important;
+  box-shadow: none !important;
+  /* Important: stay clickable. The user said "they're still selectable,
+     just visually dimmed." */
+  pointer-events: auto;
+}
+
+@keyframes stride-port-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--handle-color, var(--accent-blue)),
+                0 0 8px var(--handle-color, var(--accent-blue));
+  }
+  50% {
+    box-shadow: 0 0 0 3px var(--handle-color, var(--accent-blue)),
+                0 0 16px var(--handle-color, var(--accent-blue));
+  }
+}
+
 /* Node State Classes */
 .node-breakpoint {
   border-color: rgba(248, 81, 73, 0.6);
