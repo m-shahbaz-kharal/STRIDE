@@ -12,3 +12,8 @@ wheels/
 # Frontend build artifacts
 frontend/dist/
 frontend/node_modules/
+
+# Model weights / large binary artifacts
+*.pt
+*.pth
+*.onnx
