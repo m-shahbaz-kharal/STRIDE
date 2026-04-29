@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,6 +17,25 @@ from stride_fl511.nodes import get_active_stream
 from .db import init_db
 from .routers import auth as auth_router
 from .routers import graphs as graphs_router
+
+
+class _LegacyWSKeepaliveFilter(logging.Filter):
+    """Drop the harmless 'keepalive ping failed' AssertionError emitted by
+    websockets.legacy during graceful close races. Real WebSocket errors still
+    surface — we only suppress this specific known-harmless trace."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info:
+            exc_type = record.exc_info[0]
+            if exc_type is AssertionError and "keepalive" in str(record.getMessage()).lower():
+                return False
+        if "keepalive ping failed" in record.getMessage():
+            return False
+        return True
+
+
+for _name in ("websockets.server", "websockets.protocol", "websockets.legacy.protocol"):
+    logging.getLogger(_name).addFilter(_LegacyWSKeepaliveFilter())
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()
