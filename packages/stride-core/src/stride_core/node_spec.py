@@ -57,7 +57,21 @@ class PortSpec:
 
 @dataclass
 class NodeSpec:
-    """Complete specification for a node type."""
+    """Complete specification for a node type.
+
+    The optional ``metadata`` map is used for unstructured spec-level hints
+    consumed by tooling and the frontend. The current well-known keys are:
+
+    * ``convert_from`` / ``convert_to`` — kind names for ``convert.*``
+      nodes. The frontend builds a converter index keyed on these so an
+      invalid connection can be repaired with a single click. See
+      ``docs/architecture/unified-type-system-and-ux.md`` §4.5.
+    * ``cost`` — an integer in ``1..10`` ranking suggestion candidates
+      cheapest-first. See §4.6.
+    * ``suggested`` — when ``True``, the frontend treats this converter
+      as a one-click suggestion (the default). When ``False`` the user
+      must add it explicitly.
+    """
 
     type: str
     version: str = "1.0.0"
@@ -71,6 +85,7 @@ class NodeSpec:
     outputs: List[PortSpec] = field(default_factory=list)
     stability: str = "stable"
     cache_policy: str = "auto"
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     # Plugin metadata
     plugin_name: Optional[str] = None
@@ -91,6 +106,7 @@ class NodeSpec:
             "outputs": [p.to_dict() for p in self.outputs],
             "stability": self.stability,
             "cache_policy": self.cache_policy,
+            "metadata": dict(self.metadata) if self.metadata else {},
             "plugin_name": self.plugin_name,
             "api_version": self.api_version,
             # Legacy/compat fields for the current frontend

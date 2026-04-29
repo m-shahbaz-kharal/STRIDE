@@ -2132,6 +2132,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "stride-converters"
+version = "0.1.0"
+source = { editable = "../packages/stride-converters" }
+dependencies = [
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "stride-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "opencv-python", specifier = ">=4.8" },
+    { name = "stride-core" },
+]
+
+[[package]]
 name = "stride-core"
 version = "1.0.0"
 source = { editable = "../packages/stride-core" }
@@ -2362,6 +2379,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "stride-bytetrack" },
     { name = "stride-clip" },
+    { name = "stride-converters" },
     { name = "stride-core" },
     { name = "stride-depth-anything" },
     { name = "stride-fl511" },
@@ -2401,6 +2419,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "stride-bytetrack", editable = "../packages/stride-bytetrack" },
     { name = "stride-clip", editable = "../packages/stride-clip" },
+    { name = "stride-converters", editable = "../packages/stride-converters" },
     { name = "stride-core", editable = "../packages/stride-core" },
     { name = "stride-depth-anything", editable = "../packages/stride-depth-anything" },
     { name = "stride-fl511", editable = "../packages/stride-fl511" },
