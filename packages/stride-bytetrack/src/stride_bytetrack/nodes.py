@@ -4,6 +4,10 @@ ByteTrack tracker node.
 Wraps `supervision.ByteTrack`, a well-maintained, pip-installable port
 of the original ByteTrack reference implementation (Zhang et al., ECCV
 2022).
+
+Phase 2: tracker state lives on the ExecutionContext (per-run, per-node)
+rather than a module-level dict, so consecutive runs always start with a
+fresh tracker. ``reset=True`` still forces a fresh tracker mid-run.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ except ImportError:
     sv = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -42,15 +47,15 @@ from stride_core.image_utils import (
 )
 
 
-# Per-node tracker state, keyed by node id.
-_TRACKERS: Dict[str, Any] = {}
+_TRACKER_KEY = "bytetrack.tracker"
+_TRACKER_PARAMS_KEY = "bytetrack.tracker_params"
 
 
 def _require_deps() -> None:
     if not HAS_NUMPY:
-        raise RuntimeError("numpy not installed")
+        raise NodeMissingDependencyError("numpy not installed")
     if not HAS_SV:
-        raise RuntimeError(
+        raise NodeMissingDependencyError(
             "supervision not installed. Install with: pip install supervision"
         )
 
@@ -64,7 +69,8 @@ BYTETRACK_SPEC = NodeSpec(
     description=(
         "Assigns persistent track IDs to 2D detections across frames using "
         "ByteTrack (Zhang et al., ECCV 2022) via the `supervision` library. "
-        "Stateful — maintains one tracker per node id."
+        "Stateful — tracker state lives on the ExecutionContext for the "
+        "duration of a single run."
     ),
     icon="git-branch",
     tags=["tracking", "mot", "bytetrack"],
@@ -73,11 +79,15 @@ BYTETRACK_SPEC = NodeSpec(
         PortSpec(name="detections", type=t_detections2d(), required=True),
         PortSpec(name="image", type=t_image(), required=False, default=None,
                  description="Optional source image, used for the annotated output"),
-        PortSpec(name="track_activation_threshold", type=t_float(), required=False, default=0.25),
+        PortSpec(name="track_activation_threshold", type=t_float(), required=False, default=0.25,
+                 constraints={"min": 0.0, "max": 1.0}),
         PortSpec(name="lost_track_buffer", type=t_int(), required=False, default=30,
-                 description="Frames to keep a lost track alive before deleting"),
-        PortSpec(name="minimum_matching_threshold", type=t_float(), required=False, default=0.8),
-        PortSpec(name="frame_rate", type=t_int(), required=False, default=30),
+                 description="Frames to keep a lost track alive before deleting",
+                 constraints={"min": 0}),
+        PortSpec(name="minimum_matching_threshold", type=t_float(), required=False, default=0.8,
+                 constraints={"min": 0.0, "max": 1.0}),
+        PortSpec(name="frame_rate", type=t_int(), required=False, default=30,
+                 constraints={"min": 1}),
         PortSpec(name="reset", type=t_boolean(), required=False, default=False,
                  description="Reset the tracker state on this call"),
         PortSpec(name="annotate", type=t_boolean(), required=False, default=True),
@@ -125,7 +135,11 @@ class ByteTrackNode(NodeBase):
 
         det_record = inputs.get("detections")
         if not isinstance(det_record, dict):
-            raise ValueError("ByteTrack: `detections` must be a Detections2D record")
+            raise NodeInputError(
+                "`detections` must be a Detections2D record",
+                port="detections",
+                details={"got": type(det_record).__name__},
+            )
 
         boxes_in: List[Dict[str, Any]] = list(det_record.get("boxes") or [])
         params = {
@@ -137,9 +151,19 @@ class ByteTrackNode(NodeBase):
         reset = bool(inputs.get("reset", False))
         annotate = bool(inputs.get("annotate", True))
 
-        if reset or self.id not in _TRACKERS:
-            _TRACKERS[self.id] = _build_tracker(params)
-        tracker = _TRACKERS[self.id]
+        # Phase 2: tracker lives on the per-run ExecutionContext rather than a
+        # module-level dict, so two consecutive runs each start with a fresh
+        # tracker. ``reset=True`` still rebuilds mid-run, and a parameter
+        # change also triggers a rebuild because ByteTrack's parameters are
+        # baked in at construction time.
+        bucket = ctx.node_resources.setdefault(self.id, {})
+        last_params = bucket.get(_TRACKER_PARAMS_KEY)
+        params_changed = last_params is not None and last_params != params
+
+        if reset or params_changed or _TRACKER_KEY not in bucket:
+            bucket[_TRACKER_KEY] = _build_tracker(params)
+            bucket[_TRACKER_PARAMS_KEY] = dict(params)
+        tracker = bucket[_TRACKER_KEY]
 
         sv_dets = _detections_to_sv(boxes_in)
         tracked = tracker.update_with_detections(sv_dets)
