@@ -33,6 +33,8 @@ dependencies = [
     "stride-pcdet",
     "stride-bytetrack",
     "stride-clip",
+    "stride-grounding-dino",
+    "stride-kalman",
 ]
 
 [tool.uv.sources]
@@ -48,6 +50,8 @@ stride-depth-anything = { path = "../packages/stride-depth-anything", editable =
 stride-pcdet = { path = "../packages/stride-pcdet", editable = true }
 stride-bytetrack = { path = "../packages/stride-bytetrack", editable = true }
 stride-clip = { path = "../packages/stride-clip", editable = true }
+stride-grounding-dino = { path = "../packages/stride-grounding-dino", editable = true }
+stride-kalman = { path = "../packages/stride-kalman", editable = true }
 
 [dependency-groups]
 dev = [

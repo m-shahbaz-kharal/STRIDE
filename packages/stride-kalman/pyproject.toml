@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stride-kalman"
+version = "0.1.0"
+description = "Kalman-filter / Hungarian-assignment 3D multi-object tracker for STRIDE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "stride-core",
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.entry-points."stride.plugins"]
+kalman = "stride_kalman:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stride_kalman"]

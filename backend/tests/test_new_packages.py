@@ -39,6 +39,9 @@ PACKAGES = [
     ]),
     ("stride_bytetrack", ["tracker.bytetrack"]),
     ("stride_clip", ["image.classify.clip", "image.embed.clip"]),
+    # Bonus packages
+    ("stride_grounding_dino", ["image.detect.grounding_dino"]),
+    ("stride_kalman", ["tracker.kalman3d"]),
 ]
 
 
@@ -95,6 +98,43 @@ def test_bytetrack_runs_on_synthetic_input():
     assert out["count"] == 1
     assert out["track_ids"] and out["track_ids"][0] >= 1
     assert out["detections"]["_type"] == "Detections2D"
+
+
+def test_kalman3d_runs_on_synthetic_input():
+    """Smoke test for the 3D Kalman tracker — pure numpy/scipy, no weights."""
+    pytest.importorskip("numpy")
+    pytest.importorskip("scipy")
+
+    from stride_kalman.nodes import Kalman3DTrackerNode, KALMAN3D_SPEC
+    from stride_core import ExecutionContext
+
+    node = Kalman3DTrackerNode({"id": "k3d-test", "type": KALMAN3D_SPEC.type})
+    ctx = ExecutionContext()
+
+    # Frame 1: a single detection.  min_hits=1 so it confirms immediately.
+    box1 = {
+        "id": 0,
+        "center": [1.0, 2.0, 0.5],
+        "size": [0.8, 0.8, 1.7],
+        "heading": 0.0,
+        "confidence": 0.9,
+        "class_id": 0,
+        "class_name": "person",
+    }
+    out1 = node.forward({
+        "boxes": [box1],
+        "min_hits": 1,
+        "reset": True,
+    }, ctx)
+    assert out1["count"] == 1
+    tid1 = out1["boxes"][0]["track_id"]
+
+    # Frame 2: same object slightly moved
+    box2 = dict(box1, center=[1.05, 2.05, 0.5])
+    out2 = node.forward({"boxes": [box2], "min_hits": 1}, ctx)
+    assert out2["count"] == 1
+    tid2 = out2["boxes"][0]["track_id"]
+    assert tid1 == tid2, "Kalman tracker should keep the same id across nearby frames"
 
 
 def test_yolo_specs_are_well_formed():

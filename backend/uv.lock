@@ -2189,6 +2189,46 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "stride-grounding-dino"
+version = "0.1.0"
+source = { editable = "../packages/stride-grounding-dino" }
+dependencies = [
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pillow" },
+    { name = "stride-core" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "opencv-python", specifier = ">=4.8" },
+    { name = "pillow", specifier = ">=10.0" },
+    { name = "stride-core" },
+    { name = "torch", specifier = ">=2.0" },
+    { name = "transformers", specifier = ">=4.40" },
+]
+
+[[package]]
+name = "stride-kalman"
+version = "0.1.0"
+source = { editable = "../packages/stride-kalman" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "stride-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "scipy", specifier = ">=1.10" },
+    { name = "stride-core" },
+]
+
+[[package]]
 name = "stride-mediapipe"
 version = "0.1.0"
 source = { editable = "../packages/stride-mediapipe" }
@@ -2325,6 +2365,8 @@ dependencies = [
     { name = "stride-core" },
     { name = "stride-depth-anything" },
     { name = "stride-fl511" },
+    { name = "stride-grounding-dino" },
+    { name = "stride-kalman" },
     { name = "stride-mediapipe" },
     { name = "stride-ouster" },
     { name = "stride-pcdet" },
@@ -2362,6 +2404,8 @@ requires-dist = [
     { name = "stride-core", editable = "../packages/stride-core" },
     { name = "stride-depth-anything", editable = "../packages/stride-depth-anything" },
     { name = "stride-fl511", editable = "../packages/stride-fl511" },
+    { name = "stride-grounding-dino", editable = "../packages/stride-grounding-dino" },
+    { name = "stride-kalman", editable = "../packages/stride-kalman" },
     { name = "stride-mediapipe", editable = "../packages/stride-mediapipe" },
     { name = "stride-ouster", editable = "../packages/stride-ouster" },
     { name = "stride-pcdet", editable = "../packages/stride-pcdet" },
