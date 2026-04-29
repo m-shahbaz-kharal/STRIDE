@@ -364,14 +364,27 @@ export const useConnectionValidation = ({
                 "target"
             );
             const compatible = arePortTypesCompatible(sourceType, targetType);
+            const dragClassification = compatible
+                ? "compatible"
+                : classifyAssignment(sourceType, targetType);
 
             setConnectionLineIsInvalid?.(!compatible);
             const desiredColor = getPortTypeColor(sourceType);
-            setConnectionLineDash?.(
-                sourceType.kind === "control" || targetType.kind === "control"
-                    ? "8 4"
-                    : undefined
-            );
+            // Phase 3 §7.5 — connection-line dash style by classification:
+            //   • compatible  + non-control = solid
+            //   • convertible              = dashed
+            //   • control on either side   = control dash
+            //   • any-bridge (kind === "any" on one side) = double-dashed warn
+            const isControlEdge = sourceType.kind === "control" || targetType.kind === "control";
+            const isAnyBridge = !isControlEdge && (sourceType.kind === "any" || targetType.kind === "any") && sourceType.kind !== targetType.kind;
+            const dragDash = isControlEdge
+                ? "8 4"
+                : dragClassification === "convertible"
+                    ? "6 5"
+                    : isAnyBridge
+                        ? "2 4 8 4"
+                        : undefined;
+            setConnectionLineDash?.(dragDash);
             setConnectionLineColor?.(desiredColor);
 
             const classification = compatible

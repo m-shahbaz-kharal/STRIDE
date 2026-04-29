@@ -639,15 +639,39 @@ const App = () => {
     );
 
     const hydratedEdges = data.edges.map((edge: any) => {
-      const data = { ...(edge.data ?? {}) } as { kind?: string };
-      if (!data.kind && edge.sourceHandle && edge.targetHandle) {
-        const types = portTypeByNode.get(edge.source);
-        const targetTypes = portTypeByNode.get(edge.target);
-        const sourceType = types?.output?.[edge.sourceHandle];
-        const targetType = targetTypes?.input?.[edge.targetHandle];
-        const sourceKind = typeof sourceType === "string" ? sourceType : sourceType?.kind;
-        const targetKind = typeof targetType === "string" ? targetType : targetType?.kind;
-        data.kind = (sourceKind === "control" || targetKind === "control") ? "control" : "data";
+      const edgeData = { ...(edge.data ?? {}) } as {
+        kind?: string;
+        typeTooltip?: string;
+        dashStyle?: "compatible" | "convertible" | "any-bridge";
+      };
+      const types = portTypeByNode.get(edge.source);
+      const targetTypes = portTypeByNode.get(edge.target);
+      const sourceType = edge.sourceHandle ? types?.output?.[edge.sourceHandle] : undefined;
+      const targetType = edge.targetHandle ? targetTypes?.input?.[edge.targetHandle] : undefined;
+      const sourceKind = typeof sourceType === "string" ? sourceType : sourceType?.kind;
+      const targetKind = typeof targetType === "string" ? targetType : targetType?.kind;
+      if (!edgeData.kind && sourceKind && targetKind) {
+        edgeData.kind = (sourceKind === "control" || targetKind === "control") ? "control" : "data";
+      }
+      // Phase 3 §7.5/§7.6 — backfill type tooltip + dash style for
+      // edges loaded from saved graphs so hover info works without a
+      // re-connect.
+      if (sourceType && targetType) {
+        const fmt = (t: any) => {
+          const base = (typeof t === "string" ? t : t.kind) || "any";
+          const subtype = typeof t === "object" ? t.metadata?.subtype : undefined;
+          return subtype ? `${base}[${subtype}]` : base;
+        };
+        if (!edgeData.typeTooltip) {
+          edgeData.typeTooltip = `${fmt(sourceType)} → ${fmt(targetType)}`;
+        }
+        if (!edgeData.dashStyle) {
+          const isControl = sourceKind === "control" || targetKind === "control";
+          const isAnyBridge = !isControl
+            && (sourceKind === "any" || targetKind === "any")
+            && sourceKind !== targetKind;
+          edgeData.dashStyle = isAnyBridge ? "any-bridge" : "compatible";
+        }
       }
       return {
         id: edge.id,
@@ -656,7 +680,7 @@ const App = () => {
         sourceHandle: edge.sourceHandle,
         targetHandle: edge.targetHandle,
         type: edge.type ?? "default",
-        data,
+        data: edgeData,
       };
     });
 
@@ -1611,6 +1635,20 @@ const App = () => {
       const targetType = getPortTypeForHandle(normalized.target!, normalized.targetHandle!, "target");
       const isControlConnection = sourceType.kind === "control" || targetType.kind === "control";
       const edgeColor = getPortTypeColor(sourceType);
+      // Phase 3 §7.5/§7.6 — derive hover tooltip + dash style from
+      // the type registry. The tooltip exposes kind[subtype] on both
+      // sides so the user can debug at a glance.
+      const formatTypeWithSubtype = (t: typeof sourceType) => {
+        const base = (t.kind || "any") as string;
+        const subtype = t.metadata?.subtype as string | undefined;
+        return subtype ? `${base}[${subtype}]` : base;
+      };
+      const typeTooltip = `${formatTypeWithSubtype(sourceType)} → ${formatTypeWithSubtype(targetType)}`;
+      const isAnyBridge = !isControlConnection
+        && (sourceType.kind === "any" || targetType.kind === "any")
+        && sourceType.kind !== targetType.kind;
+      const dashStyle: "compatible" | "convertible" | "any-bridge" =
+        isAnyBridge ? "any-bridge" : "compatible";
 
       const isDuplicate = edges.some(
         (edge) =>
@@ -1640,7 +1678,11 @@ const App = () => {
             type: "default",
             animated: false,
             style: { stroke: edgeColor, strokeWidth: 2 },
-            data: { kind: isControlConnection ? "control" : "data" },
+            data: {
+              kind: isControlConnection ? "control" : "data",
+              typeTooltip,
+              dashStyle,
+            },
           },
           filtered
         );
@@ -1845,6 +1887,21 @@ const App = () => {
 
         if (arePortTypesCompatible(sourceType, targetType)) {
           const edgeColor = getPortTypeColor(sourceType);
+          // Phase 3 §7.5/§7.6 — same tooltip+dash logic as handleConnect.
+          const formatTypeWithSubtype = (t: typeof sourceType) => {
+            if (typeof t !== "object" || !t) return "any";
+            const base = ((t as any).kind || "any") as string;
+            const subtype = (t as any).metadata?.subtype as string | undefined;
+            return subtype ? `${base}[${subtype}]` : base;
+          };
+          const sKind = typeof sourceType === "object" ? (sourceType as any).kind : sourceType;
+          const tKind = typeof targetType === "object" ? (targetType as any).kind : targetType;
+          const typeTooltip = `${formatTypeWithSubtype(sourceType as any)} → ${formatTypeWithSubtype(targetType as any)}`;
+          const isAnyBridge = !isControlConnection
+            && (sKind === "any" || tKind === "any")
+            && sKind !== tKind;
+          const dashStyle: "compatible" | "convertible" | "any-bridge" =
+            isAnyBridge ? "any-bridge" : "compatible";
           setEdges((eds) => {
             const filtered = source.type === "target"
               ? eds.filter((edge) => !(edge.target === targetId && edge.targetHandle === targetHandle))
@@ -1858,7 +1915,11 @@ const App = () => {
                 type: "default",
                 animated: false,
                 style: { stroke: edgeColor, strokeWidth: 2 },
-                data: { kind: isControlConnection ? "control" : "data" },
+                data: {
+                  kind: isControlConnection ? "control" : "data",
+                  typeTooltip,
+                  dashStyle,
+                },
               },
               filtered
             );
