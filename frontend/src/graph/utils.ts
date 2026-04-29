@@ -1,21 +1,53 @@
 import { NodeExecutionStatus, TypeDescriptor } from "../types";
 
+// Stable colour per type kind. Sourced verbatim from
+// docs/architecture/unified-type-system-and-ux.md §3.5 — Tailwind 400/500
+// palette for consistency with the rest of the UI.
+//
+// Phase 0: every backend kind gets a stable colour. Existing kinds keep
+// their previous colour. New kinds (mask, depthmap, bbox2d, …) join the map.
 export const PORT_TYPE_COLORS: Record<string, string> = {
+  // Scalars
   int: "#4a9eff",
   float: "#60a5fa",
-  number: "#60a5fa",
-  image: "#e85aad",
-  stream: "#0fb5a9",
-  url: "#7c3aed",
+  number: "#60a5fa", // legacy alias kept for backward compat with widgets
   boolean: "#f59e0b",
   string: "#10b981",
+  null: "#94a3b8",
+  // Flexible / categorical
   any: "#94a3b8",
   unknown: "#cbd5e1",
+  control: "#f97316",
+  // Containers
   list: "#7dd3fc",
   map: "#facc15",
   record: "#a855f7",
+  tuple: "#a855f7",
+  option: "#94a3b8",
+  // Numeric tensors / streams
   tensor: "#22d3ee",
-  control: "#f97316",
+  stream: "#0fb5a9",
+  // 2-D image-domain
+  image: "#e85aad",
+  mask: "#f472b6",
+  depthmap: "#14b8a6",
+  bbox2d: "#fb7185",
+  track2d: "#f43f5e",
+  keypoints: "#facc15",
+  detections2d: "#ef4444",
+  // 3-D point-cloud-domain
+  pointcloud: "#8b5cf6",
+  bbox3d: "#a78bfa",
+  track3d: "#7c3aed",
+  region3d: "#ec4899",
+  scene3d: "#6366f1",
+  detections3d: "#dc2626",
+  // Special / resource
+  session: "#64748b",
+  point: "#94a3b8",
+  box: "#94a3b8",
+  // Frontend-only legacy
+  url: "#7c3aed",
 };
 
 /**

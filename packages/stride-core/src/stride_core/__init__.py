@@ -14,6 +14,16 @@ from .typesystem import (
     t_image, t_bbox2d, t_detections2d, t_detections3d, t_depthmap,
     t_track2d, t_track3d, t_keypoints, t_pointcloud, t_bbox3d,
 )
+from .errors import (
+    NodeError,
+    NodeInputError,
+    NodeTypeError,
+    NodeRuntimeError,
+    NodeMissingDependencyError,
+    NodeCancelled,
+    NodeFileNotFoundError,
+    NodeNetworkError,
+)
 from .plugin import discover_plugins, PluginInfo
 
 __version__ = "1.0.0"
@@ -52,6 +62,15 @@ __all__ = [
     "t_keypoints",
     "t_pointcloud",
     "t_bbox3d",
+    # Errors
+    "NodeError",
+    "NodeInputError",
+    "NodeTypeError",
+    "NodeRuntimeError",
+    "NodeMissingDependencyError",
+    "NodeCancelled",
+    "NodeFileNotFoundError",
+    "NodeNetworkError",
     # Plugins
     "discover_plugins",
     "PluginInfo",

@@ -1,8 +1,7 @@
 import React from "react";
 import { DashboardWidget, BlueprintNodeData } from "../../types";
 import { Node } from "reactflow";
-import { PointCloudWidget } from "./PointCloudWidget";
-import { Scene3DWidget } from "./Scene3DWidget";
+import { resolveVisualizer } from "../../visualizers/registry";
 
 interface DashboardWidgetContentProps {
     widget: DashboardWidget;
@@ -94,29 +93,19 @@ export const DashboardWidgetContent: React.FC<DashboardWidgetContentProps> = ({
             return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center' }}>{widget.label || "Label"}</div>;
         case "panel":
             return <div style={{ width: '100%', height: '100%', background: 'var(--bg-surface)', borderRadius: '4px', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}></div>;
-        case "bound-output":
-            if (typeof value === "string" && (value.startsWith("data:image") || value.startsWith("http"))) {
-                return <img src={value} alt="output" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />;
-            } else if (value && typeof value === 'object' && (value as any)._type === 'StreamResource') {
-                const stream = value as any;
-                return (
-                    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
-                        <img src={`/api/streams/${stream.stream_id}/frame?ts=${Date.now()}`} alt="stream" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                    </div>
-                );
-            } else if (value && typeof value === 'object' && (value as any)._type === 'Scene3D') {
-                return <Scene3DWidget data={value as any} />;
-            } else if (value && typeof value === 'object' && (value as any)._type === 'PointCloud') {
-                return <PointCloudWidget data={value as any} />;
-            }
-            return (
-                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                    {widget.label && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{widget.label}</div>}
-                    <div style={{ flex: 1, background: 'var(--bg-tertiary)', padding: '8px', borderRadius: '4px', overflow: 'auto', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                        {value !== undefined ? (typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)) : <span style={{ opacity: 0.5 }}>No Data</span>}
-                    </div>
-                </div>
-            );
+        case "bound-output": {
+            // Phase 0 refactor: dispatch through the visualizer registry.
+            // The registry mirrors the previous if/else chain exactly — image
+            // string → <img>, StreamResource → live frame, Scene3D / PointCloud
+            // → their dedicated widgets, everything else → JSON dump.
+            // See frontend/src/visualizers/registry.ts.
+            const spec = resolveVisualizer("*", value);
+            // The "*" fallback (JSON dump) always matches, so spec is never null
+            // in practice; the null branch is defensive.
+            if (!spec) return null;
+            const Vis = spec.Component;
+            return <Vis value={value} label={widget.label} />;
+        }
         case "bound-input":
             if (!widget.label) {
                 // Flat rendering for clean UI

@@ -1,27 +1,54 @@
 
 
+// Mirrors the kind values produced by stride-core's typesystem.py.
+// Phase 0: extended to all backend kinds so PORT_TYPE_COLORS covers every
+// kind that can flow on the wire. This is a *union*, not an enum — string
+// literals like "url" remain valid at every existing call site. If you
+// add a new kind in stride-core, add it here too.
+//
+// Reference: docs/architecture/unified-type-system-and-ux.md §3.5
 export type TypeKind =
+  // Scalars (PRIMITIVES in typesystem.py)
   | "int"
   | "float"
   | "string"
   | "boolean"
   | "null"
-  | "control"
-  | "image"
-  | "stream"
-  | "url"
-  | "any"
-  | "unknown"
+  // Containers
   | "list"
   | "map"
   | "record"
   | "tuple"
   | "option"
+  // Flexible / categorical
+  | "any"
+  | "unknown"
   | "tensor"
+  | "control"
+  | "stream"
+  // 2-D / image-domain
+  | "image"
+  | "mask"
+  | "depthmap"
+  | "bbox2d"
+  | "track2d"
+  | "keypoints"
+  | "detections2d"
+  // 3-D / point-cloud-domain
   | "pointcloud"
   | "bbox3d"
+  | "track3d"
   | "region3d"
-  | "scene3d";
+  | "scene3d"
+  | "detections3d"
+  // Special / resource
+  | "point"
+  | "box"
+  | "session"
+  // Frontend-only legacy aliases retained for backward compatibility with
+  // existing widget code (e.g. URL string inputs). These are not produced
+  // by the backend type registry but appear in saved widget configs.
+  | "url";
 
 export interface TypeDescriptor {
   kind: TypeKind;
