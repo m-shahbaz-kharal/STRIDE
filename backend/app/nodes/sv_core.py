@@ -1,4 +1,20 @@
-"""Supervision core nodes: image conversion and detection utilities."""
+"""Supervision core nodes: image conversion and detection utilities.
+
+Every ``t_any()`` port in this module carries an opaque, in-process
+value: either a ``numpy.ndarray`` (BGR image) or a
+``supervision.Detections`` handle. These are not the canonical record
+types declared in ``stride-core``; the supervision library uses
+ndarray-backed objects end-to-end and the wire form is recovered by
+``sv.image.encode`` (image) or by the
+``convert.sv.detections_to_detections2d`` /
+``convert.sv.detections2d_to_detections`` marshallers shipped in the
+``stride-converters`` package.
+
+Per the Phase 5 §4 contract: the ``t_any()`` ports here are documented,
+single-purpose escape hatches for live in-process Python references —
+not unconstrained "anything goes" — and round-tripping into / out of the
+canonical record types is supported by the explicit marshallers above.
+"""
 from __future__ import annotations
 
 import base64

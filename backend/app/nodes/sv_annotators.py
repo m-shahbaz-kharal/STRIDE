@@ -1,4 +1,21 @@
-"""Supervision annotator nodes for drawing on images."""
+"""Supervision annotator nodes for drawing on images.
+
+Every node here takes two ``t_any()`` inputs by design:
+
+* ``image`` — an in-process ``numpy.ndarray`` (BGR, H×W×3 uint8). It
+  is *not* a canonical ``image`` record; the supervision library
+  works with ndarrays end-to-end. To bridge from a record-shaped
+  ``image`` use ``sv.image.decode`` first.
+* ``detections`` — an in-process ``supervision.Detections`` handle. To
+  bridge from / to the canonical ``detections2d`` record use the
+  ``convert.sv.detections2d_to_detections`` and
+  ``convert.sv.detections_to_detections2d`` converters in the
+  ``stride-converters`` package.
+
+Phase 5 leaves these ports as ``t_any()`` because the values they carry
+are genuinely opaque, in-process Python objects with no JSON wire form.
+The structured marshallers above are the documented bridge.
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List
