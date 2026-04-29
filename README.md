@@ -6,11 +6,37 @@ and modular execution engine.
 
 ## Features
 
-- **Visual Graph Editor**: React Flow-powered canvas with draggable nodes, typed ports, and real-time execution feedback
-- **Streaming Execution**: WebSocket-based streaming for live progress updates during graph runs
-- **Parallel Branch Execution**: Independent branches execute concurrently with proper error isolation
-- **Caching System**: Node-level caching with intelligent cache invalidation
-- **Extensible Node System**: Plugin-based node registration from `stride-core` package
+- **Unified type system** with structural subtyping: every kind (image,
+  bbox2d, detections2d, pointcloud, depthmap, scene3d, …) carries a
+  fixed record schema declared once in `stride-core` and reused
+  across every plugin package.
+- **Conversion graph** (`stride-converters`): the editor consults a
+  one-hop converter index at drag-time and offers a single-click
+  "Insert <converter>" action whenever a `convert.*` node would bridge
+  an otherwise-incompatible edge.
+- **Lifecycle hooks**: `prepare` / `forward` / `teardown` per run, plus
+  declarative `PortSpec.constraints` enforced server-side and consumed
+  client-side to render bounded widgets (sliders, enums, file
+  pickers).
+- **Run-scoped resources**: model sessions and live streams live on
+  `ExecutionContext.acquire_run_resource`; nothing leaks across runs,
+  no module-level caches.
+- **Typed errors**: every node failure surfaces as a structured
+  `error_payload` (code, message, port, details) and renders inline
+  in the editor with a disclosure tooltip.
+- **Visual graph editor**: React Flow canvas with draggable nodes,
+  type-aware connection validation, real-time execution highlights,
+  and inline node error UI.
+- **Streaming execution**: WebSocket-based per-node events for live
+  progress, log, and result updates.
+- **Parallel branch execution** with proper error isolation.
+- **Caching**: node-level result caching with hash-based invalidation.
+- **Extensible plugin system**: every node ships in a `stride-*`
+  package registered through Python entry-points; the runtime
+  auto-discovers plugins on startup.
+- **Visualizer registry**: per-kind dashboard widgets (Scene3D,
+  ImageWidget, …); future packages contribute custom visualisers via
+  Vite-time discovery (see `docs/architecture/visualizers.md`).
 
 ## Quick Start
 
@@ -75,6 +101,7 @@ STRIDE/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/node-definitions` | Get all available node types and specs |
+| `GET` | `/api/converters` | Converter index (Phase 5 §4.7) — `(from_kind, to_kind)` lookup |
 | `POST` | `/api/run-graph` | Execute a graph synchronously |
 | `WS` | `/ws/run-graph` | Execute graph with streaming events |
 | `POST` | `/api/executions/{id}/cancel` | Cancel a running execution |

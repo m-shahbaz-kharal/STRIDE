@@ -1,481 +1,261 @@
 # Node Authoring Guide
 
-This guide explains how to create new nodes for LiGuard-Web.
+This guide explains how to create new nodes for STRIDE.
 
-## Overview
+A node is a Python class registered against a `NodeSpec`. It has typed
+input and output ports, an explicit lifecycle (prepare → forward →
+teardown), declarative parameter constraints, and access to a per-run
+`ExecutionContext` for resources, logging, and cancellation.
 
-Nodes are the building blocks of graphs. Each node:
-- Has typed input and output ports
-- Contains execution logic
-- Can have configurable parameters
+## Where to put it
 
-## Node Structure
+- **Built-in node** (ships with the runtime): a new module under
+  `backend/app/nodes/` and an import in `backend/app/nodes/__init__.py`.
+- **Plugin package** (preferred for anything domain-specific): a new
+  `packages/stride-<name>/` folder following the
+  `stride-bytetrack` template, plus a `[project.entry-points."stride.plugins"]`
+  registration in its `pyproject.toml`. The runtime auto-loads plugin
+  packages from the entry-point group at startup; you only need to add
+  the package name to `backend/pyproject.toml`'s dependencies and
+  `[tool.uv.sources]` and run `uv sync`.
 
-### NodeSpec
-
-Every node has a specification that describes its interface:
-
-```python
-@dataclass
-class NodeSpec:
-    id: str                     # Unique identifier
-    type: str                   # Node type (e.g., "Math.Add")
-    category: str               # Category for grouping
-    label: str                  # Display name
-    description: str            # Help text
-    inputs: List[PortSpec]      # Input ports
-    outputs: List[PortSpec]     # Output ports
-    params: List[ParamSpec]     # Configurable parameters
-```
-
-### PortSpec
-
-Ports define the node's inputs and outputs:
+## NodeBase v2 contract
 
 ```python
-@dataclass
-class PortSpec:
-    name: str                   # Port identifier
-    type: TypeDescriptor        # Port type
-    label: str                  # Display name
-    description: str            # Help text
-    default: Any = None         # Default value (inputs only)
-    optional: bool = False      # Whether input is required
+# packages/stride-core/src/stride_core/node_base.py
+class NodeBase(abc.ABC):
+    spec: NodeSpec  # injected by @register_node
+
+    def prepare(self, ctx: ExecutionContext) -> None: ...
+    def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]: ...
+    def teardown(self, ctx: ExecutionContext) -> None: ...
+    def validate_inputs(self, inputs: Dict[str, Any]) -> None: ...
+    def cache_key(self, inputs: Dict[str, Any]) -> Optional[str]: ...
+    def estimate_cost(self, inputs: Dict[str, Any]) -> float: ...
 ```
 
-### ParamSpec
+Hook lifecycle:
 
-Parameters are user-configurable values:
+- `prepare` runs **once per execution run**, before the first `forward()`
+  call. Use it to allocate stateful resources (model sessions, sockets,
+  Kalman state, voxel background models, …) — typically via
+  `ctx.acquire_node_resource(...)` or `ctx.acquire_run_resource(...)`.
+  Default no-op so stateless nodes inherit-for-free.
+- `forward` is the data transform. **Pure-ish**: must not allocate
+  per-call expensive resources; reuse what `prepare` allocated.
+- `teardown` runs once per run after the last forward (also on
+  cancellation / error). Default no-op. Override only when the resource
+  you held is not Python-managed (an OS handle, a subprocess) — Python
+  refs and `acquire_node_resource` / `acquire_run_resource` resources
+  are released automatically.
+- `validate_inputs` is auto-called by the executor before `forward`.
+  The default enforces declarative `PortSpec.constraints` and raises
+  `NodeInputError` on failure (see below). Override to add bespoke
+  shape / range checks.
+- `cache_key` returns a stable hash (or `None` to disable caching for
+  this call). The default hashes type + params + inputs and is correct
+  for almost every node.
+- `estimate_cost` is a scheduler hint (in arbitrary units). Default
+  returns 1.0.
+
+## A minimal node
 
 ```python
-@dataclass
-class ParamSpec:
-    name: str                   # Parameter identifier
-    type: str                   # Parameter type
-    label: str                  # Display name
-    default: Any                # Default value
-    options: List[Any] = None   # For select/enum types
+# packages/stride-foo/src/stride_foo/nodes.py
+
+from typing import Any, Dict
+from stride_core import NodeBase, ExecutionContext, register_node
+from stride_core.node_spec import NodeSpec, PortSpec
+from stride_core.typesystem import t_float, t_int, t_control
+
+ADD_SPEC = NodeSpec(
+    type="foo.add",
+    version="1.0.0",
+    display_name="Add",
+    category="Foo",
+    summary="Add two numbers.",
+    inputs=[
+        PortSpec(name="control_in", type=t_control(), required=False, default=None),
+        PortSpec(name="a", type=t_float(), required=True, default=0.0),
+        PortSpec(name="b", type=t_float(), required=True, default=0.0),
+    ],
+    outputs=[
+        PortSpec(name="control_out", type=t_control(), required=False, default=None),
+        PortSpec(name="sum", type=t_float()),
+    ],
+    cache_policy="auto",
+)
+
+@register_node(ADD_SPEC)
+class AddNode(NodeBase):
+    def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
+        a = float(inputs.get("a") or 0.0)
+        b = float(inputs.get("b") or 0.0)
+        ctx.log(f"foo.add: {a} + {b}")
+        return {"control_out": None, "sum": a + b}
 ```
 
-## Creating a Simple Node
+## Declarative parameter constraints
 
-### Step 1: Define the Node Handler
+`PortSpec.constraints` (see `node_spec.py`) lets the runtime enforce
+shape / range / enum / pattern checks server-side and the frontend
+render bounded widgets.
 
-Create a new file or add to an existing category file in `backend/app/nodes/`:
+| Constraint | Meaning |
+|---|---|
+| `{"min": x, "max": y}` | numeric range; bounds enforced by `validate_inputs` |
+| `{"enum": [...]}` | value must be one of the choices |
+| `{"pattern": "regex"}` | string must match the regex |
+| `{"length_min": n, "length_max": m}` | string / list length bounds |
+| `{"extensions": ["jpg", "png"]}` | file path extension whitelist |
+| `{"presets": [{"label": ..., "value": ...}]}` | UI-only preset hint |
+
+Example:
 
 ```python
-# backend/app/nodes/math_nodes.py
-
-from app.nodes.base import NodeHandler, register_node
-
-@register_node("Math.Multiply")
-class MultiplyNode(NodeHandler):
-    """Multiplies two numbers."""
-
-    @classmethod
-    def get_spec(cls) -> dict:
-        return {
-            "type": "Math.Multiply",
-            "category": "Math",
-            "label": "Multiply",
-            "description": "Multiplies two numbers together",
-            "inputs": [
-                {
-                    "name": "a",
-                    "type": {"kind": "float"},
-                    "label": "A",
-                    "description": "First number",
-                },
-                {
-                    "name": "b",
-                    "type": {"kind": "float"},
-                    "label": "B",
-                    "description": "Second number",
-                },
-            ],
-            "outputs": [
-                {
-                    "name": "result",
-                    "type": {"kind": "float"},
-                    "label": "Result",
-                    "description": "Product of A and B",
-                },
-            ],
-            "params": [],
-        }
-
-    def execute(self, inputs: dict, params: dict) -> dict:
-        a = inputs.get("a", 0)
-        b = inputs.get("b", 0)
-        return {"result": a * b}
+PortSpec(
+    name="track_activation_threshold",
+    type=t_float(),
+    required=False, default=0.25,
+    constraints={"min": 0.0, "max": 1.0},
+)
+PortSpec(
+    name="strategy",
+    type=t_string(),
+    required=False, default="random",
+    constraints={"enum": ["random", "voxel"]},
+)
 ```
 
-### Step 2: Register the Node
+A constraint violation surfaces as a `NodeInputError` with a structured
+payload (`code: "node_input_error"`, `port: ...`, `details.constraint`)
+and is rendered as an inline node error in the editor.
 
-The `@register_node` decorator automatically registers the node. Ensure the module is imported in `backend/app/nodes/__init__.py`:
+## Resource scoping
+
+Three lifetimes are available on `ExecutionContext`:
+
+| Scope | API | Released by | Use when |
+|---|---|---|---|
+| Per node, per run | `ctx.acquire_node_resource(self.id, key, factory)` | end of run | tracker / Kalman state private to one node |
+| Run-scoped, cross node | `ctx.acquire_run_resource(key, factory)` | end of run | model session shared between sibling nodes; FL511 stream |
+| Process-wide | global module dict (rare) | never | only when the runtime cannot manage it (e.g. an HTTP endpoint must reach the resource from outside the executor) |
+
+Pre-Phase-2 nodes used module-level dicts as caches; **don't do this
+anymore**. Phase 5 deleted every model cache dict in the plugin
+packages — they all flow through `ctx.acquire_run_resource` now. The
+benefits:
+
+- Two consecutive runs can never see each other's state.
+- Nodes that share a model (e.g. two YOLO nodes pointing at the same
+  weights) materialise the model exactly once per run.
+- The executor's teardown step closes every resource even when a
+  `forward` raises.
+
+## Typed errors
+
+Raise a typed `NodeError` subclass (from `stride_core.errors`) so the
+runtime emits a structured error payload:
 
 ```python
-# backend/app/nodes/__init__.py
+from stride_core.errors import (
+    NodeInputError, NodeFileNotFoundError, NodeNetworkError,
+    NodeMissingDependencyError, NodeRuntimeError, NodeCancelled,
+)
 
-from . import math_nodes  # Add this line if not present
+raise NodeInputError("voxel_size must be > 0",
+                     port="voxel_size", details={"got": -0.1})
 ```
 
-### Step 3: Test the Node
+The streaming WebSocket emits `error_payload = {code, message, port,
+node_id, details}`; the editor renders an inline badge and disclosure
+tooltip. Untyped exceptions still don't crash the runtime — they're
+folded into a `NodeRuntimeError` with code `"internal_error"`.
 
-Create a test file:
+## Cancellation
+
+A node that runs a long loop should poll `ctx.is_interrupted` and exit
+early when it returns True:
 
 ```python
-# backend/tests/test_nodes/test_math_nodes.py
-
-import pytest
-from app.nodes.math_nodes import MultiplyNode
-
-def test_multiply_basic():
-    node = MultiplyNode()
-    result = node.execute(
-        inputs={"a": 3, "b": 4},
-        params={}
-    )
-    assert result["result"] == 12
-
-def test_multiply_with_zero():
-    node = MultiplyNode()
-    result = node.execute(
-        inputs={"a": 5, "b": 0},
-        params={}
-    )
-    assert result["result"] == 0
+for chunk in stream_chunks():
+    if ctx.is_interrupted:
+        return {"control_out": None, "result": partial}
+    consume(chunk)
 ```
 
-## Working with Types
+For subprocess-based nodes, register the process with
+`ctx.register_subprocess(proc)`; the cancellation controller will send
+SIGTERM on cancel.
 
-### Simple Types
+## Plugin contract
+
+A plugin package contributes types, nodes, validators, and
+visualisers. The minimum:
+
+```toml
+# packages/stride-foo/pyproject.toml
+
+[project]
+name = "stride-foo"
+dependencies = ["stride-core", "numpy>=1.24"]
+
+[project.entry-points."stride.plugins"]
+foo = "stride_foo:register"
+```
 
 ```python
-# Integer input
-{"name": "count", "type": {"kind": "int"}}
-
-# Float input
-{"name": "value", "type": {"kind": "float"}}
-
-# String input
-{"name": "text", "type": {"kind": "string"}}
-
-# Boolean input
-{"name": "enabled", "type": {"kind": "bool"}}
+# packages/stride-foo/src/stride_foo/__init__.py
+from .nodes import register
+__all__ = ["register"]
 ```
 
-### Container Types
+The `register()` function may be a no-op — registration happens
+automatically when the package's `nodes` module is imported (via the
+`@register_node` decorator). Importing `stride_foo` from the entry
+point is what triggers registration.
+
+## Testing
 
 ```python
-# List of integers
-{"name": "numbers", "type": {"kind": "list", "item": {"kind": "int"}}}
+# backend/tests/test_foo.py
 
-# Map with string values
-{"name": "config", "type": {"kind": "map", "value": {"kind": "string"}}}
+from app.runner import GraphExecutor
 
-# Optional integer
-{"name": "limit", "type": {"kind": "option", "item": {"kind": "int"}}}
+def test_foo_add() -> None:
+    graph = {
+        "nodes": [
+            {"id": "add", "type": "foo.add",
+             "input_values": {"a": 2.0, "b": 3.0}},
+        ],
+        "links": [],
+        "output_nodes": [{"node_id": "add", "port": "sum", "alias": "out"}],
+    }
+    assert GraphExecutor(graph).run()["outputs"]["out"] == 5.0
 ```
 
-### Special Types
+The runner exercises the full prepare → forward → teardown cycle and
+the typed-error contract, so a graph-level test is usually sufficient.
+For more targeted tests of `validate_inputs`, instantiate the node
+directly and call the hook.
+
+## Best practices
+
+- One node = one responsibility. Add a `convert.*` node when you find
+  yourself reaching for a "transform inside another node".
+- Always declare a `cache_policy` — `"disabled"` for time-varying or
+  side-effecting nodes, `"auto"` (default) otherwise.
+- Use the canonical type factories from `stride_core.typesystem`. Don't
+  redefine `bbox3d` or `image` locally; the type system uses
+  structural subtyping and any drift breaks cross-package wiring.
+- Prefer `t_<kind>()` over `t_any()`. The Phase 5 contract is that
+  `t_any()` is reserved for documented in-process opaque handles
+  (e.g. supervision.Detections) — every other use is a code-review
+  red flag.
+
+## See also
 
-```python
-# Any type (accepts anything)
-{"name": "data", "type": {"kind": "any"}}
-
-# Control flow signal
-{"name": "trigger", "type": {"kind": "control"}}
-
-# Tensor with specific dtype
-{"name": "weights", "type": {"kind": "tensor", "metadata": {"dtype": "float32"}}}
-```
-
-## Parameters
-
-### Text Parameter
-
-```python
-{
-    "name": "separator",
-    "type": "string",
-    "label": "Separator",
-    "default": ","
-}
-```
-
-### Number Parameter
-
-```python
-{
-    "name": "precision",
-    "type": "int",
-    "label": "Decimal Places",
-    "default": 2
-}
-```
-
-### Select Parameter
-
-```python
-{
-    "name": "operation",
-    "type": "select",
-    "label": "Operation",
-    "default": "add",
-    "options": ["add", "subtract", "multiply", "divide"]
-}
-```
-
-### Boolean Parameter
-
-```python
-{
-    "name": "case_sensitive",
-    "type": "bool",
-    "label": "Case Sensitive",
-    "default": True
-}
-```
-
-### Code Parameter
-
-```python
-{
-    "name": "expression",
-    "type": "code",
-    "label": "Expression",
-    "default": "x * 2"
-}
-```
-
-## Async Nodes
-
-For I/O-bound operations, use async execution:
-
-```python
-@register_node("Network.HttpGet")
-class HttpGetNode(NodeHandler):
-    @classmethod
-    def get_spec(cls) -> dict:
-        return {
-            "type": "Network.HttpGet",
-            # ... spec
-        }
-
-    async def execute_async(self, inputs: dict, params: dict) -> dict:
-        import aiohttp
-
-        url = inputs["url"]
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                text = await response.text()
-                return {"body": text, "status": response.status}
-```
-
-## Generator Nodes (Streaming Output)
-
-For nodes that produce incremental output:
-
-```python
-@register_node("LLM.Generate")
-class GenerateNode(NodeHandler):
-    @classmethod
-    def get_spec(cls) -> dict:
-        return {
-            "type": "LLM.Generate",
-            "outputs": [
-                {"name": "text", "type": {"kind": "string"}, "streaming": True},
-            ],
-            # ... rest of spec
-        }
-
-    async def execute_streaming(self, inputs: dict, params: dict):
-        prompt = inputs["prompt"]
-
-        async for chunk in generate_text(prompt):
-            yield {"text": chunk}
-```
-
-## Control Flow Nodes
-
-### Loop Node
-
-```python
-@register_node("Control.ForEach")
-class ForEachNode(NodeHandler):
-    @classmethod
-    def get_spec(cls) -> dict:
-        return {
-            "type": "Control.ForEach",
-            "category": "Control",
-            "control_type": "loop",
-            "inputs": [
-                {"name": "items", "type": {"kind": "list", "item": {"kind": "any"}}},
-            ],
-            "outputs": [
-                {"name": "item", "type": {"kind": "any"}, "scope": "body"},
-                {"name": "index", "type": {"kind": "int"}, "scope": "body"},
-                {"name": "results", "type": {"kind": "list", "item": {"kind": "any"}}},
-            ],
-            "body": True,  # Indicates this node has a body scope
-        }
-```
-
-### Conditional Node
-
-```python
-@register_node("Control.If")
-class IfNode(NodeHandler):
-    @classmethod
-    def get_spec(cls) -> dict:
-        return {
-            "type": "Control.If",
-            "category": "Control",
-            "control_type": "conditional",
-            "inputs": [
-                {"name": "condition", "type": {"kind": "bool"}},
-            ],
-            "branches": ["then", "else"],  # Named branches
-        }
-```
-
-## Error Handling
-
-Raise exceptions to indicate errors:
-
-```python
-def execute(self, inputs: dict, params: dict) -> dict:
-    divisor = inputs["divisor"]
-
-    if divisor == 0:
-        raise ValueError("Cannot divide by zero")
-
-    return {"result": inputs["dividend"] / divisor}
-```
-
-The execution engine will:
-1. Catch the exception
-2. Mark the node as FAILED
-3. Emit an error event
-4. Skip dependent nodes
-
-## Best Practices
-
-### 1. Keep Nodes Focused
-
-Each node should do one thing well:
-
-```python
-# Good: Single responsibility
-class AddNode:      # Adds two numbers
-class MultiplyNode: # Multiplies two numbers
-
-# Bad: Too many responsibilities
-class MathNode:     # Adds, subtracts, multiplies, divides...
-```
-
-### 2. Use Descriptive Types
-
-Be specific with types to enable better validation:
-
-```python
-# Good: Specific type
-{"kind": "list", "item": {"kind": "int"}}
-
-# Less good: Generic type
-{"kind": "any"}
-```
-
-### 3. Provide Sensible Defaults
-
-```python
-{
-    "name": "timeout",
-    "type": "int",
-    "label": "Timeout (ms)",
-    "default": 5000,  # Reasonable default
-}
-```
-
-### 4. Document Parameters
-
-```python
-{
-    "name": "regex",
-    "type": "string",
-    "label": "Pattern",
-    "description": "Regular expression pattern (Python re syntax)",
-    "default": ".*"
-}
-```
-
-### 5. Handle Missing Inputs
-
-```python
-def execute(self, inputs: dict, params: dict) -> dict:
-    # Use .get() with defaults
-    value = inputs.get("value", 0)
-    multiplier = inputs.get("multiplier", 1)
-
-    return {"result": value * multiplier}
-```
-
-### 6. Validate Inputs
-
-```python
-def execute(self, inputs: dict, params: dict) -> dict:
-    items = inputs.get("items", [])
-
-    if not isinstance(items, list):
-        raise TypeError(f"Expected list, got {type(items).__name__}")
-
-    if len(items) == 0:
-        raise ValueError("List cannot be empty")
-
-    return {"first": items[0]}
-```
-
-## Testing Guidelines
-
-### Unit Tests
-
-Test node logic in isolation:
-
-```python
-def test_node_basic():
-    node = MyNode()
-    result = node.execute({"a": 1, "b": 2}, {})
-    assert result["sum"] == 3
-
-def test_node_with_params():
-    node = MyNode()
-    result = node.execute({"value": 10}, {"multiplier": 2})
-    assert result["result"] == 20
-
-def test_node_error_handling():
-    node = MyNode()
-    with pytest.raises(ValueError):
-        node.execute({"divisor": 0}, {})
-```
-
-### Integration Tests
-
-Test nodes within graph execution:
-
-```python
-def test_node_in_graph():
-    graph = create_test_graph([
-        {"id": "1", "type": "Math.Add", "params": {}},
-        {"id": "2", "type": "Math.Multiply", "params": {}},
-    ])
-
-    result = execute_graph(graph, inputs={"a": 2, "b": 3})
-    # Verify execution completed correctly
-```
-
-## See Also
-
-- [Architecture Overview](../architecture/overview.md)
 - [Type System](../architecture/type-system.md)
 - [Execution Engine](../architecture/execution-engine.md)
+- [Visualizers](../architecture/visualizers.md)
+- [Unified design doc](../architecture/unified-type-system-and-ux.md)
