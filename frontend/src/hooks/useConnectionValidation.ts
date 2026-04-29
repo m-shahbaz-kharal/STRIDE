@@ -8,6 +8,30 @@ interface ConnectionValidationResult {
     reason?: string;
     sourceType?: TypeDescriptor;
     targetType?: TypeDescriptor;
+    classification?: PortCompatibility;
+}
+
+// Phase 3 §7.1: per-target classification used to drive port highlighting
+// while a connection is in progress.
+//
+// - "compatible":   directly assignable per `arePortTypesCompatible`.
+// - "convertible":  same kind but the target wants a narrower subtype than
+//                   the source advertises (e.g. source `image[any]` →
+//                   target `image[rgb]`). Once `stride-converters` lands
+//                   (Phase 5) this also covers cross-kind paths reachable
+//                   through a registered converter.
+// - "incompatible": no path; rendering should grey the port out.
+// - "neutral":      not part of the current drag (self-port, wrong
+//                   direction, no active drag).
+export type PortCompatibility =
+    | "compatible"
+    | "convertible"
+    | "incompatible"
+    | "neutral";
+
+export interface ClassifyOptions {
+    // The handle the user grabbed (`source` = an output, `target` = an input).
+    sourceRole: "source" | "target";
 }
 
 interface UseConnectionValidationProps {
@@ -102,6 +126,52 @@ export const useConnectionValidation = ({
             return true;
         },
         [normalizeType]
+    );
+
+    // Phase 3 §7.1: classify how a *target* port relates to a *source*
+    // port, *given* both are direction-correct (output → input). We treat
+    // anything that `arePortTypesCompatible` accepts as "compatible". The
+    // narrower bucket "convertible" is reserved for same-kind pairs whose
+    // subtype metadata cannot be unified — i.e. the connection would need
+    // an explicit conversion node before it becomes valid.
+    //
+    // Cross-kind pairs are "incompatible" until `stride-converters` ships
+    // a converter index in Phase 5. At that point this function will also
+    // consult the converter registry; see TODO at end of file.
+    const classifyAssignment = useCallback(
+        (
+            sourceType: TypeDescriptor | string | undefined,
+            targetType: TypeDescriptor | string | undefined
+        ): PortCompatibility => {
+            if (arePortTypesCompatible(sourceType, targetType)) {
+                return "compatible";
+            }
+            const src = normalizeType(sourceType);
+            const tgt = normalizeType(targetType);
+
+            // Same-kind narrowing: source advertises a wider subtype
+            // (or no subtype) than the target requires. A converter
+            // could plausibly resolve this — the user will be prompted.
+            if (src.kind === tgt.kind) {
+                const srcSubtype = (src.metadata?.subtype as string | undefined) ?? null;
+                const tgtSubtype = (tgt.metadata?.subtype as string | undefined) ?? null;
+                if (tgtSubtype && srcSubtype !== tgtSubtype) {
+                    return "convertible";
+                }
+                // List/map element-type narrowing — recurse into the item type.
+                if (src.kind === "list" && src.item && tgt.item) {
+                    const inner = classifyAssignment(src.item, tgt.item);
+                    if (inner === "convertible") return "convertible";
+                }
+                if (src.kind === "map" && src.value && tgt.value) {
+                    const inner = classifyAssignment(src.value, tgt.value);
+                    if (inner === "convertible") return "convertible";
+                }
+            }
+
+            return "incompatible";
+        },
+        [arePortTypesCompatible, normalizeType]
     );
 
     const getPortTypeForHandle = useCallback(
@@ -304,6 +374,10 @@ export const useConnectionValidation = ({
             );
             setConnectionLineColor?.(desiredColor);
 
+            const classification = compatible
+                ? "compatible"
+                : classifyAssignment(sourceType, targetType);
+
             return {
                 valid: compatible,
                 reason: compatible
@@ -311,20 +385,112 @@ export const useConnectionValidation = ({
                     : `Type mismatch: ${formatPortTypeLabel(sourceType)} -> ${formatPortTypeLabel(targetType)}`,
                 sourceType,
                 targetType,
+                classification,
             };
         },
         [
             arePortTypesCompatible,
+            classifyAssignment,
             getHandleRole,
             getPortTypeForHandle,
             normalizeConnection,
         ]
     );
 
+    // Phase 3 §7.1: classify a single (otherCandidate) port relative to
+    // the currently dragged port. Used by BlueprintNode to decorate every
+    // input port on every other node during a drag.
+    //
+    // Returns `"neutral"` when:
+    //   - no drag is active
+    //   - the candidate is on the same node as the drag origin
+    //   - the candidate has the wrong direction for this drag (e.g. user
+    //     is dragging from an output, candidate is also an output)
+    const classifyPortForDrag = useCallback(
+        (
+            candidateNodeId: string,
+            candidateHandleId: string,
+            candidateDirection: "input" | "output"
+        ): PortCompatibility => {
+            if (!connectStartParams?.nodeId || !connectStartParams.handleId || !connectStartParams.handleType) {
+                return "neutral";
+            }
+            // Can't connect a port to itself or anywhere else on the same node.
+            if (candidateNodeId === connectStartParams.nodeId) {
+                return "neutral";
+            }
+            // Direction must be the opposite of what the user grabbed.
+            const dragRole = connectStartParams.handleType;
+            const wantedDirection = dragRole === "source" ? "input" : "output";
+            if (candidateDirection !== wantedDirection) {
+                return "neutral";
+            }
+
+            const dragType = getPortTypeForHandle(
+                connectStartParams.nodeId,
+                connectStartParams.handleId,
+                dragRole
+            );
+            const candidateType = getPortTypeForHandle(
+                candidateNodeId,
+                candidateHandleId,
+                candidateDirection === "input" ? "target" : "source"
+            );
+
+            // Resolve who is the source and who is the target type-wise
+            // (independent of which side the user grabbed).
+            const [sourceType, targetType] = dragRole === "source"
+                ? [dragType, candidateType]
+                : [candidateType, dragType];
+
+            return classifyAssignment(sourceType, targetType);
+        },
+        [classifyAssignment, connectStartParams, getPortTypeForHandle]
+    );
+
+    // Re-validate every existing edge against current node port types.
+    // Phase 3 §7.3: nodes whose params change can mutate their declared
+    // port types; edges that pointed at them need a refresh. Returns a
+    // map of edgeId → classification for any edge that is no longer
+    // strictly compatible. Unchanged edges are omitted from the map so
+    // callers can clear bad-edge state with `.size === 0`.
+    const revalidateEdges = useCallback(
+        (
+            edges: Array<{
+                id: string;
+                source: string;
+                sourceHandle?: string | null;
+                target: string;
+                targetHandle?: string | null;
+                data?: { kind?: "data" | "control" } | undefined;
+            }>
+        ): Map<string, { classification: PortCompatibility; reason: string }> => {
+            const result = new Map<string, { classification: PortCompatibility; reason: string }>();
+            for (const edge of edges) {
+                if (!edge.sourceHandle || !edge.targetHandle) continue;
+                // Skip control edges — kind matches by construction.
+                if (edge.data?.kind === "control") continue;
+                const sourceType = getPortTypeForHandle(edge.source, edge.sourceHandle, "source");
+                const targetType = getPortTypeForHandle(edge.target, edge.targetHandle, "target");
+                if (arePortTypesCompatible(sourceType, targetType)) continue;
+                const classification = classifyAssignment(sourceType, targetType);
+                result.set(edge.id, {
+                    classification,
+                    reason: `${formatPortTypeLabel(sourceType)} → ${formatPortTypeLabel(targetType)} no longer compatible`,
+                });
+            }
+            return result;
+        },
+        [arePortTypesCompatible, classifyAssignment, getPortTypeForHandle]
+    );
+
     return {
         nodeMap,
         normalizeType,
         arePortTypesCompatible,
+        classifyAssignment,
+        classifyPortForDrag,
+        revalidateEdges,
         getPortTypeForHandle,
         getHandleRole,
         getHandleRoleFromDom,
@@ -332,3 +498,37 @@ export const useConnectionValidation = ({
         validateConnection,
     };
 };
+
+// Phase 3 §7.1: re-export pure classifier helpers so non-hook code
+// (visualisers, vitest unit tests) can call them without spinning up a
+// React tree. The hook already wraps these in `useCallback`; the bare
+// functions below have no React dependencies.
+export const classifyAssignmentPure = (
+    sourceType: TypeDescriptor | string | undefined,
+    targetType: TypeDescriptor | string | undefined,
+    isAssignable: (
+        a: TypeDescriptor | string | undefined,
+        b: TypeDescriptor | string | undefined
+    ) => boolean
+): PortCompatibility => {
+    if (isAssignable(sourceType, targetType)) return "compatible";
+
+    const norm = (t?: TypeDescriptor | string): TypeDescriptor => {
+        if (!t) return { kind: "any" };
+        if (typeof t === "string") return { kind: t as TypeDescriptor["kind"] };
+        return t;
+    };
+    const src = norm(sourceType);
+    const tgt = norm(targetType);
+    if (src.kind === tgt.kind) {
+        const srcSubtype = (src.metadata?.subtype as string | undefined) ?? null;
+        const tgtSubtype = (tgt.metadata?.subtype as string | undefined) ?? null;
+        if (tgtSubtype && srcSubtype !== tgtSubtype) return "convertible";
+    }
+    return "incompatible";
+};
+
+// TODO(Phase 5 / stride-converters): once the converter index is built,
+// `classifyAssignment` should also return "convertible" for cross-kind
+// pairs that have a registered converter, and "compatible" for free
+// (zero-cost) implicit conversions per §4.2 of the design doc.
