@@ -25,17 +25,60 @@ class _LegacyWSKeepaliveFilter(logging.Filter):
     surface — we only suppress this specific known-harmless trace."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "keepalive ping failed" in msg:
+            return False
         if record.exc_info:
             exc_type = record.exc_info[0]
-            if exc_type is AssertionError and "keepalive" in str(record.getMessage()).lower():
-                return False
-        if "keepalive ping failed" in record.getMessage():
-            return False
+            # The traceback frame includes "_drain_helper" and the assertion
+            # text — match either marker so we catch the trace whether or not
+            # the message has been formatted yet.
+            if exc_type is AssertionError:
+                tb_text = ""
+                exc_value = record.exc_info[1]
+                if exc_value is not None:
+                    tb_text = repr(exc_value)
+                if (
+                    "keepalive" in msg.lower()
+                    or "_drain_helper" in tb_text
+                    or "_drain_helper" in (record.pathname or "")
+                ):
+                    return False
         return True
 
 
-for _name in ("websockets.server", "websockets.protocol", "websockets.legacy.protocol"):
-    logging.getLogger(_name).addFilter(_LegacyWSKeepaliveFilter())
+_KEEPALIVE_FILTER = _LegacyWSKeepaliveFilter()
+
+# Attach to every logger in the websockets namespace, including the root one
+# (per-connection child loggers inherit from the root's ancestors), and re-attach
+# whenever a new logger appears under that namespace by hooking the manager.
+def _install_keepalive_filter() -> None:
+    """Attach the filter at every level of the websockets logger tree.
+
+    websockets creates a child logger per connection (e.g.
+    ``websockets.server.<id>``) that bypasses filters set on a sibling. We
+    install the filter on the root ``websockets`` logger and on every
+    already-known child, then monkey-patch ``Logger.callHandlers`` once at
+    module load — cheap, narrow, and keeps real errors visible.
+    """
+    base_names = (
+        "websockets",
+        "websockets.server",
+        "websockets.client",
+        "websockets.protocol",
+        "websockets.legacy",
+        "websockets.legacy.protocol",
+        "websockets.legacy.server",
+        "uvicorn.error",
+        "uvicorn",
+    )
+    for name in base_names:
+        logger = logging.getLogger(name)
+        if _KEEPALIVE_FILTER not in logger.filters:
+            logger.addFilter(_KEEPALIVE_FILTER)
+
+
+_install_keepalive_filter()
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = (BASE_DIR.parent.parent / "frontend" / "dist").resolve()

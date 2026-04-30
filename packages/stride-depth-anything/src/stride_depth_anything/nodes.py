@@ -77,47 +77,26 @@ def _require_deps() -> None:
         )
 
 
-def _load_processor(checkpoint: str) -> Any:
-    """Load the image processor with a fallback chain.
-
-    Some HF caches end up partially populated when a download is interrupted
-    (network flake, ctrl-C). ``AutoImageProcessor`` then complains about a
-    missing ``preprocessor_config.json`` even though one of the more specific
-    classes can still load the same files. Try the broadest API first, fall
-    back through ``AutoProcessor`` and the concrete ``DPTImageProcessor``,
-    and only re-raise the original error if every path fails.
-    """
-    last_err: Exception | None = None
-    candidates = [AutoImageProcessor, AutoProcessor, DPTImageProcessor]
-    for klass in candidates:
-        if klass is None:
-            continue
-        try:
-            return klass.from_pretrained(checkpoint)
-        except Exception as exc:  # noqa: BLE001 — re-raised below if all fail
-            last_err = exc
-            continue
-    cache_hint = (
-        "If the error mentions a missing 'preprocessor_config.json', the HF cache "
-        "may be partially populated from an interrupted download. Delete "
-        "'~/.cache/huggingface/hub/models--depth-anything--Depth-Anything-V2-Small-hf' "
-        "and retry."
-    )
-    raise NodeMissingDependencyError(
-        f"Failed to load image processor for '{checkpoint}'. {cache_hint} "
-        f"Underlying error: {last_err}"
-    ) from last_err
-
-
 def _load_model(ctx: ExecutionContext, checkpoint: str, device: str) -> "tuple[Any, Any, str]":
     """Get-or-create a depth-anything (processor, model, device) bundle on the run-scoped registry."""
+    from stride_core.hf_loader import ensure_snapshot, load_from_snapshot
+
     if not device:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     cache_key = f"stride_depth_anything:{checkpoint}|{device}"
 
     def _factory() -> "tuple[Any, Any, str]":
-        processor = _load_processor(checkpoint)
-        model = AutoModelForDepthEstimation.from_pretrained(checkpoint).to(device).eval()
+        snapshot_path = ensure_snapshot(checkpoint)
+        processor = load_from_snapshot(
+            snapshot_path,
+            [AutoImageProcessor, AutoProcessor, DPTImageProcessor],
+            kind="image processor",
+        )
+        model = load_from_snapshot(
+            snapshot_path,
+            [AutoModelForDepthEstimation],
+            kind="depth-estimation model",
+        ).to(device).eval()
         return (processor, model, device)
 
     return ctx.acquire_run_resource(cache_key, _factory)
