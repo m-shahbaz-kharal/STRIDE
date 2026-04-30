@@ -483,11 +483,18 @@ const CameraAutoFit: React.FC<{ bounds: DecodedCloud["bounds"] | null; trigger: 
   bounds,
   trigger,
 }) => {
+  // Hold `bounds` in a ref so the effect re-reads it without depending on it.
+  // Otherwise every parent re-render (HUDReporter ticks setHud every 500ms)
+  // produces a fresh bounds object reference and the effect snaps the camera
+  // back, fighting the user's orbit drag.
+  const boundsRef = useRef(bounds);
+  boundsRef.current = bounds;
   const { camera } = useThree();
   useEffect(() => {
-    if (!bounds) return;
-    const r = bounds.radius;
-    const target = bounds.center;
+    const b = boundsRef.current;
+    if (!b) return;
+    const r = b.radius;
+    const target = b.center;
     const offset = new THREE.Vector3(r * 1.6, -r * 1.6, r * 1.6);
     camera.position.copy(target).add(offset);
     camera.up.set(0, 0, 1);
@@ -497,7 +504,9 @@ const CameraAutoFit: React.FC<{ bounds: DecodedCloud["bounds"] | null; trigger: 
       (camera as THREE.PerspectiveCamera).far = Math.max(1000, r * 100);
       (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
     }
-  }, [bounds, trigger, camera]);
+    // Intentionally only re-runs on `trigger` change (cloud data changed, or
+    // user clicked Fit). Camera state otherwise stays where the user put it.
+  }, [trigger, camera]);
   return null;
 };
 
