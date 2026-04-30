@@ -181,10 +181,15 @@ class GroundingDinoNode(NodeBase):
             post = getattr(processor, "post_process_grounded_object_detection", None)
             if post is None:  # pragma: no cover - older transformers
                 post = processor.post_process_object_detection
+            # The box-confidence kwarg was renamed `box_threshold` → `threshold`
+            # somewhere in the 4.4x→5.x transition. Pick the one this version accepts.
+            import inspect as _inspect
+            _params = _inspect.signature(post).parameters
+            _box_kwarg = "threshold" if "threshold" in _params else "box_threshold"
             results = post(
                 outputs,
                 input_ids=batch["input_ids"],
-                box_threshold=box_thresh,
+                **{_box_kwarg: box_thresh},
                 text_threshold=text_thresh,
                 target_sizes=target_sizes,
             )
