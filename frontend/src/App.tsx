@@ -2320,14 +2320,10 @@ const App = () => {
     setHighlightedNodeIds(nodeIds);
   }, []);
 
-  // ========== Render ==========
-
-  if (!session) {
-    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
-  }
-
   // Phase 3 §7.1 — broadcast the active connection drag so every
   // BlueprintNode can decorate its ports without a `nodes` rebuild.
+  // Must be declared above any early returns to keep the hook order stable
+  // across the unauthenticated → authenticated transition.
   const connectionDragInfo: ConnectionDragInfo | null = useMemo(() => {
     if (!connectStartParams?.nodeId || !connectStartParams.handleId || !connectStartParams.handleType) {
       return null;
@@ -2338,6 +2334,12 @@ const App = () => {
       handleType: connectStartParams.handleType,
     };
   }, [connectStartParams]);
+
+  // ========== Render ==========
+
+  if (!session) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
 
   return (
     <PopupProvider>
