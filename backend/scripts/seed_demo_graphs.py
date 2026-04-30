@@ -384,15 +384,18 @@ def demo_04_lidar_people() -> Tuple[str, str, Dict[str, Any]]:
     """
     name = f"{DEMO_NAME_PREFIX}04 — People Detection from Point Cloud"
     desc = (
-        "Density-based people detection on a 3D point cloud. NOTE: there is "
-        "no raw .pcd loader in the current registry, so we synthesize an "
-        "approximate point cloud from a single image via Depth-Anything -> "
-        "convert.depth.to_pointcloud. The cloud is then fed into "
-        "people.detect (DBSCAN-style clustering after voxel-grid background "
-        "subtraction) and tracker.kalman3d. Dashboard shows the foreground "
-        "cloud + detection counts. For real LIDAR data, replace the depth "
-        "branch with an Ouster source (ouster.open_source -> "
-        "ouster.get_frame) plus a pcap+metadata pair."
+        "End-to-end 3D pipeline: a single image is monocular-depth-estimated "
+        "by Depth-Anything V2, the depth map is unprojected into a ~200k-point "
+        "cloud, that cloud is fed through people.detect (DBSCAN clustering "
+        "after voxel-grid background subtraction) and tracker.kalman3d. The "
+        "dashboard's 3-D viewer shows the unprojected cloud and any detected "
+        "person boxes. NOTE: people.detect does *temporal* background "
+        "subtraction (it learns what's static across multiple frames). With a "
+        "single synthetic frame nothing has a chance to look like foreground, "
+        "so 0 detections is expected — the demo proves the wiring works "
+        "end-to-end. For real detections, replace the depth branch with a "
+        "streaming source like ouster.open_source -> ouster.get_frame "
+        "(needs a pcap+metadata pair) and run the graph in a loop."
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
@@ -426,7 +429,11 @@ def demo_04_lidar_people() -> Tuple[str, str, Dict[str, Any]]:
         # tracker.kalman3d expects 'boxes' (list)
         make_edge("people", "detections", "kalman", "boxes", nodes=nodes),
         make_edge("people", "control_out", "viz", "control_in", nodes=nodes),
-        make_edge("people", "foreground_cloud", "viz", "point_cloud", nodes=nodes),
+        # Show the FULL unprojected cloud in the 3D viewer rather than the
+        # post-subtraction foreground (which is empty for a single frame —
+        # background subtraction is temporal). Detection boxes still overlay
+        # if any are produced upstream.
+        make_edge("topc", "point_cloud", "viz", "point_cloud", nodes=nodes),
         make_edge("people", "detections", "viz", "detections", nodes=nodes),
     ]
     widgets = [
