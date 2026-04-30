@@ -142,14 +142,16 @@ def make_edge(
             f"Edge {src_node}.{src_port} -> {tgt_node}.{tgt_port}: "
             f"target port '{tgt_port}' not in {sorted(tgt_ins)}"
         )
-    # Use the same shape the frontend produces.
+    # Use the same shape the frontend produces. The editor registers
+    # CustomEdge under the "default" key (App.tsx: `edgeTypes = { default: CustomEdge }`),
+    # so leaving `type` unset (or setting it to "default") is what ReactFlow expects.
     return {
         "id": f"e-{src_node}-{src_port}-{tgt_node}-{tgt_port}",
         "source": src_node,
         "target": tgt_node,
         "sourceHandle": src_port,
         "targetHandle": tgt_port,
-        "type": "custom",
+        "type": "default",
     }
 
 
