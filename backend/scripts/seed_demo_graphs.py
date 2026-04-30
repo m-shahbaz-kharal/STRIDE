@@ -229,8 +229,8 @@ def demo_01_yolo_clip() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
-        make_node("url", "convert.image.from_url", 380, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("yolo", "image.detect.yolo", 720, 100,
                   inputs={"weights": "yolo11n.pt", "confidence": 0.3,
                           "iou": 0.45, "image_size": 640, "annotate": True}),
@@ -284,8 +284,8 @@ def demo_02_tracking_loop() -> Tuple[str, str, Dict[str, Any]]:
         make_node("start", "core.control.start", 100, 200),
         make_node("loop", "core.control.for", 380, 200,
                   inputs={"first_index": 0, "last_index": 9}),
-        make_node("url", "convert.image.from_url", 720, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 720, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("yolo", "image.detect.yolo", 1060, 200,
                   inputs={"weights": "yolo11n.pt", "confidence": 0.3,
                           "iou": 0.45, "annotate": False}),
@@ -335,8 +335,8 @@ def demo_03_depth() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
-        make_node("url", "convert.image.from_url", 380, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("depth", "image.depth.depth_anything", 720, 200,
                   inputs={"colormap": "inferno", "visualize": True}),
         make_node("topc", "convert.depth.to_pointcloud", 1060, 200,
@@ -394,8 +394,8 @@ def demo_04_lidar_people() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
-        make_node("url", "convert.image.from_url", 380, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("depth", "image.depth.depth_anything", 720, 200,
                   inputs={"visualize": False}),
         make_node("topc", "convert.depth.to_pointcloud", 1060, 200,
@@ -460,8 +460,8 @@ def demo_05_grounding_dino() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
-        make_node("url", "convert.image.from_url", 380, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("dino", "image.detect.grounding_dino", 720, 200,
                   inputs={"text_prompt": "a person. a bus. a traffic light.",
                           "box_threshold": 0.35, "text_threshold": 0.25,
@@ -498,8 +498,8 @@ def demo_06_pose() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 200),
-        make_node("url", "convert.image.from_url", 380, 200,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 200,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("pose", "image.pose.mediapipe", 720, 200,
                   inputs={"model_complexity": 1, "num_poses": 4,
                           "min_detection_confidence": 0.5, "annotate": True}),
@@ -539,8 +539,8 @@ def demo_07_converters() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 220),
-        make_node("url", "convert.image.from_url", 380, 220,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 220,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("yolo", "image.detect.yolo", 720, 100,
                   inputs={"weights": "yolo11n.pt", "confidence": 0.3,
                           "annotate": False}),
@@ -672,8 +672,8 @@ def demo_09_multimodal() -> Tuple[str, str, Dict[str, Any]]:
     )
     nodes: List[Dict[str, Any]] = [
         make_node("start", "core.control.start", 100, 220),
-        make_node("url", "convert.image.from_url", 380, 220,
-                  inputs={"url": SAMPLE_IMAGE_URL, "timeout": 30.0}),
+        make_node("url", "core.image.load", 380, 220,
+                  inputs={"file_path": SAMPLE_IMAGE_URL}),
         make_node("yolo", "image.detect.yolo", 720, 100,
                   inputs={"weights": "yolo11n.pt", "confidence": 0.3,
                           "annotate": True}),
