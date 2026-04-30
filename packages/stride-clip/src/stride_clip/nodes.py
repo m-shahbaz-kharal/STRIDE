@@ -40,11 +40,23 @@ except ImportError:
 
 try:
     from transformers import CLIPModel, CLIPProcessor  # type: ignore
+    try:
+        from transformers import AutoProcessor  # type: ignore
+    except ImportError:  # pragma: no cover - very old transformers
+        AutoProcessor = None  # type: ignore
+    try:
+        from transformers import CLIPImageProcessor, CLIPTokenizer  # type: ignore
+    except ImportError:  # pragma: no cover
+        CLIPImageProcessor = None  # type: ignore
+        CLIPTokenizer = None  # type: ignore
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
     CLIPModel = None  # type: ignore
     CLIPProcessor = None  # type: ignore
+    AutoProcessor = None  # type: ignore
+    CLIPImageProcessor = None  # type: ignore
+    CLIPTokenizer = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
 from stride_core.errors import NodeMissingDependencyError
@@ -66,6 +78,43 @@ def _require_deps() -> None:
         )
 
 
+def _load_processor(checkpoint: str) -> Any:
+    """Load the CLIP processor with a fallback chain.
+
+    Some HF caches end up partially populated when a download is interrupted
+    (network flake, ctrl-C). ``CLIPProcessor.from_pretrained`` then complains
+    about a missing ``preprocessor_config.json`` even though one of the more
+    specific classes can still load the same files. Try the canonical class
+    first, fall back through ``AutoProcessor`` and the concrete
+    ``CLIPImageProcessor``, and only re-raise once every path fails.
+    """
+    last_err: Exception | None = None
+    # Note: only CLIPProcessor / AutoProcessor return a full processor with
+    # text tokenizer; CLIPImageProcessor is image-only and won't support the
+    # text= kwarg used by the classifier. We deliberately leave it out of
+    # the chain so a partial cache fails loudly rather than silently breaking
+    # text-prompt classification at call time.
+    candidates = [CLIPProcessor, AutoProcessor]
+    for klass in candidates:
+        if klass is None:
+            continue
+        try:
+            return klass.from_pretrained(checkpoint)
+        except Exception as exc:  # noqa: BLE001 — re-raised below if all fail
+            last_err = exc
+            continue
+    safe_dir = checkpoint.replace("/", "--")
+    cache_hint = (
+        "If the error mentions a missing 'preprocessor_config.json', the HF cache "
+        "may be partially populated from an interrupted download. Delete "
+        f"'~/.cache/huggingface/hub/models--{safe_dir}' and retry."
+    )
+    raise NodeMissingDependencyError(
+        f"Failed to load CLIP processor for '{checkpoint}'. {cache_hint} "
+        f"Underlying error: {last_err}"
+    ) from last_err
+
+
 def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
     """Get-or-create a (processor, model, device) bundle on the run-scoped registry."""
     if not device:
@@ -73,7 +122,7 @@ def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
     cache_key = f"stride_clip:{checkpoint}|{device}"
 
     def _factory():
-        processor = CLIPProcessor.from_pretrained(checkpoint)
+        processor = _load_processor(checkpoint)
         model = CLIPModel.from_pretrained(checkpoint).to(device).eval()
         return (processor, model, device)
 

@@ -40,11 +40,16 @@ except ImportError:
 
 try:
     from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor  # type: ignore
+    try:
+        from transformers import GroundingDinoProcessor  # type: ignore
+    except ImportError:  # pragma: no cover — older transformers
+        GroundingDinoProcessor = None  # type: ignore
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
     AutoModelForZeroShotObjectDetection = None  # type: ignore
     AutoProcessor = None  # type: ignore
+    GroundingDinoProcessor = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
 from stride_core.errors import NodeMissingDependencyError
@@ -67,6 +72,38 @@ def _require_deps() -> None:
         raise NodeMissingDependencyError("transformers not installed (pip install transformers)")
 
 
+def _load_processor(checkpoint: str) -> Any:
+    """Load the Grounding DINO processor with a fallback chain.
+
+    Some HF caches end up partially populated when a download is interrupted
+    (network flake, ctrl-C). ``AutoProcessor.from_pretrained`` then complains
+    about a missing ``preprocessor_config.json`` even though the concrete
+    ``GroundingDinoProcessor`` can still load the same files. Try the
+    auto-discovered class first, fall back through the concrete class, and
+    only re-raise once every path fails.
+    """
+    last_err: Exception | None = None
+    candidates = [AutoProcessor, GroundingDinoProcessor]
+    for klass in candidates:
+        if klass is None:
+            continue
+        try:
+            return klass.from_pretrained(checkpoint)
+        except Exception as exc:  # noqa: BLE001 — re-raised below if all fail
+            last_err = exc
+            continue
+    safe_dir = checkpoint.replace("/", "--")
+    cache_hint = (
+        "If the error mentions a missing 'preprocessor_config.json', the HF cache "
+        "may be partially populated from an interrupted download. Delete "
+        f"'~/.cache/huggingface/hub/models--{safe_dir}' and retry."
+    )
+    raise NodeMissingDependencyError(
+        f"Failed to load Grounding DINO processor for '{checkpoint}'. {cache_hint} "
+        f"Underlying error: {last_err}"
+    ) from last_err
+
+
 def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
     """Get-or-create a Grounding DINO (processor, model, device) bundle on the run-scoped registry."""
     if not device:
@@ -74,7 +111,7 @@ def _load_model(ctx: ExecutionContext, checkpoint: str, device: str):
     cache_key = f"stride_grounding_dino:{checkpoint}|{device}"
 
     def _factory():
-        processor = AutoProcessor.from_pretrained(checkpoint)
+        processor = _load_processor(checkpoint)
         model = AutoModelForZeroShotObjectDetection.from_pretrained(checkpoint).to(device).eval()
         return (processor, model, device)
 
