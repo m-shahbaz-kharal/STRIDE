@@ -36,6 +36,7 @@ dependencies = [
     "stride-grounding-dino",
     "stride-kalman",
     "stride-converters",
+    "stride-traffic",
 ]
 
 [tool.uv.sources]
@@ -54,6 +55,7 @@ stride-clip = { path = "../packages/stride-clip", editable = true }
 stride-grounding-dino = { path = "../packages/stride-grounding-dino", editable = true }
 stride-kalman = { path = "../packages/stride-kalman", editable = true }
 stride-converters = { path = "../packages/stride-converters", editable = true }
+stride-traffic = { path = "../packages/stride-traffic", editable = true }
 
 [dependency-groups]
 dev = [

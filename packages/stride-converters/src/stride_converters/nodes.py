@@ -129,9 +129,13 @@ URL_LOAD_SPEC = NodeSpec(
         PortSpec(name="control_in", type=t_control(), required=False, default=None),
         PortSpec(
             name="url",
-            type=t_string(),
+            # Nullable so live-stream sources (fl511.get_frame.image) that
+            # may transiently emit ``null`` between frames can flow into
+            # this converter without a static type error. The runtime
+            # raises ``NodeInputError`` if ``None``/empty arrives.
+            type=t_string().with_nullable(True),
             required=True,
-            description="HTTP(S) URL or absolute file path to load.",
+            description="HTTP(S) URL, data: URL, or absolute file path to load.",
         ),
         PortSpec(
             name="timeout",
@@ -157,6 +161,29 @@ def _looks_like_url(value: str) -> bool:
     return parsed.scheme in {"http", "https", "file"}
 
 
+def _decode_data_url(value: str) -> bytes:
+    """Decode an RFC 2397 ``data:`` URL into raw bytes.
+
+    Accepts ``data:<mime>;base64,<payload>``. Non-base64 / percent-encoded
+    payloads aren't relevant for image streams produced by FL511 etc.
+    """
+    if not value.startswith("data:"):
+        raise NodeInputError("not a data: URL", port="url")
+    head, _, body = value.partition(",")
+    if not body:
+        raise NodeInputError("data: URL has no payload", port="url")
+    if ";base64" in head:
+        try:
+            return base64.b64decode(body)
+        except Exception as exc:
+            raise NodeInputError(
+                f"data: URL base64 decode failed: {exc}", port="url",
+            ) from exc
+    # Percent-encoded text payload — supported but rare for images.
+    from urllib.parse import unquote_to_bytes
+    return unquote_to_bytes(body)
+
+
 @register_node(URL_LOAD_SPEC)
 class ConvertImageFromUrlNode(NodeBase):
     def forward(self, inputs: Dict[str, Any], ctx: ExecutionContext) -> Dict[str, Any]:
@@ -167,7 +194,9 @@ class ConvertImageFromUrlNode(NodeBase):
         timeout = float(inputs.get("timeout") if inputs.get("timeout") is not None else 10.0)
 
         raw: bytes
-        if _looks_like_url(url):
+        if url.startswith("data:"):
+            raw = _decode_data_url(url)
+        elif _looks_like_url(url):
             try:
                 req = Request(url, headers={"User-Agent": "STRIDE-Converter/1.0"})
                 with urlopen(req, timeout=timeout) as resp:

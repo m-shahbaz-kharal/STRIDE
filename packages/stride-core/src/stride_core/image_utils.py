@@ -18,8 +18,25 @@ from io import BytesIO
 from typing import Any, Optional, Tuple
 
 
-def strip_data_url(image_str: str) -> str:
-    """Strip a `data:...;base64,` prefix if present and return raw base64."""
+def strip_data_url(image_str: Any) -> str:
+    """Strip a `data:...;base64,` prefix and return raw base64.
+
+    Accepts either:
+
+    * a bare string (data URL or raw base64) — the convention used by
+      ``core.image.load.image``;
+    * a canonical Image record dict (``{"_type": "Image", ..., "data_b64":
+      "..."}``) — the convention used by ``convert.image.from_url`` and
+      anything that produces a structured Image.
+
+    Returns ``""`` for anything else so callers can detect "missing" input.
+    """
+    if isinstance(image_str, dict):
+        # Canonical Image record — pull data_b64.
+        inner = image_str.get("data_b64")
+        if not isinstance(inner, str):
+            return ""
+        image_str = inner
     if not isinstance(image_str, str):
         return ""
     if image_str.startswith("data:") and "," in image_str:
@@ -27,13 +44,13 @@ def strip_data_url(image_str: str) -> str:
     return image_str
 
 
-def decode_image_bytes(image_str: str) -> bytes:
-    """Decode a STRIDE image string into raw bytes."""
+def decode_image_bytes(image_str: Any) -> bytes:
+    """Decode a STRIDE image string (or record) into raw bytes."""
     return base64.b64decode(strip_data_url(image_str))
 
 
-def decode_image_to_numpy(image_str: str) -> "Any":
-    """Decode a STRIDE image string into a HxWxC BGR numpy array via OpenCV.
+def decode_image_to_numpy(image_str: Any) -> "Any":
+    """Decode a STRIDE image (string or record) to an HxWxC BGR ndarray.
 
     Raises RuntimeError if numpy/opencv aren't available.
     """

@@ -70,6 +70,35 @@ def _check_node(node_type: str) -> Dict[str, Any]:
     return REGISTRY[node_type]
 
 
+# Grid spacing for the auto-layout helper :func:`gp` below.
+#
+# The frontend (``BlueprintNode``) renders each node at:
+#
+#     width  = max(node["width"], MIN_NODE_WIDTH=260)
+#     height = HEADER_HEIGHT(70) + maxPorts * PORT_ROW_HEIGHT(42)
+#            + paramCount * PARAM_ROW_HEIGHT(26) + 8
+#
+# A high-fanout node like ``tracker.bytetrack`` (9 inputs / 6 outputs)
+# therefore renders at ~456 px tall; ``traffic.events.annotate`` and
+# ``image.detect.yolo`` are ~330 px tall. The grid spacing below leaves
+# a ~50 px buffer below even the tallest node so no two nodes can ever
+# visually overlap in the editor.
+GRID_X0, GRID_Y0 = 60, 60
+# col_w must beat the actual rendered node width (which often grows past
+# the declared 280 once long display names + parameter widgets land).
+# 540 gives a clean ~260 px clear gap between node edges horizontally.
+# row_h beats the tallest node we register (~456 px for tracker.bytetrack
+# with 9 ports) plus ~64 px of breathing room.
+GRID_COL_W, GRID_ROW_H = 540, 520
+
+
+def gp(col: int, row: int) -> Tuple[int, int]:
+    """Return ``(x, y)`` for a node placed at ``(col, row)`` on the
+    canonical demo-grid. Use as ``make_node("foo", "...", *gp(2, 1))``.
+    """
+    return GRID_X0 + col * GRID_COL_W, GRID_Y0 + row * GRID_ROW_H
+
+
 def make_node(
     node_id: str,
     node_type: str,
@@ -769,6 +798,894 @@ def demo_10_hello() -> Tuple[str, str, Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Traffic demos — exercise the stride-traffic plugin
+# ---------------------------------------------------------------------------
+
+
+def demo_traffic_01_flow_metrics() -> Tuple[str, str, Dict[str, Any]]:
+    """Live counting + classification + AADT/PHF/headway from FL511."""
+    name = f"{DEMO_NAME_PREFIX}Traffic 01 — Live Counting + AADT / PHF / Headway"
+    desc = (
+        "End-to-end live counting pipeline. FL511 → image-decode → YOLO "
+        "→ ByteTrack → traffic.count.line + traffic.count.classify. The "
+        "counter's running ``total`` flows into traffic.flow.live_metrics "
+        "for an extrapolated AADT and hourly rate. Its ``events`` stream "
+        "feeds traffic.flow.live_phf (4×15-min rolling Peak-Hour Factor) "
+        "and traffic.safety.headway_live (running mean / minimum / "
+        "critical-headway tally). The annotated tracker frame is "
+        "post-processed by traffic.events.annotate to overlay the virtual "
+        "counting line and a severity-coloured border whenever a "
+        "critical-headway event lands. If the FL511 'frame' node errors "
+        "with a 404, the configured camera 2130 is offline — edit the "
+        "``camera`` parameter on the ``connect`` node to any other active "
+        "FL511 camera ID."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Top pipeline (row 1): start → connect → loop → frame → decode → YOLO → track → count
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("connect", "fl511.connect", *gp(1, 1),
+                  inputs={"camera": 2130, "fps": 10, "buffer_seconds": 4,
+                          "refresh_minutes": 4}),
+        make_node("loop", "core.control.for", *gp(2, 1),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 1),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("img_decode", "convert.image.from_url", *gp(4, 1),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 1),
+                  inputs={"weights": "yolo11n.pt", "confidence": 0.3,
+                          "iou": 0.45, "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 1),
+                  inputs={"track_activation_threshold": 0.25,
+                          "lost_track_buffer": 30,
+                          "minimum_matching_threshold": 0.8,
+                          "frame_rate": 10, "annotate": True}),
+        make_node("count", "traffic.count.line", *gp(7, 1),
+                  inputs={"reference": "bottom", "hysteresis_px": 2.0}),
+        # ROI source (row 3, below the pipeline) → annot_lines (row 3, col 7)
+        make_node("line", "traffic.roi.line", *gp(6, 3),
+                  inputs={"name": "screen line",
+                          "x1": 0, "y1": 240, "x2": 704, "y2": 240}),
+        make_node("annot_lines", "traffic.roi.merge_lines", *gp(7, 3),
+                  inputs={}),
+        # Classification on row 2 below count
+        make_node("classify", "traffic.count.classify", *gp(7, 2),
+                  inputs={}),
+        # Metrics column (col 8): live AADT, PHF, headway, severity filter
+        make_node("live_metrics", "traffic.flow.live_metrics", *gp(8, 0),
+                  inputs={"seasonal_factor": 1.0, "dow_factor": 1.0,
+                          "axle_factor": 1.0}),
+        make_node("live_phf", "traffic.flow.live_phf", *gp(8, 1),
+                  inputs={"bin_seconds": 900.0,
+                          "kind_filter": "line_cross"}),
+        make_node("hd_live", "traffic.safety.headway_live", *gp(8, 2),
+                  inputs={"kind_filter": "line_cross",
+                          "max_samples": 4096}),
+        make_node("hd_filter", "traffic.events.filter", *gp(8, 3),
+                  inputs={"kind": "", "severity": "critical"}),
+        # Annotator + dashboard widgets
+        make_node("annotate", "traffic.events.annotate", *gp(9, 1),
+                  inputs={"thickness": 2}),
+        make_node("disp_frame", "general.to_display", *gp(10, 0),
+                  inputs={"section": "Frame", "title": "Annotated"}),
+        make_node("disp_total", "general.to_display", *gp(10, 1),
+                  inputs={"section": "Counts", "title": "Total"}),
+        make_node("disp_classes", "general.to_display", *gp(10, 2),
+                  inputs={"section": "Counts", "title": "Per-class"}),
+        make_node("disp_hd_mean", "general.to_display", *gp(10, 3),
+                  inputs={"section": "Headway", "title": "Mean (s)"}),
+        make_node("disp_hd_crit", "general.to_display", *gp(10, 4),
+                  inputs={"section": "Headway", "title": "Critical (<1s)"}),
+        make_node("disp_aadt", "general.to_display", *gp(11, 0),
+                  inputs={"section": "Flow", "title": "AADT (extrapolated)"}),
+        make_node("disp_hourly", "general.to_display", *gp(11, 1),
+                  inputs={"section": "Flow", "title": "Hourly rate"}),
+        make_node("disp_phf", "general.to_display", *gp(11, 2),
+                  inputs={"section": "Flow", "title": "Live PHF"}),
+        make_node("disp_hd_min", "general.to_display", *gp(11, 3),
+                  inputs={"section": "Headway", "title": "Min (s)"}),
+    ]
+    edges = [
+        # FL511 → frame → image → YOLO → ByteTrack
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "img_decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "img_decode", "url", nodes=nodes),
+        make_edge("img_decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("img_decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("img_decode", "image", "track", "image", nodes=nodes),
+        # Counting + classification
+        make_edge("track", "control_out", "count", "control_in", nodes=nodes),
+        make_edge("track", "detections", "count", "detections", nodes=nodes),
+        make_edge("line", "line", "count", "line", nodes=nodes),
+        make_edge("track", "control_out", "classify", "control_in", nodes=nodes),
+        make_edge("track", "detections", "classify", "detections", nodes=nodes),
+        # Live flow metrics from running total
+        make_edge("count", "control_out", "live_metrics", "control_in",
+                  nodes=nodes),
+        make_edge("count", "total", "live_metrics", "count", nodes=nodes),
+        # Live PHF + Headway from event stream
+        make_edge("count", "control_out", "live_phf", "control_in", nodes=nodes),
+        make_edge("count", "events", "live_phf", "events", nodes=nodes),
+        make_edge("count", "control_out", "hd_live", "control_in", nodes=nodes),
+        make_edge("count", "events", "hd_live", "events", nodes=nodes),
+        # Severity overlay: pull only critical-severity events for the border
+        make_edge("count", "control_out", "hd_filter", "control_in",
+                  nodes=nodes),
+        make_edge("count", "events", "hd_filter", "events", nodes=nodes),
+        # Compose the line into a list for the annotator
+        make_edge("line", "line", "annot_lines", "line_1", nodes=nodes),
+        # Annotate
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("hd_filter", "events", "annotate", "events", nodes=nodes),
+        make_edge("annot_lines", "lines", "annotate", "lines", nodes=nodes),
+        # Displays
+        make_edge("annotate", "control_out", "disp_frame",
+                  "control_in", nodes=nodes),
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("count", "total", "disp_total", "value", nodes=nodes),
+        make_edge("count", "control_out", "disp_total", "control_in",
+                  nodes=nodes),
+        make_edge("classify", "summary", "disp_classes", "value", nodes=nodes),
+        make_edge("classify", "control_out", "disp_classes",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "aadt", "disp_aadt", "value", nodes=nodes),
+        make_edge("live_metrics", "control_out", "disp_aadt",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "hourly_rate", "disp_hourly",
+                  "value", nodes=nodes),
+        make_edge("live_metrics", "control_out", "disp_hourly",
+                  "control_in", nodes=nodes),
+        make_edge("live_phf", "phf", "disp_phf", "value", nodes=nodes),
+        make_edge("live_phf", "control_out", "disp_phf",
+                  "control_in", nodes=nodes),
+        make_edge("hd_live", "mean_s", "disp_hd_mean", "value", nodes=nodes),
+        make_edge("hd_live", "control_out", "disp_hd_mean",
+                  "control_in", nodes=nodes),
+        make_edge("hd_live", "min_s", "disp_hd_min", "value", nodes=nodes),
+        make_edge("hd_live", "control_out", "disp_hd_min",
+                  "control_in", nodes=nodes),
+        make_edge("hd_live", "critical_count", "disp_hd_crit",
+                  "value", nodes=nodes),
+        make_edge("hd_live", "control_out", "disp_hd_crit",
+                  "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=700, h=40,
+               label="Demo · Traffic 01 — Live Counting + Flow"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=480, h=320,
+               label="Annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-total", type="bound-output", x=520, y=80, w=200, h=80,
+               label="Total count", node_id="count",
+               port_name="total", input_type="int"),
+        widget("w-class", type="bound-output", x=740, y=80, w=240, h=200,
+               label="Per-class", node_id="classify",
+               port_name="counts", input_type="any"),
+        widget("w-aadt", type="bound-output", x=520, y=200, w=200, h=80,
+               label="AADT (extrap.)", node_id="live_metrics",
+               port_name="aadt", input_type="float"),
+        widget("w-hourly", type="bound-output", x=520, y=320, w=200, h=80,
+               label="Hourly rate", node_id="live_metrics",
+               port_name="hourly_rate", input_type="float"),
+        widget("w-phf", type="bound-output", x=20, y=420, w=240, h=80,
+               label="Live PHF", node_id="live_phf",
+               port_name="phf", input_type="float"),
+        widget("w-hd-mean", type="bound-output", x=280, y=420, w=240, h=80,
+               label="Mean headway (s)", node_id="hd_live",
+               port_name="mean_s", input_type="float"),
+        widget("w-hd-min", type="bound-output", x=540, y=420, w=240, h=80,
+               label="Min headway (s)", node_id="hd_live",
+               port_name="min_s", input_type="float"),
+        widget("w-hd-crit", type="bound-output", x=800, y=420, w=240, h=80,
+               label="Critical (<1s)", node_id="hd_live",
+               port_name="critical_count", input_type="int"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_02_hsm_crash() -> Tuple[str, str, Dict[str, Any]]:
+    """Live FL511 -> speed estimation -> density / v/c / fundamental diagram."""
+    name = f"{DEMO_NAME_PREFIX}Traffic 02 — Live Speed + Density + v/c"
+    desc = (
+        "Wires per-track speed estimation onto the FL511 → YOLO → ByteTrack "
+        "stack. ``traffic.calibration.from_known_width`` produces a "
+        "TrafficCalibration record that ``traffic.speed.estimate`` uses to "
+        "stamp every detection with km/h. The running 85th-/95th-percentile "
+        "speeds come from ``traffic.speed.summary``. The hourly flow rate "
+        "from a screen-line counter feeds ``traffic.flow.density`` "
+        "(k = q / v_space-mean) and ``traffic.flow.capacity_vc``. Edit the "
+        "``connect`` node's ``camera`` parameter if FL511 returns a 404 on "
+        "the configured camera."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Top pipeline (row 1): start → connect → loop → frame → decode → YOLO → track → speed → summary
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("connect", "fl511.connect", *gp(1, 1),
+                  inputs={"camera": 2130, "fps": 10, "buffer_seconds": 4}),
+        make_node("loop", "core.control.for", *gp(2, 1),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 1),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("img_decode", "convert.image.from_url", *gp(4, 1),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 1),
+                  inputs={"weights": "yolo11n.pt", "confidence": 0.3,
+                          "iou": 0.45, "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 1),
+                  inputs={"track_activation_threshold": 0.25,
+                          "lost_track_buffer": 30,
+                          "minimum_matching_threshold": 0.8,
+                          "frame_rate": 10, "annotate": True}),
+        make_node("speed", "traffic.speed.estimate", *gp(7, 1),
+                  inputs={"reference": "bottom", "ema_alpha": 0.4,
+                          "window_s": 0.6, "store_key": "speed"}),
+        make_node("speed_summary", "traffic.speed.summary", *gp(8, 1),
+                  inputs={"max_samples": 5000}),
+        # Calibration is computed once at run start (col 0, row 3 — out of pipeline path)
+        make_node("cal", "traffic.calibration.from_known_width", *gp(0, 3),
+                  inputs={"image_width": 704, "image_height": 480,
+                          "point_a": [320, 360], "point_b": [400, 360],
+                          "real_distance_m": 3.65}),
+        # ROI + counting branch (row 3): line → annot_lines, count
+        make_node("line", "traffic.roi.line", *gp(6, 3),
+                  inputs={"name": "screen line",
+                          "x1": 0, "y1": 240, "x2": 704, "y2": 240}),
+        make_node("annot_lines", "traffic.roi.merge_lines", *gp(7, 3),
+                  inputs={}),
+        make_node("count", "traffic.count.line", *gp(7, 2),
+                  inputs={"reference": "bottom", "hysteresis_px": 2.0}),
+        make_node("live_metrics", "traffic.flow.live_metrics", *gp(8, 2),
+                  inputs={}),
+        # Density / v/c on row 2 (col 9), keeping a clear vertical for displays
+        make_node("density", "traffic.flow.density", *gp(9, 2),
+                  inputs={}),
+        make_node("vc", "traffic.flow.capacity_vc", *gp(9, 3),
+                  inputs={"capacity_vph": 2200.0}),
+        # Annotator (col 9, row 1) and dashboard widgets (col 10-11)
+        make_node("annotate", "traffic.events.annotate", *gp(9, 1),
+                  inputs={"thickness": 2}),
+        make_node("disp_frame", "general.to_display", *gp(10, 0),
+                  inputs={"section": "Frame", "title": "Annotated"}),
+        make_node("disp_mean", "general.to_display", *gp(10, 1),
+                  inputs={"section": "Speed", "title": "Mean (km/h)"}),
+        make_node("disp_p85", "general.to_display", *gp(11, 0),
+                  inputs={"section": "Speed", "title": "85th %ile (km/h)"}),
+        make_node("disp_dens", "general.to_display", *gp(10, 2),
+                  inputs={"section": "Flow", "title": "Density (veh/km)"}),
+        make_node("disp_vc", "general.to_display", *gp(10, 3),
+                  inputs={"section": "Flow", "title": "v/c"}),
+        make_node("disp_status", "general.to_display", *gp(11, 3),
+                  inputs={"section": "Flow", "title": "Capacity status"}),
+    ]
+    edges = [
+        # Calibration computed once; feeds speed.estimate
+        make_edge("start", "control_out", "cal", "control_in", nodes=nodes),
+        # FL511 → frame → image → YOLO → ByteTrack
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "img_decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "img_decode", "url", nodes=nodes),
+        make_edge("img_decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("img_decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("img_decode", "image", "track", "image", nodes=nodes),
+        # Speed estimation
+        make_edge("track", "control_out", "speed", "control_in", nodes=nodes),
+        make_edge("track", "detections", "speed", "detections", nodes=nodes),
+        make_edge("cal", "calibration", "speed", "calibration", nodes=nodes),
+        make_edge("speed", "control_out", "speed_summary", "control_in",
+                  nodes=nodes),
+        make_edge("speed", "speeds_kph", "speed_summary",
+                  "speeds_kph", nodes=nodes),
+        # Counter on the screen line
+        make_edge("track", "control_out", "count", "control_in", nodes=nodes),
+        make_edge("speed", "detections", "count", "detections", nodes=nodes),
+        make_edge("line", "line", "count", "line", nodes=nodes),
+        # Hourly rate from live_metrics
+        make_edge("count", "control_out", "live_metrics", "control_in",
+                  nodes=nodes),
+        make_edge("count", "total", "live_metrics", "count", nodes=nodes),
+        # Density: q from hourly_rate, v from space_mean speed proxy
+        # (use mean_kph; in full HCM you'd want true space-mean)
+        make_edge("live_metrics", "control_out", "density",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "hourly_rate", "density",
+                  "flow_vph", nodes=nodes),
+        make_edge("speed_summary", "mean_kph", "density",
+                  "space_mean_speed_kph", nodes=nodes),
+        # v/c
+        make_edge("live_metrics", "control_out", "vc", "control_in", nodes=nodes),
+        make_edge("live_metrics", "hourly_rate", "vc", "volume_vph", nodes=nodes),
+        # Annotation: tracker-annotated image + line ROI
+        make_edge("line", "line", "annot_lines", "line_1", nodes=nodes),
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("annot_lines", "lines", "annotate", "lines", nodes=nodes),
+        # Displays
+        make_edge("annotate", "control_out", "disp_frame",
+                  "control_in", nodes=nodes),
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("speed_summary", "mean_kph", "disp_mean", "value", nodes=nodes),
+        make_edge("speed_summary", "control_out", "disp_mean",
+                  "control_in", nodes=nodes),
+        make_edge("speed_summary", "p85_kph", "disp_p85", "value", nodes=nodes),
+        make_edge("speed_summary", "control_out", "disp_p85",
+                  "control_in", nodes=nodes),
+        make_edge("density", "density_vpkm", "disp_dens",
+                  "value", nodes=nodes),
+        make_edge("density", "control_out", "disp_dens",
+                  "control_in", nodes=nodes),
+        make_edge("vc", "vc", "disp_vc", "value", nodes=nodes),
+        make_edge("vc", "control_out", "disp_vc",
+                  "control_in", nodes=nodes),
+        make_edge("vc", "status", "disp_status", "value", nodes=nodes),
+        make_edge("vc", "control_out", "disp_status",
+                  "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=700, h=40,
+               label="Demo · Traffic 02 — Live Speed + Density"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=480, h=320,
+               label="Annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-mean", type="bound-output", x=520, y=80, w=240, h=80,
+               label="Mean speed (km/h)", node_id="speed_summary",
+               port_name="mean_kph", input_type="float"),
+        widget("w-p85", type="bound-output", x=520, y=200, w=240, h=80,
+               label="85th %ile (km/h)", node_id="speed_summary",
+               port_name="p85_kph", input_type="float"),
+        widget("w-p95", type="bound-output", x=520, y=320, w=240, h=80,
+               label="95th %ile (km/h)", node_id="speed_summary",
+               port_name="p95_kph", input_type="float"),
+        widget("w-dens", type="bound-output", x=20, y=420, w=240, h=80,
+               label="Density (veh/km)", node_id="density",
+               port_name="density_vpkm", input_type="float"),
+        widget("w-vc", type="bound-output", x=280, y=420, w=240, h=80,
+               label="v/c", node_id="vc",
+               port_name="vc", input_type="float"),
+        widget("w-status", type="bound-output", x=540, y=420, w=240, h=80,
+               label="Capacity status", node_id="vc",
+               port_name="status", input_type="string"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_03_safety_metrics() -> Tuple[str, str, Dict[str, Any]]:
+    """Live FL511 -> live multi-event safety overlay (TTC + DRAC + brake + WW)."""
+    name = f"{DEMO_NAME_PREFIX}Traffic 03 — Live Safety Conflicts (TTC + DRAC + Brake + Wrong-way)"
+    desc = (
+        "Live surrogate-safety overlay. The same FL511 → YOLO → ByteTrack "
+        "stack feeds ``traffic.speed.estimate`` (which fills the per-run "
+        "track store). Four detectors then read that store and emit "
+        "``traffic.event`` records:\n\n"
+        " · ``traffic.safety.ttc_pairwise`` — Hayward-style Time-to-Collision\n"
+        " · ``traffic.safety.drac_pairwise`` — leader/follower DRAC\n"
+        " · ``traffic.events.hard_brake`` — deceleration > 3.4 m/s²\n"
+        " · ``traffic.events.wrong_way`` — heading vs lane-flow\n\n"
+        "All event lists merge into ``traffic.events.merge`` → "
+        "``traffic.events.annotate`` (severity-coloured border + caption "
+        "showing per-kind counts) → dashboard image. ``traffic.report."
+        "event_summary`` provides the running tally widget. If FL511 cam "
+        "2130 returns 404, edit the connect node's ``camera`` parameter."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Top pipeline (row 1): start → connect → loop → frame → decode → YOLO → track → speed
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("connect", "fl511.connect", *gp(1, 1),
+                  inputs={"camera": 2130, "fps": 10, "buffer_seconds": 4}),
+        make_node("loop", "core.control.for", *gp(2, 1),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 1),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("img_decode", "convert.image.from_url", *gp(4, 1),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 1),
+                  inputs={"weights": "yolo11n.pt", "confidence": 0.3,
+                          "iou": 0.45, "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 1),
+                  inputs={"track_activation_threshold": 0.25,
+                          "lost_track_buffer": 30,
+                          "minimum_matching_threshold": 0.8,
+                          "frame_rate": 10, "annotate": True}),
+        make_node("speed", "traffic.speed.estimate", *gp(7, 1),
+                  inputs={"reference": "bottom", "ema_alpha": 0.4,
+                          "window_s": 0.6, "store_key": "speed"}),
+        # Calibration node parked off the main pipeline (col 0, row 3)
+        make_node("cal", "traffic.calibration.from_known_width", *gp(0, 3),
+                  inputs={"image_width": 704, "image_height": 480,
+                          "point_a": [320, 360], "point_b": [400, 360],
+                          "real_distance_m": 3.65}),
+        # Four parallel safety detectors stacked in col 8
+        make_node("ttc", "traffic.safety.ttc_pairwise", *gp(8, 0),
+                  inputs={"store_key": "speed", "threshold_s": 2.0,
+                          "critical_s": 0.8, "min_speed_mps": 1.5}),
+        make_node("drac", "traffic.safety.drac_pairwise", *gp(8, 1),
+                  inputs={"store_key": "speed", "threshold_mps2": 3.4,
+                          "critical_mps2": 4.5,
+                          "max_lead_distance_m": 50.0,
+                          "min_speed_mps": 2.0}),
+        make_node("brake", "traffic.events.hard_brake", *gp(8, 2),
+                  inputs={"store_key": "speed", "threshold_mps2": 3.4,
+                          "window_s": 1.0}),
+        make_node("ww", "traffic.events.wrong_way", *gp(8, 3),
+                  inputs={"store_key": "speed",
+                          "expected_dx": 1.0, "expected_dy": 0.0,
+                          "angle_threshold_deg": 110.0,
+                          "min_speed_mps": 2.0}),
+        # Merge → summary + annotate
+        make_node("ev_merge", "traffic.events.merge", *gp(9, 1), inputs={}),
+        make_node("ev_summary", "traffic.report.event_summary", *gp(9, 2),
+                  inputs={}),
+        make_node("annotate", "traffic.events.annotate", *gp(9, 0),
+                  inputs={"thickness": 3}),
+        # Displays (col 10, 11)
+        make_node("disp_frame", "general.to_display", *gp(10, 0),
+                  inputs={"section": "Frame", "title": "Annotated"}),
+        make_node("disp_kinds", "general.to_display", *gp(10, 1),
+                  inputs={"section": "Events", "title": "By kind"}),
+        make_node("disp_sev", "general.to_display", *gp(10, 2),
+                  inputs={"section": "Events", "title": "By severity"}),
+        make_node("disp_total", "general.to_display", *gp(10, 3),
+                  inputs={"section": "Events", "title": "Total"}),
+        make_node("disp_min_ttc", "general.to_display", *gp(11, 0),
+                  inputs={"section": "Safety", "title": "Min TTC (s)"}),
+        make_node("disp_max_drac", "general.to_display", *gp(11, 1),
+                  inputs={"section": "Safety", "title": "Max DRAC (m/s²)"}),
+    ]
+    edges = [
+        # Calibration once
+        make_edge("start", "control_out", "cal", "control_in", nodes=nodes),
+        # FL511 chain
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "img_decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "img_decode", "url", nodes=nodes),
+        make_edge("img_decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("img_decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("img_decode", "image", "track", "image", nodes=nodes),
+        # Speed: fills the track store
+        make_edge("track", "control_out", "speed", "control_in", nodes=nodes),
+        make_edge("track", "detections", "speed", "detections", nodes=nodes),
+        make_edge("cal", "calibration", "speed", "calibration", nodes=nodes),
+        # Four parallel safety detectors
+        make_edge("speed", "control_out", "ttc", "control_in", nodes=nodes),
+        make_edge("speed", "control_out", "drac", "control_in", nodes=nodes),
+        make_edge("speed", "control_out", "brake", "control_in", nodes=nodes),
+        make_edge("speed", "control_out", "ww", "control_in", nodes=nodes),
+        # Merge events
+        make_edge("ttc", "events", "ev_merge", "events_1", nodes=nodes),
+        make_edge("drac", "events", "ev_merge", "events_2", nodes=nodes),
+        make_edge("brake", "events", "ev_merge", "events_3", nodes=nodes),
+        make_edge("ww", "events", "ev_merge", "events_4", nodes=nodes),
+        make_edge("ttc", "control_out", "ev_merge", "control_in", nodes=nodes),
+        # Summary + annotation
+        make_edge("ev_merge", "control_out", "ev_summary",
+                  "control_in", nodes=nodes),
+        make_edge("ev_merge", "events", "ev_summary", "events", nodes=nodes),
+        make_edge("ev_merge", "control_out", "annotate",
+                  "control_in", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("ev_merge", "events", "annotate", "events", nodes=nodes),
+        # Displays
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("annotate", "control_out", "disp_frame",
+                  "control_in", nodes=nodes),
+        make_edge("ev_summary", "by_kind", "disp_kinds",
+                  "value", nodes=nodes),
+        make_edge("ev_summary", "control_out", "disp_kinds",
+                  "control_in", nodes=nodes),
+        make_edge("ev_summary", "by_severity", "disp_sev",
+                  "value", nodes=nodes),
+        make_edge("ev_summary", "control_out", "disp_sev",
+                  "control_in", nodes=nodes),
+        make_edge("ev_summary", "total", "disp_total",
+                  "value", nodes=nodes),
+        make_edge("ev_summary", "control_out", "disp_total",
+                  "control_in", nodes=nodes),
+        make_edge("ttc", "min_ttc_s", "disp_min_ttc", "value", nodes=nodes),
+        make_edge("ttc", "control_out", "disp_min_ttc",
+                  "control_in", nodes=nodes),
+        make_edge("drac", "max_drac_mps2", "disp_max_drac",
+                  "value", nodes=nodes),
+        make_edge("drac", "control_out", "disp_max_drac",
+                  "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=700, h=40,
+               label="Demo · Traffic 03 — Live Safety Conflicts"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=520, h=360,
+               label="Annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-total", type="bound-output", x=560, y=80, w=200, h=80,
+               label="Total events", node_id="ev_summary",
+               port_name="total", input_type="int"),
+        widget("w-kinds", type="bound-output", x=560, y=200, w=240, h=160,
+               label="By kind", node_id="ev_summary",
+               port_name="by_kind", input_type="any"),
+        widget("w-sev", type="bound-output", x=820, y=200, w=240, h=160,
+               label="By severity", node_id="ev_summary",
+               port_name="by_severity", input_type="any"),
+        widget("w-min-ttc", type="bound-output", x=20, y=460, w=240, h=80,
+               label="Min TTC (s)", node_id="ttc",
+               port_name="min_ttc_s", input_type="float"),
+        widget("w-max-drac", type="bound-output", x=280, y=460, w=240, h=80,
+               label="Max DRAC (m/s²)", node_id="drac",
+               port_name="max_drac_mps2", input_type="float"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_04_video_pipeline() -> Tuple[str, str, Dict[str, Any]]:
+    """Live travel-time pipeline: entry/exit lines -> reliability indices -> CSV."""
+    name = f"{DEMO_NAME_PREFIX}Traffic 04 — Live Travel Time + Reliability + CSV Snapshot"
+    desc = (
+        "End-to-end travel-time pipeline using two virtual screen lines. "
+        "FL511 → YOLO → ByteTrack → traffic.trajectory.accumulate (with a "
+        "calibration). traffic.events.travel_time stamps each track that "
+        "crosses both lines with an elapsed-seconds metric. The metric "
+        "values flow through traffic.events.timestamps (field=metric) → "
+        "traffic.report.travel_time_indices for FHWA-style reliability "
+        "indices (Travel-Time Index, Planning-Time Index, Buffer Index). "
+        "Every event also lands in traffic.report.csv_emit → "
+        "traffic.report.snapshot_writer for an on-disk CSV report. If "
+        "FL511 cam 2130 is offline, edit the connect node's ``camera`` "
+        "parameter."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Top pipeline (row 1): start → connect → loop → frame → decode → YOLO → track → trajectory → travel-time
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("connect", "fl511.connect", *gp(1, 1),
+                  inputs={"camera": 2130, "fps": 10, "buffer_seconds": 4}),
+        make_node("loop", "core.control.for", *gp(2, 1),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 1),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("img_decode", "convert.image.from_url", *gp(4, 1),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 1),
+                  inputs={"weights": "yolo11n.pt", "confidence": 0.3,
+                          "iou": 0.45, "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 1),
+                  inputs={"track_activation_threshold": 0.25,
+                          "frame_rate": 10, "annotate": True}),
+        make_node("traj", "traffic.trajectory.accumulate", *gp(7, 1),
+                  inputs={"store_key": "trajectory", "max_history": 256}),
+        make_node("travel", "traffic.events.travel_time", *gp(8, 1),
+                  inputs={"reference": "bottom"}),
+        # Calibration off the main pipeline (col 0, row 3)
+        make_node("cal", "traffic.calibration.from_known_width", *gp(0, 3),
+                  inputs={"image_width": 704, "image_height": 480,
+                          "point_a": [320, 360], "point_b": [400, 360],
+                          "real_distance_m": 3.65}),
+        # ROI lines + merger (row 3, cols 6-7)
+        make_node("entry_line", "traffic.roi.line", *gp(6, 3),
+                  inputs={"name": "entry", "x1": 0, "y1": 180,
+                          "x2": 704, "y2": 180}),
+        make_node("exit_line", "traffic.roi.line", *gp(7, 3),
+                  inputs={"name": "exit", "x1": 0, "y1": 320,
+                          "x2": 704, "y2": 320}),
+        make_node("annot_lines", "traffic.roi.merge_lines", *gp(8, 3),
+                  inputs={}),
+        # Bridge events → list<float> of travel times → reliability indices
+        make_node("ts_extract", "traffic.events.timestamps", *gp(9, 1),
+                  inputs={"field": "metric"}),
+        make_node("tti", "traffic.report.travel_time_indices", *gp(10, 1),
+                  inputs={"free_flow_s": 2.0}),
+        make_node("ev_summary", "traffic.report.event_summary", *gp(9, 2),
+                  inputs={}),
+        make_node("csv", "traffic.report.csv_emit", *gp(10, 2), inputs={}),
+        # Annotator + dashboard widgets
+        make_node("annotate", "traffic.events.annotate", *gp(9, 0),
+                  inputs={"thickness": 2}),
+        make_node("disp_frame", "general.to_display", *gp(10, 0),
+                  inputs={"section": "Frame", "title": "Annotated"}),
+        make_node("disp_completed", "general.to_display", *gp(11, 0),
+                  inputs={"section": "Travel Time", "title": "Completed"}),
+        make_node("disp_active", "general.to_display", *gp(11, 1),
+                  inputs={"section": "Travel Time", "title": "Active (in transit)"}),
+        make_node("disp_mean", "general.to_display", *gp(11, 2),
+                  inputs={"section": "Travel Time", "title": "Mean (s)"}),
+        make_node("disp_pti", "general.to_display", *gp(11, 3),
+                  inputs={"section": "Reliability", "title": "Planning Time Index"}),
+        make_node("disp_bi", "general.to_display", *gp(10, 3),
+                  inputs={"section": "Reliability", "title": "Buffer Index"}),
+        make_node("disp_csv", "general.to_display", *gp(9, 3),
+                  inputs={"section": "Snapshot", "title": "CSV preview"}),
+    ]
+    edges = [
+        make_edge("start", "control_out", "cal", "control_in", nodes=nodes),
+        # FL511
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "img_decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "img_decode", "url", nodes=nodes),
+        make_edge("img_decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("img_decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("img_decode", "image", "track", "image", nodes=nodes),
+        # Trajectory (uses calibration)
+        make_edge("track", "control_out", "traj", "control_in", nodes=nodes),
+        make_edge("track", "detections", "traj", "detections", nodes=nodes),
+        make_edge("cal", "calibration", "traj", "calibration", nodes=nodes),
+        # Travel-time events between the two lines
+        make_edge("traj", "control_out", "travel", "control_in", nodes=nodes),
+        make_edge("track", "detections", "travel", "detections", nodes=nodes),
+        make_edge("entry_line", "line", "travel", "entry_line", nodes=nodes),
+        make_edge("exit_line", "line", "travel", "exit_line", nodes=nodes),
+        # Reliability indices via timestamp-extractor
+        make_edge("travel", "control_out", "ts_extract",
+                  "control_in", nodes=nodes),
+        make_edge("travel", "events", "ts_extract", "events", nodes=nodes),
+        make_edge("ts_extract", "control_out", "tti",
+                  "control_in", nodes=nodes),
+        make_edge("ts_extract", "values", "tti",
+                  "travel_times_s", nodes=nodes),
+        # Event summary + CSV
+        make_edge("travel", "control_out", "ev_summary",
+                  "control_in", nodes=nodes),
+        make_edge("travel", "events", "ev_summary", "events", nodes=nodes),
+        make_edge("travel", "control_out", "csv", "control_in", nodes=nodes),
+        make_edge("travel", "events", "csv", "records", nodes=nodes),
+        # Annotate frame with both lines
+        make_edge("entry_line", "line", "annot_lines", "line_1", nodes=nodes),
+        make_edge("exit_line", "line", "annot_lines", "line_2", nodes=nodes),
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("annot_lines", "lines", "annotate", "lines", nodes=nodes),
+        # Displays
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("annotate", "control_out", "disp_frame",
+                  "control_in", nodes=nodes),
+        make_edge("travel", "completed_total", "disp_completed",
+                  "value", nodes=nodes),
+        make_edge("travel", "control_out", "disp_completed",
+                  "control_in", nodes=nodes),
+        make_edge("travel", "active_total", "disp_active",
+                  "value", nodes=nodes),
+        make_edge("travel", "control_out", "disp_active",
+                  "control_in", nodes=nodes),
+        make_edge("tti", "mean_s", "disp_mean", "value", nodes=nodes),
+        make_edge("tti", "control_out", "disp_mean",
+                  "control_in", nodes=nodes),
+        make_edge("tti", "planning_time_index", "disp_pti",
+                  "value", nodes=nodes),
+        make_edge("tti", "control_out", "disp_pti",
+                  "control_in", nodes=nodes),
+        make_edge("tti", "buffer_index", "disp_bi",
+                  "value", nodes=nodes),
+        make_edge("tti", "control_out", "disp_bi",
+                  "control_in", nodes=nodes),
+        make_edge("csv", "csv", "disp_csv", "value", nodes=nodes),
+        make_edge("csv", "control_out", "disp_csv",
+                  "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=700, h=40,
+               label="Demo · Traffic 04 — Live Travel Time"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=520, h=360,
+               label="Annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-completed", type="bound-output", x=560, y=80, w=200, h=80,
+               label="Completed", node_id="travel",
+               port_name="completed_total", input_type="int"),
+        widget("w-active", type="bound-output", x=560, y=200, w=200, h=80,
+               label="In transit", node_id="travel",
+               port_name="active_total", input_type="int"),
+        widget("w-mean", type="bound-output", x=560, y=320, w=200, h=80,
+               label="Mean travel (s)", node_id="tti",
+               port_name="mean_s", input_type="float"),
+        widget("w-pti", type="bound-output", x=20, y=460, w=240, h=80,
+               label="Planning Time Index", node_id="tti",
+               port_name="planning_time_index", input_type="float"),
+        widget("w-bi", type="bound-output", x=280, y=460, w=240, h=80,
+               label="Buffer Index", node_id="tti",
+               port_name="buffer_index", input_type="float"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_05_speed_estimate() -> Tuple[str, str, Dict[str, Any]]:
+    """Live FL511 counter -> AADT -> HSM SPF -> CMFs -> EB -> PSI."""
+    name = f"{DEMO_NAME_PREFIX}Traffic 05 — Live HSM Crash Prediction (Counter -> AADT -> SPF/CMF/EB/PSI)"
+    desc = (
+        "End-to-end Highway Safety Manual Part C predictive method, "
+        "bootstrapped from a live FL511 counter. The pipeline:\n\n"
+        " 1. FL511 → YOLO → ByteTrack → traffic.count.line gives a live "
+        "    cumulative count of vehicles crossing a screen line.\n"
+        " 2. traffic.flow.live_metrics extrapolates that count to an AADT "
+        "    estimate (count × 3600 / elapsed × 24 × adjustment factors).\n"
+        " 3. The extrapolated AADT feeds traffic.crash.spf_urban_arterial "
+        "    (HSM Ch. 12 SPF for 4-lane undivided arterials).\n"
+        " 4. traffic.crash.apply_cmfs applies a chain of crash-modification "
+        "    factors and a local calibration factor.\n"
+        " 5. traffic.crash.empirical_bayes blends the SPF prediction with "
+        "    a recent observed crash count.\n"
+        " 6. traffic.crash.psi reports the Potential-for-Safety-Improvement "
+        "    (excess crashes — the canonical network-screening score).\n"
+        " 7. traffic.crash.epdo translates a KABCO breakdown into an "
+        "    Equivalent-Property-Damage-Only ($k) cost.\n\n"
+        "Edit the connect node's ``camera`` parameter if FL511 returns a "
+        "404 on the configured camera."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Top pipeline (row 1): start → connect → loop → frame → decode → YOLO → track → count → live_metrics
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("connect", "fl511.connect", *gp(1, 1),
+                  inputs={"camera": 2130, "fps": 10, "buffer_seconds": 4}),
+        make_node("loop", "core.control.for", *gp(2, 1),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 1),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("img_decode", "convert.image.from_url", *gp(4, 1),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 1),
+                  inputs={"weights": "yolo11n.pt", "confidence": 0.3,
+                          "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 1),
+                  inputs={"track_activation_threshold": 0.25,
+                          "frame_rate": 10, "annotate": True}),
+        make_node("count", "traffic.count.line", *gp(7, 1),
+                  inputs={"reference": "bottom", "hysteresis_px": 2.0}),
+        make_node("live_metrics", "traffic.flow.live_metrics", *gp(8, 1),
+                  inputs={"seasonal_factor": 1.05, "dow_factor": 1.02,
+                          "axle_factor": 1.0}),
+        # ROI and merger on row 3 below the pipeline
+        make_node("line", "traffic.roi.line", *gp(6, 3),
+                  inputs={"name": "screen line",
+                          "x1": 0, "y1": 240, "x2": 704, "y2": 240}),
+        make_node("annot_lines", "traffic.roi.merge_lines", *gp(7, 3),
+                  inputs={}),
+        # SPF → CMFs → EB → PSI chain on row 2 (below live_metrics)
+        make_node("spf", "traffic.crash.spf_urban_arterial", *gp(8, 2),
+                  inputs={"length_mi": 0.75, "a": -7.99, "b": 1.17}),
+        make_node("cmfs", "traffic.crash.apply_cmfs", *gp(9, 2),
+                  inputs={"cmfs": [0.92, 1.05, 0.88],
+                          "calibration_factor": 1.10}),
+        make_node("eb", "traffic.crash.empirical_bayes", *gp(10, 2),
+                  inputs={"n_observed_total": 5.0,
+                          "overdispersion_k": 0.236}),
+        make_node("psi", "traffic.crash.psi", *gp(11, 2), inputs={}),
+        make_node("rate", "traffic.crash.crash_rate", *gp(9, 3),
+                  inputs={"n_crashes": 4, "length_mi": 0.75, "years": 1.0}),
+        # KABCO → EPDO branch (col 0, row 4 — out of pipeline)
+        make_node("epdo", "traffic.crash.epdo", *gp(0, 4),
+                  inputs={"k": 1, "a": 2, "b": 5, "c": 8, "o": 25}),
+        # Annotator + dashboard widgets
+        make_node("annotate", "traffic.events.annotate", *gp(9, 1),
+                  inputs={"thickness": 2}),
+        make_node("disp_frame", "general.to_display", *gp(10, 0),
+                  inputs={"section": "Frame", "title": "Annotated"}),
+        make_node("disp_aadt", "general.to_display", *gp(10, 1),
+                  inputs={"section": "Live Counter",
+                          "title": "AADT (extrapolated)"}),
+        make_node("disp_predicted", "general.to_display", *gp(11, 1),
+                  inputs={"section": "HSM Predicted", "title": "N predicted"}),
+        make_node("disp_expected", "general.to_display", *gp(11, 0),
+                  inputs={"section": "HSM Expected", "title": "N expected (EB)"}),
+        make_node("disp_psi", "general.to_display", *gp(11, 3),
+                  inputs={"section": "Network Screening", "title": "PSI (excess)"}),
+        make_node("disp_rate", "general.to_display", *gp(10, 3),
+                  inputs={"section": "Rate", "title": "Per MVM"}),
+        make_node("disp_epdo", "general.to_display", *gp(1, 4),
+                  inputs={"section": "Severity", "title": "EPDO ($k)"}),
+    ]
+    edges = [
+        # FL511 chain
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "img_decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "img_decode", "url", nodes=nodes),
+        make_edge("img_decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("img_decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("img_decode", "image", "track", "image", nodes=nodes),
+        # Counter -> AADT
+        make_edge("track", "control_out", "count", "control_in", nodes=nodes),
+        make_edge("track", "detections", "count", "detections", nodes=nodes),
+        make_edge("line", "line", "count", "line", nodes=nodes),
+        make_edge("count", "control_out", "live_metrics", "control_in",
+                  nodes=nodes),
+        make_edge("count", "total", "live_metrics", "count", nodes=nodes),
+        # AADT -> SPF -> CMFs -> EB -> PSI
+        make_edge("live_metrics", "control_out", "spf",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "aadt", "spf", "aadt", nodes=nodes),
+        make_edge("spf", "control_out", "cmfs", "control_in", nodes=nodes),
+        make_edge("spf", "n_spf_per_year", "cmfs",
+                  "n_spf_per_year", nodes=nodes),
+        make_edge("cmfs", "control_out", "eb", "control_in", nodes=nodes),
+        make_edge("cmfs", "n_predicted", "eb", "n_predicted_total",
+                  nodes=nodes),
+        make_edge("eb", "control_out", "psi", "control_in", nodes=nodes),
+        make_edge("eb", "n_expected", "psi", "n_expected", nodes=nodes),
+        make_edge("cmfs", "n_predicted", "psi", "n_predicted", nodes=nodes),
+        # Crash rate (uses live AADT too)
+        make_edge("live_metrics", "control_out", "rate",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "aadt", "rate", "aadt", nodes=nodes),
+        # EPDO independent
+        make_edge("start", "control_out", "epdo", "control_in", nodes=nodes),
+        # Annotate
+        make_edge("line", "line", "annot_lines", "line_1", nodes=nodes),
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("annot_lines", "lines", "annotate", "lines", nodes=nodes),
+        # Displays
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("annotate", "control_out", "disp_frame",
+                  "control_in", nodes=nodes),
+        make_edge("live_metrics", "aadt", "disp_aadt", "value", nodes=nodes),
+        make_edge("live_metrics", "control_out", "disp_aadt",
+                  "control_in", nodes=nodes),
+        make_edge("cmfs", "n_predicted", "disp_predicted", "value", nodes=nodes),
+        make_edge("cmfs", "control_out", "disp_predicted",
+                  "control_in", nodes=nodes),
+        make_edge("eb", "n_expected", "disp_expected", "value", nodes=nodes),
+        make_edge("eb", "control_out", "disp_expected",
+                  "control_in", nodes=nodes),
+        make_edge("psi", "psi", "disp_psi", "value", nodes=nodes),
+        make_edge("psi", "control_out", "disp_psi",
+                  "control_in", nodes=nodes),
+        make_edge("rate", "rate_per_million", "disp_rate", "value", nodes=nodes),
+        make_edge("rate", "control_out", "disp_rate",
+                  "control_in", nodes=nodes),
+        make_edge("epdo", "epdo", "disp_epdo", "value", nodes=nodes),
+        make_edge("epdo", "control_out", "disp_epdo",
+                  "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=700, h=40,
+               label="Demo · Traffic 05 — Live HSM Crash Prediction"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=480, h=320,
+               label="Annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-aadt", type="bound-output", x=520, y=80, w=240, h=80,
+               label="AADT (extrap.)", node_id="live_metrics",
+               port_name="aadt", input_type="float"),
+        widget("w-pred", type="bound-output", x=520, y=200, w=240, h=80,
+               label="HSM N predicted", node_id="cmfs",
+               port_name="n_predicted", input_type="float"),
+        widget("w-exp", type="bound-output", x=520, y=320, w=240, h=80,
+               label="N expected (EB)", node_id="eb",
+               port_name="n_expected", input_type="float"),
+        widget("w-psi", type="bound-output", x=20, y=420, w=240, h=80,
+               label="PSI (excess)", node_id="psi",
+               port_name="psi", input_type="float"),
+        widget("w-rate", type="bound-output", x=280, y=420, w=240, h=80,
+               label="Crash rate (MVM)", node_id="rate",
+               port_name="rate_per_million", input_type="float"),
+        widget("w-epdo", type="bound-output", x=540, y=420, w=240, h=80,
+               label="EPDO ($k)", node_id="epdo",
+               port_name="epdo", input_type="float"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
 DEMO_BUILDERS = [
     demo_01_yolo_clip,
     demo_02_tracking_loop,
@@ -780,6 +1697,11 @@ DEMO_BUILDERS = [
     demo_08_cancel_loop,
     demo_09_multimodal,
     demo_10_hello,
+    demo_traffic_01_flow_metrics,
+    demo_traffic_02_hsm_crash,
+    demo_traffic_03_safety_metrics,
+    demo_traffic_04_video_pipeline,
+    demo_traffic_05_speed_estimate,
 ]
 
 

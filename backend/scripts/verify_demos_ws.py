@@ -310,6 +310,15 @@ def categorize_error(msg: str) -> str:
         "connect", "timeout", "name resolution", "max retries", "url",
     )):
         return "flake"
+    # External CDN / live-stream availability — fl511 cameras can return
+    # 404, ffmpeg can fail on transient HLS-token expiry, etc. None of
+    # these are pipeline bugs.
+    if any(k in s for k in (
+        "ffmpeg", "404 not found", "no frame available",
+        "stream not", "hls", "selenium",
+        "could not resolve stream",
+    )):
+        return "flake"
     if "preprocessor_config" in s:
         # If our hardening worked, this should never escape — flag as real bug
         return "real_bug"

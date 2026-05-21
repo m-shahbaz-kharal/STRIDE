@@ -2363,6 +2363,23 @@ requires-dist = [
 provides-extras = ["server", "dev"]
 
 [[package]]
+name = "stride-traffic"
+version = "0.1.0"
+source = { editable = "../packages/stride-traffic" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "stride-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "scipy", specifier = ">=1.10" },
+    { name = "stride-core" },
+]
+
+[[package]]
 name = "stride-web"
 version = "0.1.0"
 source = { virtual = "." }
@@ -2391,6 +2408,7 @@ dependencies = [
     { name = "stride-people" },
     { name = "stride-rtdetr" },
     { name = "stride-sam3" },
+    { name = "stride-traffic" },
     { name = "stride-yolo" },
     { name = "supervision" },
     { name = "ultralytics" },
@@ -2431,6 +2449,7 @@ requires-dist = [
     { name = "stride-people", editable = "../packages/stride-people" },
     { name = "stride-rtdetr", editable = "../packages/stride-rtdetr" },
     { name = "stride-sam3", editable = "../packages/stride-sam3" },
+    { name = "stride-traffic", editable = "../packages/stride-traffic" },
     { name = "stride-yolo", editable = "../packages/stride-yolo" },
     { name = "supervision", specifier = ">=0.25.0" },
     { name = "ultralytics", specifier = ">=8.3.0" },
