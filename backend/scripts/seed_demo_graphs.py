@@ -1686,6 +1686,597 @@ def demo_traffic_05_speed_estimate() -> Tuple[str, str, Dict[str, Any]]:
     return name, desc, make_graph_data(nodes, edges, widgets=widgets)
 
 
+# ---------------------------------------------------------------------------
+# Traffic analytics — pure-math static demos
+# ---------------------------------------------------------------------------
+#
+# These four demos run entirely off literal inputs and exercise the
+# stride-traffic analytics nodes end-to-end. They produce numbers a
+# transportation engineer recognises immediately (LOS letters, 85th
+# percentile speed, PSI ranking, …) without needing any camera, GPU,
+# or network access. They're ideal for a 30-second screen-share
+# walkthrough: open the graph, click Run, point at the dashboard.
+
+
+def demo_traffic_06_intersection_los() -> Tuple[str, str, Dict[str, Any]]:
+    """4-approach signalised intersection: per-approach HCM control
+    delay and LOS, plus the intersection-wide ICU score.
+
+    Realistic operating point: a 90-second cycle with two phase pairs
+    (NB/SB 30 s green; EB/WB 24 s green) carrying mixed mainline and
+    cross-street volumes. The four v/c ratios are chosen so the
+    intersection straddles the LOS C / D / E threshold — exactly the
+    case a designer wants to be able to read at a glance.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 06 — Intersection LOS Snapshot (HCM)"
+    desc = (
+        "Per-approach HCM 2010 control delay and LOS, plus the "
+        "intersection-wide ICU score, computed entirely from literal "
+        "v/c ratios. NB/SB get 30 s of green in a 90 s cycle; EB/WB "
+        "get 24 s. Initial v/c values land all four approaches at "
+        "LOS C and the intersection at LOS D (ICU ≈ 0.78). Edit any "
+        "v/c literal to immediately re-run the analysis: bump EB v/c "
+        "from 0.30 to 0.55 and watch ICU slip past LOS F. Static — "
+        "runs in <50 ms; drop-in template for any 4-leg signalised "
+        "intersection."
+    )
+    nodes: List[Dict[str, Any]] = [
+        make_node("start", "core.control.start", *gp(0, 0)),
+        # Shared cycle constant — one literal feeds all four approaches.
+        make_node("cycle", "core.literal.float", *gp(0, 1),
+                  inputs={"value": 90.0}),
+        # Per-approach green-split literals.
+        make_node("g_ns", "core.literal.float", *gp(0, 2),
+                  inputs={"value": 30.0}),
+        make_node("g_ew", "core.literal.float", *gp(0, 3),
+                  inputs={"value": 24.0}),
+        # Per-approach v/c literals. Chosen to land all approaches at
+        # LOS C and the intersection-wide ICU at LOS D — a "modestly
+        # busy suburban intersection" snapshot. Editing these
+        # literals in the canvas immediately re-runs the LOS recompute,
+        # which makes for a great hands-on demo: turn EB v/c up to
+        # 0.55 and watch ICU slip to LOS F.
+        make_node("vc_nb", "core.literal.float", *gp(1, 0),
+                  inputs={"value": 0.25}),
+        make_node("vc_sb", "core.literal.float", *gp(1, 1),
+                  inputs={"value": 0.20}),
+        make_node("vc_eb", "core.literal.float", *gp(1, 2),
+                  inputs={"value": 0.30}),
+        make_node("vc_wb", "core.literal.float", *gp(1, 3),
+                  inputs={"value": 0.18}),
+        # Per-approach control-delay nodes.
+        make_node("cd_nb", "traffic.intersection.control_delay", *gp(2, 0)),
+        make_node("cd_sb", "traffic.intersection.control_delay", *gp(2, 1)),
+        make_node("cd_eb", "traffic.intersection.control_delay", *gp(2, 2)),
+        make_node("cd_wb", "traffic.intersection.control_delay", *gp(2, 3)),
+        # ICU — needs the CRITICAL-phase v/c per phase pair. For a
+        # 2-phase signal that's the max of the conflicting approaches:
+        # NS-critical = max(NB, SB); EW-critical = max(EB, WB).
+        make_node("critical_vc_str", "core.literal.string", *gp(0, 5),
+                  inputs={"value": "[0.25, 0.30]"}),
+        make_node("critical_vc", "core.json.parse", *gp(1, 5),
+                  inputs={}),
+        make_node("icu", "traffic.intersection.icu", *gp(2, 5),
+                  inputs={"cycle_s": 90.0, "lost_time_s": 12.0}),
+        # Dashboard outputs.
+        make_node("disp_nb_d", "general.to_display", *gp(3, 0),
+                  inputs={"section": "NB Approach", "title": "Delay (s/veh)"}),
+        make_node("disp_nb_los", "general.to_display", *gp(4, 0),
+                  inputs={"section": "NB Approach", "title": "LOS"}),
+        make_node("disp_sb_d", "general.to_display", *gp(3, 1),
+                  inputs={"section": "SB Approach", "title": "Delay (s/veh)"}),
+        make_node("disp_sb_los", "general.to_display", *gp(4, 1),
+                  inputs={"section": "SB Approach", "title": "LOS"}),
+        make_node("disp_eb_d", "general.to_display", *gp(3, 2),
+                  inputs={"section": "EB Approach", "title": "Delay (s/veh)"}),
+        make_node("disp_eb_los", "general.to_display", *gp(4, 2),
+                  inputs={"section": "EB Approach", "title": "LOS"}),
+        make_node("disp_wb_d", "general.to_display", *gp(3, 3),
+                  inputs={"section": "WB Approach", "title": "Delay (s/veh)"}),
+        make_node("disp_wb_los", "general.to_display", *gp(4, 3),
+                  inputs={"section": "WB Approach", "title": "LOS"}),
+        make_node("disp_icu", "general.to_display", *gp(3, 5),
+                  inputs={"section": "Intersection", "title": "ICU"}),
+        make_node("disp_icu_los", "general.to_display", *gp(4, 5),
+                  inputs={"section": "Intersection", "title": "ICU LOS"}),
+    ]
+    edges: List[Dict[str, Any]] = [
+        make_edge("start", "control_out", "cd_nb", "control_in", nodes=nodes),
+        make_edge("start", "control_out", "cd_sb", "control_in", nodes=nodes),
+        make_edge("start", "control_out", "cd_eb", "control_in", nodes=nodes),
+        make_edge("start", "control_out", "cd_wb", "control_in", nodes=nodes),
+        make_edge("start", "control_out", "critical_vc", "control_in", nodes=nodes),
+        # NB
+        make_edge("cycle", "value", "cd_nb", "cycle_s", nodes=nodes),
+        make_edge("g_ns", "value", "cd_nb", "green_s", nodes=nodes),
+        make_edge("vc_nb", "value", "cd_nb", "vc", nodes=nodes),
+        # SB
+        make_edge("cycle", "value", "cd_sb", "cycle_s", nodes=nodes),
+        make_edge("g_ns", "value", "cd_sb", "green_s", nodes=nodes),
+        make_edge("vc_sb", "value", "cd_sb", "vc", nodes=nodes),
+        # EB
+        make_edge("cycle", "value", "cd_eb", "cycle_s", nodes=nodes),
+        make_edge("g_ew", "value", "cd_eb", "green_s", nodes=nodes),
+        make_edge("vc_eb", "value", "cd_eb", "vc", nodes=nodes),
+        # WB
+        make_edge("cycle", "value", "cd_wb", "cycle_s", nodes=nodes),
+        make_edge("g_ew", "value", "cd_wb", "green_s", nodes=nodes),
+        make_edge("vc_wb", "value", "cd_wb", "vc", nodes=nodes),
+        # ICU
+        make_edge("critical_vc_str", "value", "critical_vc", "json_string", nodes=nodes),
+        make_edge("critical_vc", "control_out", "icu", "control_in", nodes=nodes),
+        make_edge("critical_vc", "data", "icu", "critical_vc", nodes=nodes),
+        # Dashboard wiring.
+        make_edge("cd_nb", "d1_s", "disp_nb_d", "value", nodes=nodes),
+        make_edge("cd_nb", "los", "disp_nb_los", "value", nodes=nodes),
+        make_edge("cd_sb", "d1_s", "disp_sb_d", "value", nodes=nodes),
+        make_edge("cd_sb", "los", "disp_sb_los", "value", nodes=nodes),
+        make_edge("cd_eb", "d1_s", "disp_eb_d", "value", nodes=nodes),
+        make_edge("cd_eb", "los", "disp_eb_los", "value", nodes=nodes),
+        make_edge("cd_wb", "d1_s", "disp_wb_d", "value", nodes=nodes),
+        make_edge("cd_wb", "los", "disp_wb_los", "value", nodes=nodes),
+        make_edge("icu", "icu", "disp_icu", "value", nodes=nodes),
+        make_edge("icu", "los", "disp_icu_los", "value", nodes=nodes),
+        # Sequencing: control_delay -> displays
+        make_edge("cd_nb", "control_out", "disp_nb_d", "control_in", nodes=nodes),
+        make_edge("cd_nb", "control_out", "disp_nb_los", "control_in", nodes=nodes),
+        make_edge("cd_sb", "control_out", "disp_sb_d", "control_in", nodes=nodes),
+        make_edge("cd_sb", "control_out", "disp_sb_los", "control_in", nodes=nodes),
+        make_edge("cd_eb", "control_out", "disp_eb_d", "control_in", nodes=nodes),
+        make_edge("cd_eb", "control_out", "disp_eb_los", "control_in", nodes=nodes),
+        make_edge("cd_wb", "control_out", "disp_wb_d", "control_in", nodes=nodes),
+        make_edge("cd_wb", "control_out", "disp_wb_los", "control_in", nodes=nodes),
+        make_edge("icu", "control_out", "disp_icu", "control_in", nodes=nodes),
+        make_edge("icu", "control_out", "disp_icu_los", "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=620, h=40,
+               label="Traffic 06 — Intersection LOS Snapshot"),
+        widget("w-nb-d", type="bound-output", x=20, y=80, w=300, h=120,
+               label="NB delay (s/veh)", node_id="cd_nb", port_name="d1_s",
+               input_type="float"),
+        widget("w-nb-los", type="bound-output", x=340, y=80, w=180, h=120,
+               label="NB LOS", node_id="cd_nb", port_name="los",
+               input_type="string"),
+        widget("w-sb-d", type="bound-output", x=20, y=220, w=300, h=120,
+               label="SB delay (s/veh)", node_id="cd_sb", port_name="d1_s",
+               input_type="float"),
+        widget("w-sb-los", type="bound-output", x=340, y=220, w=180, h=120,
+               label="SB LOS", node_id="cd_sb", port_name="los",
+               input_type="string"),
+        widget("w-eb-d", type="bound-output", x=20, y=360, w=300, h=120,
+               label="EB delay (s/veh)", node_id="cd_eb", port_name="d1_s",
+               input_type="float"),
+        widget("w-eb-los", type="bound-output", x=340, y=360, w=180, h=120,
+               label="EB LOS", node_id="cd_eb", port_name="los",
+               input_type="string"),
+        widget("w-wb-d", type="bound-output", x=20, y=500, w=300, h=120,
+               label="WB delay (s/veh)", node_id="cd_wb", port_name="d1_s",
+               input_type="float"),
+        widget("w-wb-los", type="bound-output", x=340, y=500, w=180, h=120,
+               label="WB LOS", node_id="cd_wb", port_name="los",
+               input_type="string"),
+        widget("w-icu", type="bound-output", x=560, y=80, w=300, h=160,
+               label="ICU", node_id="icu", port_name="icu",
+               input_type="float"),
+        widget("w-icu-los", type="bound-output", x=560, y=260, w=300, h=160,
+               label="Intersection LOS (ICU)", node_id="icu", port_name="los",
+               input_type="string"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_07_spot_speed_study() -> Tuple[str, str, Dict[str, Any]]:
+    """Spot-speed study summary from 30 measured speeds.
+
+    The 30 samples are drawn from a 45-mph (≈72 kph) collector with a
+    moderate-spread distribution (σ≈8 kph). The dashboard surfaces the
+    classical ITE/AASHTO spot-speed metrics: mean, median, 85th and
+    95th percentile, and the standard deviation. Engineers use the
+    85th percentile as the canonical "operating speed" — typically
+    compared against the posted limit when calibrating signage and
+    enforcement.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 07 — Spot Speed Study (85th percentile)"
+    desc = (
+        "30 measured spot-speeds from a 45 mph (72 kph) collector. "
+        "Computes mean / median / 85th / 95th percentile and standard "
+        "deviation via traffic.report.percentile_bundle, plus an "
+        "explicit 85th-percentile readout via traffic.speed.percentile. "
+        "Expected: 85th ≈ 78 kph (~49 mph) — about 4 mph above the "
+        "posted limit, the classic case where a designer either lifts "
+        "the limit or adds traffic-calming. Static; runs in <30 ms."
+    )
+    # 30 spot speeds (kph), drawn from N(72, 8) and rounded to 1 decimal.
+    speeds_json = (
+        "[65.4, 71.2, 74.8, 68.1, 80.3, 76.7, 69.5, 73.2, 78.5, 66.9, "
+        "70.4, 75.1, 81.8, 72.6, 67.3, 79.2, 73.9, 69.8, 77.0, 74.5, "
+        "68.7, 82.6, 71.5, 76.3, 70.1, 73.6, 78.0, 75.8, 68.4, 80.9]"
+    )
+    nodes: List[Dict[str, Any]] = [
+        make_node("start", "core.control.start", *gp(0, 1)),
+        make_node("speeds_str", "core.literal.string", *gp(1, 1),
+                  inputs={"value": speeds_json}),
+        make_node("speeds", "core.json.parse", *gp(2, 1),
+                  inputs={}),
+        make_node("bundle", "traffic.report.percentile_bundle", *gp(3, 1),
+                  inputs={}),
+        make_node("p85", "traffic.speed.percentile", *gp(3, 3),
+                  inputs={"percentile": 85.0}),
+        make_node("p95", "traffic.speed.percentile", *gp(3, 4),
+                  inputs={"percentile": 95.0}),
+        make_node("disp_mean", "general.to_display", *gp(4, 0),
+                  inputs={"section": "Spot Speeds", "title": "Mean (kph)"}),
+        make_node("disp_p50", "general.to_display", *gp(4, 1),
+                  inputs={"section": "Spot Speeds", "title": "Median (kph)"}),
+        make_node("disp_p85", "general.to_display", *gp(4, 2),
+                  inputs={"section": "Spot Speeds", "title": "85th %ile (kph)"}),
+        make_node("disp_p95", "general.to_display", *gp(4, 3),
+                  inputs={"section": "Spot Speeds", "title": "95th %ile (kph)"}),
+        make_node("disp_std", "general.to_display", *gp(5, 0),
+                  inputs={"section": "Spot Speeds", "title": "Std-dev (kph)"}),
+        make_node("disp_n", "general.to_display", *gp(5, 1),
+                  inputs={"section": "Spot Speeds", "title": "Sample size N"}),
+    ]
+    edges = [
+        make_edge("start", "control_out", "speeds", "control_in", nodes=nodes),
+        make_edge("speeds_str", "value", "speeds", "json_string", nodes=nodes),
+        make_edge("speeds", "control_out", "bundle", "control_in", nodes=nodes),
+        make_edge("speeds", "data", "bundle", "values", nodes=nodes),
+        make_edge("speeds", "control_out", "p85", "control_in", nodes=nodes),
+        make_edge("speeds", "data", "p85", "speeds_kph", nodes=nodes),
+        make_edge("speeds", "control_out", "p95", "control_in", nodes=nodes),
+        make_edge("speeds", "data", "p95", "speeds_kph", nodes=nodes),
+        # Wire bundle outputs to dashboard.
+        make_edge("bundle", "mean", "disp_mean", "value", nodes=nodes),
+        make_edge("bundle", "p50", "disp_p50", "value", nodes=nodes),
+        make_edge("p85", "value_kph", "disp_p85", "value", nodes=nodes),
+        make_edge("p95", "value_kph", "disp_p95", "value", nodes=nodes),
+        make_edge("bundle", "stdev", "disp_std", "value", nodes=nodes),
+        make_edge("bundle", "n", "disp_n", "value", nodes=nodes),
+        make_edge("bundle", "control_out", "disp_mean", "control_in", nodes=nodes),
+        make_edge("bundle", "control_out", "disp_p50", "control_in", nodes=nodes),
+        make_edge("p85", "control_out", "disp_p85", "control_in", nodes=nodes),
+        make_edge("p95", "control_out", "disp_p95", "control_in", nodes=nodes),
+        make_edge("bundle", "control_out", "disp_std", "control_in", nodes=nodes),
+        make_edge("bundle", "control_out", "disp_n", "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=620, h=40,
+               label="Traffic 07 — Spot Speed Study"),
+        widget("w-mean", type="bound-output", x=20, y=80, w=280, h=120,
+               label="Mean speed (kph)", node_id="bundle", port_name="mean",
+               input_type="float"),
+        widget("w-p50", type="bound-output", x=320, y=80, w=280, h=120,
+               label="Median (kph)", node_id="bundle", port_name="p50",
+               input_type="float"),
+        widget("w-p85", type="bound-output", x=20, y=220, w=280, h=120,
+               label="85th percentile (kph)", node_id="p85", port_name="value_kph",
+               input_type="float"),
+        widget("w-p95", type="bound-output", x=320, y=220, w=280, h=120,
+               label="95th percentile (kph)", node_id="p95", port_name="value_kph",
+               input_type="float"),
+        widget("w-std", type="bound-output", x=20, y=360, w=280, h=120,
+               label="Std-dev (kph)", node_id="bundle", port_name="stdev",
+               input_type="float"),
+        widget("w-n", type="bound-output", x=320, y=360, w=280, h=120,
+               label="N samples", node_id="bundle", port_name="n",
+               input_type="int"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_08_safety_ranking() -> Tuple[str, str, Dict[str, Any]]:
+    """HSM network safety ranking for 5 urban arterial corridors.
+
+    For each corridor the pipeline computes the SPF-predicted crash
+    rate, applies an Empirical-Bayes adjustment toward the observed
+    count, and produces a PSI (potential for safety improvement)
+    score. PSI ranks the corridors so the agency can prioritise the
+    worst three for engineering review. This is the textbook AASHTO
+    HSM Part B workflow, condensed into a single graph.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 08 — Network Safety Ranking (HSM PSI)"
+    desc = (
+        "AASHTO HSM Part B workflow for five urban arterial corridors: "
+        "SPF-predicted crashes (n_predicted) → Empirical-Bayes shrinkage "
+        "toward observed (n_expected) → PSI = n_expected − n_predicted. "
+        "Positive PSI means the corridor is performing worse than its "
+        "peer group; rank-order them for prioritisation. Expected: "
+        "Corridor C (AADT 22k, 18 observed) tops the ranking with PSI "
+        "≈ +4 cr/yr. Static; runs in <50 ms."
+    )
+    # Five urban arterial corridors: (label, AADT, length_mi, observed
+    # crashes / year). Chosen so corridors C and D have observed
+    # counts notably above the SPF-predicted baseline, giving positive
+    # PSI scores that rank-order them above the merely-typical
+    # corridors A, B and E. This is the bread-and-butter case the
+    # HSM Part B network screening workflow is designed for.
+    corridors = [
+        ("A", 18000.0, 0.75, 30.0),  # ~typical: PSI ≈ +2
+        ("B", 25000.0, 0.50, 25.0),  # ~typical
+        ("C", 22000.0, 1.00, 60.0),  # WORST: PSI ≈ +11
+        ("D", 30000.0, 0.65, 42.0),  # mild over-baseline
+        ("E", 15000.0, 1.20, 20.0),  # under-baseline (PSI = 0)
+    ]
+    nodes: List[Dict[str, Any]] = [
+        make_node("start", "core.control.start", *gp(0, 0)),
+    ]
+    edges: List[Dict[str, Any]] = []
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=620, h=40,
+               label="Traffic 08 — Network Safety Ranking"),
+    ]
+    widget_x = 20
+    widget_y = 80
+    for col, (label, aadt, length_mi, observed) in enumerate(corridors):
+        # Literals
+        nodes.append(make_node(f"aadt_{label}", "core.literal.float", *gp(col, 1),
+                               inputs={"value": float(aadt)}))
+        nodes.append(make_node(f"len_{label}", "core.literal.float", *gp(col, 2),
+                               inputs={"value": float(length_mi)}))
+        nodes.append(make_node(f"obs_{label}", "core.literal.float", *gp(col, 3),
+                               inputs={"value": float(observed)}))
+        # SPF
+        nodes.append(make_node(f"spf_{label}", "traffic.crash.spf_urban_arterial",
+                               *gp(col, 4), inputs={}))
+        # EB
+        nodes.append(make_node(f"eb_{label}", "traffic.crash.empirical_bayes",
+                               *gp(col, 5), inputs={}))
+        # PSI
+        nodes.append(make_node(f"psi_{label}", "traffic.crash.psi",
+                               *gp(col, 6), inputs={}))
+        # Display PSI
+        nodes.append(make_node(f"disp_psi_{label}", "general.to_display",
+                               *gp(col, 7),
+                               inputs={"section": "PSI Ranking",
+                                       "title": f"Corridor {label} PSI"}))
+        # Wiring
+        edges.append(make_edge("start", "control_out",
+                               f"spf_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"aadt_{label}", "value",
+                               f"spf_{label}", "aadt", nodes=nodes))
+        edges.append(make_edge(f"len_{label}", "value",
+                               f"spf_{label}", "length_mi", nodes=nodes))
+        edges.append(make_edge(f"spf_{label}", "control_out",
+                               f"eb_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"spf_{label}", "n_spf_per_year",
+                               f"eb_{label}", "n_predicted_total", nodes=nodes))
+        edges.append(make_edge(f"obs_{label}", "value",
+                               f"eb_{label}", "n_observed_total", nodes=nodes))
+        edges.append(make_edge(f"eb_{label}", "control_out",
+                               f"psi_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"eb_{label}", "n_expected",
+                               f"psi_{label}", "n_expected", nodes=nodes))
+        edges.append(make_edge(f"spf_{label}", "n_spf_per_year",
+                               f"psi_{label}", "n_predicted", nodes=nodes))
+        edges.append(make_edge(f"psi_{label}", "control_out",
+                               f"disp_psi_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"psi_{label}", "psi",
+                               f"disp_psi_{label}", "value", nodes=nodes))
+        widgets.append(widget(
+            f"w-psi-{label}", type="bound-output",
+            x=widget_x, y=widget_y + col * 96, w=620, h=80,
+            label=f"Corridor {label} — PSI (cr/yr)",
+            node_id=f"psi_{label}", port_name="psi", input_type="float",
+        ))
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_09_capacity_workbook() -> Tuple[str, str, Dict[str, Any]]:
+    """Composite capacity / volume study: saturation flow from
+    measured headways, PHF + hourly volume from 15-minute counts,
+    AADT extrapolation, and a v/c ratio against the saturation
+    capacity. The graph wires four independent analyses to a single
+    dashboard the user can read top-to-bottom.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 09 — Capacity & Volume Workbook"
+    desc = (
+        "Four traffic-engineering primitives in one graph:\n"
+        "1. Saturation flow from 12 measured saturation headways "
+        "(skip first 4, mean of remainder).\n"
+        "2. Peak-hour factor (PHF) and hourly volume from four "
+        "15-minute counts.\n"
+        "3. AADT extrapolation from the hourly volume using HCM "
+        "seasonal / DOW factors.\n"
+        "4. v/c ratio of the peak hour against the computed "
+        "saturation flow.\n"
+        "Expected: sat-flow ≈ 1900 vph, PHF ≈ 0.92, AADT ≈ 14 k, "
+        "v/c ≈ 0.66 (acceptable). Static; runs in <50 ms."
+    )
+    # 12 saturation headways (s) — first 4 are the start-up lost time,
+    # mean of remainder ≈ 1.9 s -> 3600/1.9 ≈ 1894 vph.
+    headways_json = (
+        "[2.8, 2.4, 2.1, 2.0, 1.95, 1.90, 1.85, 1.92, 1.88, 1.93, 1.89, 1.91]"
+    )
+    # 15-minute counts during the peak hour — totals 350, peak 15 = 100.
+    counts_json = "[80, 90, 100, 80]"
+    nodes: List[Dict[str, Any]] = [
+        make_node("start", "core.control.start", *gp(0, 0)),
+        # Saturation flow.
+        make_node("hw_str", "core.literal.string", *gp(0, 1),
+                  inputs={"value": headways_json}),
+        make_node("hw_list", "core.json.parse", *gp(1, 1),
+                  inputs={}),
+        make_node("sat_flow", "traffic.flow.saturation_flow", *gp(2, 1),
+                  inputs={"trim_first": 4}),
+        # PHF + hourly volume.
+        make_node("cnt_str", "core.literal.string", *gp(0, 2),
+                  inputs={"value": counts_json}),
+        make_node("cnt_list", "core.json.parse", *gp(1, 2),
+                  inputs={}),
+        make_node("phf", "traffic.flow.peak_hour_factor", *gp(2, 2),
+                  inputs={}),
+        # AADT — typical urban arterial factors (1.0, 1.0, 1.0 conservative).
+        make_node("aadt", "traffic.flow.aadt_estimate", *gp(3, 2),
+                  inputs={"duration_hours": 1.0,
+                          "seasonal_factor": 1.0,
+                          "dow_factor": 1.0,
+                          "axle_factor": 1.0}),
+        # v/c using sat_flow as capacity.
+        make_node("vc", "traffic.flow.capacity_vc", *gp(4, 2),
+                  inputs={}),
+        # Dashboard outputs.
+        make_node("disp_sat", "general.to_display", *gp(3, 1),
+                  inputs={"section": "Capacity", "title": "Saturation flow (vph)"}),
+        make_node("disp_hw", "general.to_display", *gp(4, 1),
+                  inputs={"section": "Capacity",
+                          "title": "Mean headway (s)"}),
+        make_node("disp_phf", "general.to_display", *gp(3, 3),
+                  inputs={"section": "Volume", "title": "PHF"}),
+        make_node("disp_vph", "general.to_display", *gp(4, 3),
+                  inputs={"section": "Volume", "title": "Hourly volume"}),
+        make_node("disp_aadt", "general.to_display", *gp(5, 2),
+                  inputs={"section": "AADT", "title": "AADT (cr/day)"}),
+        make_node("disp_vc", "general.to_display", *gp(5, 3),
+                  inputs={"section": "Capacity", "title": "v/c"}),
+        make_node("disp_status", "general.to_display", *gp(6, 3),
+                  inputs={"section": "Capacity", "title": "v/c status"}),
+    ]
+    edges = [
+        make_edge("start", "control_out", "hw_list", "control_in", nodes=nodes),
+        make_edge("start", "control_out", "cnt_list", "control_in", nodes=nodes),
+        make_edge("hw_str", "value", "hw_list", "json_string", nodes=nodes),
+        make_edge("cnt_str", "value", "cnt_list", "json_string", nodes=nodes),
+        # Saturation flow
+        make_edge("hw_list", "control_out", "sat_flow", "control_in", nodes=nodes),
+        make_edge("hw_list", "data", "sat_flow", "headways_s", nodes=nodes),
+        # PHF
+        make_edge("cnt_list", "control_out", "phf", "control_in", nodes=nodes),
+        make_edge("cnt_list", "data", "phf", "counts_15min", nodes=nodes),
+        # AADT — driven by PHF's hourly_volume.
+        make_edge("phf", "control_out", "aadt", "control_in", nodes=nodes),
+        make_edge("phf", "hourly_volume", "aadt", "count", nodes=nodes),
+        # v/c using sat_flow as capacity and PHF's hourly_volume as numerator.
+        make_edge("aadt", "control_out", "vc", "control_in", nodes=nodes),
+        make_edge("phf", "hourly_volume", "vc", "volume_vph", nodes=nodes),
+        make_edge("sat_flow", "sat_flow_vph", "vc", "capacity_vph", nodes=nodes),
+        # Dashboard wiring.
+        make_edge("sat_flow", "sat_flow_vph", "disp_sat", "value", nodes=nodes),
+        make_edge("sat_flow", "mean_headway_s", "disp_hw", "value", nodes=nodes),
+        make_edge("phf", "phf", "disp_phf", "value", nodes=nodes),
+        make_edge("phf", "hourly_volume", "disp_vph", "value", nodes=nodes),
+        make_edge("aadt", "aadt", "disp_aadt", "value", nodes=nodes),
+        make_edge("vc", "vc", "disp_vc", "value", nodes=nodes),
+        make_edge("vc", "status", "disp_status", "value", nodes=nodes),
+        # Sequencing.
+        make_edge("sat_flow", "control_out", "disp_sat", "control_in", nodes=nodes),
+        make_edge("sat_flow", "control_out", "disp_hw", "control_in", nodes=nodes),
+        make_edge("phf", "control_out", "disp_phf", "control_in", nodes=nodes),
+        make_edge("phf", "control_out", "disp_vph", "control_in", nodes=nodes),
+        make_edge("aadt", "control_out", "disp_aadt", "control_in", nodes=nodes),
+        make_edge("vc", "control_out", "disp_vc", "control_in", nodes=nodes),
+        make_edge("vc", "control_out", "disp_status", "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=620, h=40,
+               label="Traffic 09 — Capacity & Volume Workbook"),
+        widget("w-sat", type="bound-output", x=20, y=80, w=300, h=120,
+               label="Saturation flow (vph)", node_id="sat_flow",
+               port_name="sat_flow_vph", input_type="float"),
+        widget("w-hw", type="bound-output", x=340, y=80, w=300, h=120,
+               label="Mean headway (s)", node_id="sat_flow",
+               port_name="mean_headway_s", input_type="float"),
+        widget("w-phf", type="bound-output", x=20, y=220, w=300, h=120,
+               label="PHF", node_id="phf", port_name="phf",
+               input_type="float"),
+        widget("w-vph", type="bound-output", x=340, y=220, w=300, h=120,
+               label="Hourly volume (vph)", node_id="phf",
+               port_name="hourly_volume", input_type="int"),
+        widget("w-aadt", type="bound-output", x=20, y=360, w=300, h=120,
+               label="AADT", node_id="aadt", port_name="aadt",
+               input_type="float"),
+        widget("w-vc", type="bound-output", x=340, y=360, w=300, h=120,
+               label="v/c", node_id="vc", port_name="vc",
+               input_type="float"),
+        widget("w-status", type="bound-output", x=20, y=500, w=620, h=120,
+               label="Capacity status", node_id="vc",
+               port_name="status", input_type="string"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_10_fundamental_diagram() -> Tuple[str, str, Dict[str, Any]]:
+    """Greenshields macroscopic flow model: q-k-v fundamental diagram.
+
+    Three operating points (free-flow, capacity, congested) feed three
+    greenshields nodes that emit (speed, flow) for each density level.
+    The dashboard reads like a textbook table and demonstrates the
+    classical capacity = v_f * k_j / 4 result.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 10 — Fundamental Diagram (Greenshields)"
+    desc = (
+        "Greenshields macroscopic flow model sampled at three operating "
+        "points: free-flow (k=20), capacity (k=100), congested (k=170). "
+        "Free-flow speed = 100 kph, jam density = 200 vpkm — so the "
+        "theoretical capacity is v_f · k_j / 4 = 5000 vph at the "
+        "critical density k_c = k_j / 2 = 100 vpkm. The dashboard "
+        "shows speed and flow at each point. Edit any density literal "
+        "to slide along the diagram and watch flow rise to the capacity "
+        "point then collapse back to zero. Static; runs in <30 ms."
+    )
+    # Three operating points: free-flow / capacity / congested.
+    operating = [
+        ("ff",  20.0),   # free-flow (mostly empty road)
+        ("cap", 100.0),  # at capacity
+        ("cong", 170.0), # heavily congested
+    ]
+    nodes: List[Dict[str, Any]] = [
+        make_node("start", "core.control.start", *gp(0, 0)),
+    ]
+    edges: List[Dict[str, Any]] = []
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=620, h=40,
+               label="Traffic 10 — Greenshields Fundamental Diagram"),
+        widget("w-formula", type="label", x=20, y=70, w=620, h=40,
+               label="v(k) = v_f · (1 - k/k_j) ;   q(k) = v(k) · k ;   q_max = v_f · k_j / 4"),
+    ]
+    for col, (label, k) in enumerate(operating):
+        nodes.append(make_node(
+            f"k_{label}", "core.literal.float", *gp(col, 1),
+            inputs={"value": float(k)},
+        ))
+        nodes.append(make_node(
+            f"gs_{label}", "traffic.flow.fundamental_greenshields", *gp(col, 2),
+            inputs={"free_flow_speed_kph": 100.0, "jam_density_vpkm": 200.0},
+        ))
+        nodes.append(make_node(
+            f"disp_v_{label}", "general.to_display", *gp(col, 3),
+            inputs={"section": f"k = {int(k)} vpkm", "title": "Speed (kph)"},
+        ))
+        nodes.append(make_node(
+            f"disp_q_{label}", "general.to_display", *gp(col, 4),
+            inputs={"section": f"k = {int(k)} vpkm", "title": "Flow (vph)"},
+        ))
+        edges.append(make_edge("start", "control_out",
+                               f"gs_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"k_{label}", "value",
+                               f"gs_{label}", "density_vpkm", nodes=nodes))
+        edges.append(make_edge(f"gs_{label}", "control_out",
+                               f"disp_v_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"gs_{label}", "control_out",
+                               f"disp_q_{label}", "control_in", nodes=nodes))
+        edges.append(make_edge(f"gs_{label}", "speed_kph",
+                               f"disp_v_{label}", "value", nodes=nodes))
+        edges.append(make_edge(f"gs_{label}", "flow_vph",
+                               f"disp_q_{label}", "value", nodes=nodes))
+        widgets.append(widget(
+            f"w-v-{label}", type="bound-output",
+            x=20 + col * 220, y=130, w=200, h=120,
+            label=f"k={int(k)} → Speed (kph)",
+            node_id=f"gs_{label}", port_name="speed_kph",
+            input_type="float",
+        ))
+        widgets.append(widget(
+            f"w-q-{label}", type="bound-output",
+            x=20 + col * 220, y=270, w=200, h=120,
+            label=f"k={int(k)} → Flow (vph)",
+            node_id=f"gs_{label}", port_name="flow_vph",
+            input_type="float",
+        ))
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
 DEMO_BUILDERS = [
     demo_01_yolo_clip,
     demo_02_tracking_loop,
@@ -1702,6 +2293,11 @@ DEMO_BUILDERS = [
     demo_traffic_03_safety_metrics,
     demo_traffic_04_video_pipeline,
     demo_traffic_05_speed_estimate,
+    demo_traffic_06_intersection_los,
+    demo_traffic_07_spot_speed_study,
+    demo_traffic_08_safety_ranking,
+    demo_traffic_09_capacity_workbook,
+    demo_traffic_10_fundamental_diagram,
 ]
 
 
