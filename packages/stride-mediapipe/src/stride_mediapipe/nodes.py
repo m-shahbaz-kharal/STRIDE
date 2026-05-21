@@ -48,7 +48,12 @@ except ImportError:
     _mp_vision = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError, NodeFileNotFoundError
+from stride_core.errors import (
+    NodeInputError,
+    NodeMissingDependencyError,
+    NodeFileNotFoundError,
+    NodeNetworkError,
+)
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -85,7 +90,7 @@ def _ensure_task_file(task_key: str, override_path: str = "") -> str:
         return override_path
 
     if task_key not in _TASK_URLS:
-        raise ValueError(f"unknown mediapipe task: {task_key}")
+        raise NodeInputError(f"unknown mediapipe task: {task_key}", port="task")
 
     cache = _cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
@@ -109,10 +114,11 @@ def _ensure_task_file(task_key: str, override_path: str = "") -> str:
                 tmp.unlink()
             except OSError:
                 pass
-        raise RuntimeError(
+        raise NodeNetworkError(
             f"failed to download MediaPipe task bundle from {url}: {exc}. "
             "You can pre-download it manually and pass its path via the "
-            "`model_path` parameter."
+            "`model_path` parameter.",
+            details={"url": url, "task_key": task_key},
         ) from exc
     return str(target)
 
@@ -198,7 +204,7 @@ class MediaPipePoseNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("MediaPipe pose: no image provided")
+            raise NodeInputError("MediaPipe pose: no image provided", port="image")
 
         complexity = int(inputs.get("model_complexity") if inputs.get("model_complexity") is not None else 1)
         num_poses = int(inputs.get("num_poses") if inputs.get("num_poses") is not None else 1)
@@ -307,7 +313,7 @@ class MediaPipeHandsNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("MediaPipe hands: no image provided")
+            raise NodeInputError("MediaPipe hands: no image provided", port="image")
 
         max_hands = int(inputs.get("max_num_hands") if inputs.get("max_num_hands") is not None else 2)
         min_conf = float(inputs.get("min_detection_confidence") if inputs.get("min_detection_confidence") is not None else 0.5)
@@ -413,7 +419,7 @@ class MediaPipeFaceMeshNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("MediaPipe face: no image provided")
+            raise NodeInputError("MediaPipe face: no image provided", port="image")
 
         max_faces = int(inputs.get("max_num_faces") if inputs.get("max_num_faces") is not None else 1)
         min_conf = float(inputs.get("min_detection_confidence") if inputs.get("min_detection_confidence") is not None else 0.5)

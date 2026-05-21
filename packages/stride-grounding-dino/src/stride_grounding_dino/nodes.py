@@ -52,7 +52,7 @@ except ImportError:
     GroundingDinoProcessor = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -163,10 +163,10 @@ class GroundingDinoNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("Grounding DINO: no image provided")
+            raise NodeInputError("Grounding DINO: no image provided", port="image")
         text_prompt = inputs.get("text_prompt") or ""
         if not text_prompt.strip():
-            raise ValueError("Grounding DINO: text_prompt is required")
+            raise NodeInputError("Grounding DINO: text_prompt is required", port="text_prompt")
 
         checkpoint = inputs.get("checkpoint") or "IDEA-Research/grounding-dino-tiny"
         try:

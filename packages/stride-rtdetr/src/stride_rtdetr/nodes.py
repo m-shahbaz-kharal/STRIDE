@@ -33,7 +33,7 @@ except ImportError:
     RTDETR = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -111,7 +111,7 @@ class RTDETRDetectNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("RT-DETR: no image provided")
+            raise NodeInputError("RT-DETR: no image provided", port="image")
 
         weights = inputs.get("weights") or "rtdetr-l.pt"
         try:

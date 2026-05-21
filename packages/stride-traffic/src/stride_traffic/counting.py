@@ -21,7 +21,20 @@ plain ``list<bbox2d>``.
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
+
+# Per-node per-track history cap. ByteTrack assigns monotonically
+# increasing IDs in a live deployment, so unbounded per-track state
+# would grow without bound after a few hours of operation. 4096 covers
+# ~1 hour of dense intersection traffic while staying cheap (<1 MB).
+_MAX_TRACK_HISTORY = 4096
+
+
+def _cap_track_dict(d: "OrderedDict[int, Any]") -> None:
+    """FIFO-evict the oldest entries until ``d`` is under the cap."""
+    while len(d) > _MAX_TRACK_HISTORY:
+        d.popitem(last=False)
 
 from stride_core import register_node, NodeBase, ExecutionContext
 from stride_core.errors import NodeInputError
@@ -134,13 +147,20 @@ class CountLineNode(NodeBase):
 
         bucket = ctx.node_resources.setdefault(self.id, {})
         if reset or _LINE_STATE_KEY not in bucket:
+            from collections import OrderedDict
             bucket[_LINE_STATE_KEY] = {
-                "last_side": {},   # track_id -> +1/-1/0
+                # FIFO-capped via _cap_track_dict — see counting module
+                # docstring on long-running deployments.
+                "last_side": OrderedDict(),   # track_id -> +1/-1/0
                 "forward": 0,
                 "backward": 0,
                 "counted": set(),  # track_id -> set of crossing directions seen
             }
         state = bucket[_LINE_STATE_KEY]
+        if not isinstance(state["last_side"], dict) or type(state["last_side"]).__name__ != "OrderedDict":
+            # Promote any pre-cap state dict.
+            from collections import OrderedDict
+            state["last_side"] = OrderedDict(state["last_side"])
 
         events: List[Dict[str, Any]] = []
         anchor = (
@@ -160,7 +180,11 @@ class CountLineNode(NodeBase):
                 continue  # inside dead zone — don't update side
             side = 1 if d > 0 else -1
             prev = state["last_side"].get(tid)
+            # Refresh-insert so the just-touched track moves to the end
+            # of the FIFO; cap to _MAX_TRACK_HISTORY entries.
+            state["last_side"].pop(tid, None)
             state["last_side"][tid] = side
+            _cap_track_dict(state["last_side"])
             if prev is None or prev == 0 or prev == side:
                 continue
             # Side flipped — register a crossing.
@@ -256,11 +280,14 @@ class CountPolygonNode(NodeBase):
         bucket = ctx.node_resources.setdefault(self.id, {})
         if reset or _POLY_STATE_KEY not in bucket:
             bucket[_POLY_STATE_KEY] = {
-                "inside": set(),
+                # Ordered so we can FIFO-evict — see ``_cap_track_dict``.
+                "inside": OrderedDict(),
                 "entered": 0,
                 "exited": 0,
             }
         state = bucket[_POLY_STATE_KEY]
+        if isinstance(state["inside"], set):
+            state["inside"] = OrderedDict((tid, True) for tid in state["inside"])
         anchor = (
             detection_bottom_center if ref == "bottom" else detection_center
         )
@@ -281,7 +308,8 @@ class CountPolygonNode(NodeBase):
                 seen_inside.add(tid)
                 if not was_inside:
                     state["entered"] += 1
-                    state["inside"].add(tid)
+                    state["inside"][tid] = True
+                    _cap_track_dict(state["inside"])
                     events.append(make_event(
                         kind="line_cross", severity="info",
                         track_ids=[tid], ts_start=time.time(),
@@ -295,7 +323,7 @@ class CountPolygonNode(NodeBase):
             else:
                 if was_inside:
                     state["exited"] += 1
-                    state["inside"].discard(tid)
+                    state["inside"].pop(tid, None)
                     events.append(make_event(
                         kind="line_cross", severity="info",
                         track_ids=[tid], ts_start=time.time(),
@@ -374,10 +402,14 @@ class CountClassifyNode(NodeBase):
         bucket = ctx.node_resources.setdefault(self.id, {})
         if reset or _CLASS_STATE_KEY not in bucket:
             bucket[_CLASS_STATE_KEY] = {
-                "seen": set(),
+                # FIFO-capped ordered "set" so 24/7 deployments don't
+                # accumulate every track ID ever seen forever.
+                "seen": OrderedDict(),
                 "counts": {b: 0 for b in _FHWA_BINS},
             }
         state = bucket[_CLASS_STATE_KEY]
+        if isinstance(state["seen"], set):
+            state["seen"] = OrderedDict((tid, True) for tid in state["seen"])
         mapping = {
             (inputs.get("map_motorcycle") or "motorcycle").lower(): "motorcycle",
             (inputs.get("map_car") or "car").lower(): "car",
@@ -392,8 +424,11 @@ class CountClassifyNode(NodeBase):
                 continue
             tid = int(tid)
             if tid in state["seen"]:
+                # Move to end so this id is the freshest, not the oldest.
+                state["seen"].move_to_end(tid)
                 continue
-            state["seen"].add(tid)
+            state["seen"][tid] = True
+            _cap_track_dict(state["seen"])
             cls_raw = str(det.get("class_name") or "").lower()
             bin_name = mapping.get(cls_raw, "other")
             state["counts"][bin_name] = state["counts"].get(bin_name, 0) + 1

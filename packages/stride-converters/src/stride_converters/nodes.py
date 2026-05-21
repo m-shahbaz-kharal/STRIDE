@@ -206,9 +206,28 @@ class ConvertImageFromUrlNode(NodeBase):
                     f"failed to fetch {url!r}: {exc}", port="url",
                 ) from exc
         else:
-            if not os.path.isfile(url):
+            # Local-file fallback. Restrict reads to an allow-list root so
+            # a graph that wires user-controlled text into this port can't
+            # exfiltrate arbitrary process-readable files (SSH keys,
+            # credentials, …). The default root is the current working
+            # directory; deployments expose data dirs via the env var.
+            data_root = os.environ.get("STRIDE_DATA_ROOT") or os.getcwd()
+            try:
+                resolved = os.path.realpath(os.path.abspath(url))
+                root = os.path.realpath(os.path.abspath(data_root))
+            except OSError as exc:
+                raise NodeInputError(
+                    f"could not resolve path {url!r}: {exc}", port="url",
+                ) from exc
+            if os.path.commonpath([resolved, root]) != root:
+                raise NodeInputError(
+                    f"path {url!r} is outside the allowed data root "
+                    f"{root!r}; set STRIDE_DATA_ROOT to expand the scope",
+                    port="url",
+                )
+            if not os.path.isfile(resolved):
                 raise NodeFileNotFoundError(f"file not found: {url}", port="url")
-            with open(url, "rb") as f:
+            with open(resolved, "rb") as f:
                 raw = f.read()
 
         arr = np.frombuffer(raw, dtype=np.uint8)

@@ -9,7 +9,25 @@ from __future__ import annotations
 
 import math
 import time
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
+
+# Per-node per-track history cap. Live ByteTrack assigns monotonically
+# increasing IDs, so unbounded per-track state would grow forever in a
+# 24/7 deployment. 4096 covers ~1 hour of dense intersection traffic
+# (≈70 vehicles/min × 60 min = 4200) while remaining cheap (<1 MB).
+_MAX_TRACK_HISTORY = 4096
+
+
+def _cap_track_dict(d: "OrderedDict[int, Any]") -> None:
+    """Drop the oldest insertion(s) until ``d`` is under the cap.
+
+    FIFO eviction is safe for per-track flags because once a track has
+    exited and is no longer being observed, retaining its last-known
+    state is dead weight. Keeps the dict bounded in long-running runs.
+    """
+    while len(d) > _MAX_TRACK_HISTORY:
+        d.popitem(last=False)
 
 try:
     import numpy as np
@@ -694,11 +712,15 @@ class SafetyPetAtPolygonNode(NodeBase):
 
         bucket = ctx.node_resources.setdefault(self.id, {})
         state = bucket.setdefault(_PET_KEY, {
-            "inside": {},          # tid -> bool
-            "last_exit": None,     # (tid, ts)
+            "inside": OrderedDict(),  # tid -> bool, FIFO-capped
+            "last_exit": None,        # (tid, ts)
             "min_pet": float("inf"),
             "critical": 0,
         })
+        # Defensive: an older bucket from before the cap was introduced
+        # may still hold a plain dict. Promote it once.
+        if not isinstance(state["inside"], OrderedDict):
+            state["inside"] = OrderedDict(state["inside"])
 
         events: List[Dict[str, Any]] = []
         ts = time.time()
@@ -746,7 +768,11 @@ class SafetyPetAtPolygonNode(NodeBase):
             elif was_inside and not inside:
                 # Track exited the polygon.
                 state["last_exit"] = (tid, ts)
+            # Refresh-insert so the just-touched track moves to the end
+            # of the FIFO and is the last candidate for eviction.
+            state["inside"].pop(tid, None)
             state["inside"][tid] = inside
+            _cap_track_dict(state["inside"])
 
         min_pet = state["min_pet"] if state["min_pet"] != float("inf") else 0.0
         return {

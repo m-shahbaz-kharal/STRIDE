@@ -506,7 +506,14 @@ class Fl511StartNode(NodeBase):
         buffer_seconds = int(inputs.get("buffer_seconds") if inputs.get("buffer_seconds") is not None else 4)
         refresh_minutes = int(inputs.get("refresh_minutes") if inputs.get("refresh_minutes") is not None else 4)
 
-        stream_id = str(uuid.uuid4())[:8]
+        # Derive a stable stream_id from the node id + camera so repeated
+        # invocations of the same connect node in a single run (e.g.
+        # inside a loop body) reuse the resource registered on the first
+        # call instead of spawning a new ffmpeg process per tick.
+        # uuid.uuid4 is preserved as a fallback when the node id is
+        # missing (legacy graph payloads).
+        node_id = getattr(self, "id", None) or str(uuid.uuid4())[:8]
+        stream_id = f"{node_id}:{camera_id}"
 
         def _factory() -> "StreamResource":
             return StreamResource(

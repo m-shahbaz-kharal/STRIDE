@@ -60,7 +60,7 @@ except ImportError:
     HAS_PCDET = False
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_control, t_float, t_int, t_list, t_pointcloud,
@@ -71,7 +71,7 @@ from stride_core.typesystem import (
 def _decode_pointcloud(cloud: Dict[str, Any]) -> "np.ndarray":
     """Pull (N, 3+) float32 points out of a STRIDE PointCloud record."""
     if not isinstance(cloud, dict):
-        raise ValueError("point_cloud must be a PointCloud record")
+        raise NodeInputError("point_cloud must be a PointCloud record", port="point_cloud")
 
     if cloud.get("positions_b64"):
         raw = base64.b64decode(cloud["positions_b64"])
@@ -81,7 +81,10 @@ def _decode_pointcloud(cloud: Dict[str, Any]) -> "np.ndarray":
         if pts.ndim == 1:
             pts = pts.reshape(-1, 3)
     else:
-        raise ValueError("PointCloud has no `positions` or `positions_b64`")
+        raise NodeInputError(
+            "PointCloud has no `positions` or `positions_b64`",
+            port="point_cloud",
+        )
 
     # Optional intensity / extra channel (most LIDAR detectors expect XYZI)
     intensities: Optional["np.ndarray"] = None
@@ -254,7 +257,9 @@ def _shared_forward(
 
     cloud = inputs.get("point_cloud")
     if not cloud:
-        raise ValueError(f"{detector_label}: no point cloud provided")
+        raise NodeInputError(
+            f"{detector_label}: no point cloud provided", port="point_cloud",
+        )
 
     config_path = inputs.get("config_path") or ""
     weights = inputs.get("weights") or ""

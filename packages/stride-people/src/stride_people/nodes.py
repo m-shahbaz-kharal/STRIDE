@@ -54,29 +54,47 @@ def voxel_hash(pts: "np.ndarray", voxel_size: float) -> "np.ndarray":
 
 
 def dbscan_cluster(pts: "np.ndarray", eps: float, min_samples: int) -> "np.ndarray":
-    """
-    Simple DBSCAN implementation.
-    Returns array of cluster labels (-1 for noise).
+    """DBSCAN over an N×3 point array.
+
+    Uses a KD-tree for neighbour lookup when scipy is available — this
+    reduces the per-frame cost from O(N²) (full pairwise distances) to
+    O(N log N), which is the difference between ~4 billion distance
+    evaluations and ~70 000 lookups for a typical Ouster OS1-64 frame.
+    The pure-numpy fallback is preserved for environments without scipy.
     """
     n = len(pts)
     labels = np.full(n, -1, dtype=np.int32)
-    cluster_id = 0
+    if n == 0:
+        return labels
 
-    # Build a simple distance matrix in chunks for memory efficiency
+    # Try the fast KD-tree path first. scipy.spatial.cKDTree gives
+    # O(log n) per-point neighbour queries which is dramatically faster
+    # than the brute-force O(n²) loop for point-cloud-sized inputs.
+    try:
+        from scipy.spatial import cKDTree  # type: ignore
+
+        tree = cKDTree(pts)
+
+        def _neighbours(i: int) -> "np.ndarray":
+            return np.asarray(tree.query_ball_point(pts[i], r=eps), dtype=np.int64)
+    except Exception:
+        # Pure-numpy fallback. Slow on large clouds; scipy is in the
+        # dependency tree already so this should rarely fire.
+        def _neighbours(i: int) -> "np.ndarray":
+            dists = np.linalg.norm(pts - pts[i], axis=1)
+            return np.where(dists <= eps)[0]
+
     visited = np.zeros(n, dtype=bool)
+    cluster_id = 0
 
     for i in range(n):
         if visited[i]:
             continue
 
-        # Find neighbors
-        dists = np.linalg.norm(pts - pts[i], axis=1)
-        neighbors = np.where(dists <= eps)[0]
-
+        neighbors = _neighbours(i)
         if len(neighbors) < min_samples:
             continue
 
-        # Start a new cluster
         labels[i] = cluster_id
         visited[i] = True
 
@@ -86,8 +104,7 @@ def dbscan_cluster(pts: "np.ndarray", eps: float, min_samples: int) -> "np.ndarr
             q = seed_set[j]
             if not visited[q]:
                 visited[q] = True
-                dists_q = np.linalg.norm(pts - pts[q], axis=1)
-                neighbors_q = np.where(dists_q <= eps)[0]
+                neighbors_q = _neighbours(int(q))
                 if len(neighbors_q) >= min_samples:
                     seed_set.extend(neighbors_q.tolist())
             if labels[q] == -1:
@@ -370,6 +387,11 @@ DETECT_SPEC = NodeSpec(
         PortSpec(name="count", type=t_int(), description="Number of detected people"),
         PortSpec(name="foreground_cloud", type=t_pointcloud(), description="Foreground points only"),
     ],
+    # Background model + tracker are stateful and update on every frame.
+    # Two identical clouds in consecutive frames must NOT be served from
+    # cache, or the background model never advances and the tracker
+    # never sees the second observation.
+    cache_policy="disabled",
 )
 
 

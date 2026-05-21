@@ -45,8 +45,21 @@ def strip_data_url(image_str: Any) -> str:
 
 
 def decode_image_bytes(image_str: Any) -> bytes:
-    """Decode a STRIDE image string (or record) into raw bytes."""
-    return base64.b64decode(strip_data_url(image_str))
+    """Decode a STRIDE image string (or record) into raw bytes.
+
+    Raises ``ValueError`` when the input doesn't resolve to a non-empty
+    base64 payload. The previous version silently returned ``b""`` for
+    ``None``/``bytes``/missing-data dict inputs, which then surfaced
+    deep in the caller as ``cv2.imdecode → None`` with no port
+    attribution. Raising here keeps the failure adjacent to its cause.
+    """
+    raw_b64 = strip_data_url(image_str)
+    if not raw_b64:
+        raise ValueError(
+            f"decode_image_bytes: input does not contain a base64 image payload "
+            f"(got type {type(image_str).__name__})"
+        )
+    return base64.b64decode(raw_b64)
 
 
 def decode_image_to_numpy(image_str: Any) -> "Any":

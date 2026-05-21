@@ -57,7 +57,7 @@ except ImportError:
     DPTImageProcessor = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_string, t_image, t_depthmap,
@@ -154,7 +154,7 @@ class DepthAnythingNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("Depth Anything: no image provided")
+            raise NodeInputError("Depth Anything: no image provided", port="image")
 
         checkpoint = inputs.get("checkpoint") or "depth-anything/Depth-Anything-V2-Small-hf"
         device = inputs.get("device") or ""

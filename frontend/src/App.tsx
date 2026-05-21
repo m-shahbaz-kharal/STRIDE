@@ -897,12 +897,23 @@ const App = () => {
   // Per Phase 3 spec: "full recompute is fine for now; debounced
   // incremental can come later." So we just rebuild on every nodes or
   // edges change; setEdges with bail-out keeps it cheap.
+  // Cache fingerprints by the ``data`` object identity. ReactFlow
+  // preserves ``data`` by reference on position-only updates, so a
+  // drag-frame's nodes array shares ``data`` with the previous render
+  // — we can skip the JSON.stringify entirely for those nodes. Only
+  // nodes whose params/ports/types actually changed pay the
+  // serialisation cost.
+  const portTypeFingerprintCacheRef = useRef<WeakMap<object, string>>(new WeakMap());
   const portTypeFingerprint = useMemo(() => {
-    // Hash only the bits that affect validation so the effect doesn't
-    // re-run on every position drag.
-    return nodes.map((n) =>
-      `${n.id}:${JSON.stringify(n.data.input_port_types || {})}|${JSON.stringify(n.data.output_port_types || {})}`
-    ).join("\n");
+    const cache = portTypeFingerprintCacheRef.current;
+    return nodes.map((n) => {
+      let entry = cache.get(n.data as object);
+      if (entry === undefined) {
+        entry = `${n.id}:${JSON.stringify(n.data.input_port_types || {})}|${JSON.stringify(n.data.output_port_types || {})}`;
+        cache.set(n.data as object, entry);
+      }
+      return entry;
+    }).join("\n");
   }, [nodes]);
 
   useEffect(() => {

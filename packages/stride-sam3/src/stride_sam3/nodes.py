@@ -28,6 +28,7 @@ except ImportError:
 
 from stride_core import register_node, NodeBase, ExecutionContext
 from stride_core.errors import (
+    NodeInputError,
     NodeMissingDependencyError,
     NodeNetworkError,
 )
@@ -64,7 +65,7 @@ def _make_request(
         elif method.upper() == "DELETE":
             response = requests.delete(url, timeout=timeout)
         else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
+            raise NodeInputError(f"Unsupported HTTP method: {method}")
 
         response.raise_for_status()
         return response.json()
@@ -239,9 +240,9 @@ class SAM3SetPromptNode(NodeBase):
         server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
-            raise ValueError("No session_id provided")
+            raise NodeInputError("No session_id provided", port="session_id")
         if not prompt:
-            raise ValueError("No prompt provided")
+            raise NodeInputError("No prompt provided", port="prompt")
         
         result = _make_request(
             server_url,
@@ -298,9 +299,9 @@ class SAM3AddImageNode(NodeBase):
         server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
-            raise ValueError("No session_id provided")
+            raise NodeInputError("No session_id provided", port="session_id")
         if not image:
-            raise ValueError("No image provided")
+            raise NodeInputError("No image provided", port="image")
         
         result = _make_request(
             server_url,
@@ -364,7 +365,7 @@ class SAM3GetOutputNode(NodeBase):
         server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
-            raise ValueError("No session_id provided")
+            raise NodeInputError("No session_id provided", port="session_id")
         
         result = _make_request(
             server_url,
@@ -423,7 +424,7 @@ class SAM3VisualizeNode(NodeBase):
         server_url = server_url if server_url is not None else "http://localhost:8765"
         
         if not session_id:
-            raise ValueError("No session_id provided")
+            raise NodeInputError("No session_id provided", port="session_id")
         
         result = _make_request(
             server_url,

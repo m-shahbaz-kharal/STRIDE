@@ -200,6 +200,11 @@ class NodeExecutor:
         """
         if not self.can_cache(node_id):
             return
+        # Drop cache writes for nodes whose worker thread was abandoned
+        # after the interruption deadline. The result is no longer
+        # representative — the next run shouldn't be served it.
+        if self.cancellation.is_abandoned(node_id):
+            return
         node = self.nodes[node_id]
         self.cache.set(node.type, self.cache_params(node_id), inputs, outputs, node_id=node_id)
 
@@ -330,7 +335,17 @@ class NodeExecutor:
                 raise GraphExecutionError(
                     f"Node '{node_id}' missing output ports: {expected - actual}"
                 )
-            # Trim to declared ports only
+            # Trim to declared ports only. Surface the discarded keys in
+            # ctx.logger so a spec/impl drift (extra forward outputs)
+            # doesn't sit silently — a missing widget is much easier to
+            # debug when the log says "you returned 'extra_key' that the
+            # spec doesn't advertise".
+            extra = actual - expected
+            if extra:
+                ctx.log(
+                    f"WARNING: node '{node_id}' ({node.type}) forward returned "
+                    f"undeclared output keys {sorted(extra)}; trimmed to spec."
+                )
             outputs = {k: outputs[k] for k in expected}
 
             end_time = time.perf_counter()

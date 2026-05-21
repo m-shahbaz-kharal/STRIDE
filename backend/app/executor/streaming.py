@@ -148,8 +148,12 @@ class StreamingExecutor:
                 # Check if we've waited too long after interruption
                 elapsed = time.time() - interruption_start
                 if elapsed >= _FORCE_ABANDON_TIMEOUT:
-                    # Force abandon - don't wait for task anymore
-                    # The thread will continue in background but we move on
+                    # Force abandon - don't wait for task anymore. The
+                    # underlying thread will continue in background; we
+                    # tag the node id so any late cache write or state
+                    # mutation it tries to perform is dropped instead of
+                    # corrupting the next run.
+                    self.cancellation.mark_abandoned(node_id)
                     raise asyncio.CancelledError()
 
                 # Give the task a tiny bit more time to finish gracefully
@@ -909,11 +913,18 @@ class StreamingExecutor:
         elif not is_while:
             indices = range(0)  # unknown loop type — skip
 
+        # Track our additions so we can roll them back on early break.
+        # Without this, a loop interrupted mid-flight leaves
+        # ``progress_state["total"]`` inflated, which shows up to the
+        # frontend as a stuck progress bar (or one that briefly exceeds
+        # 1.0 if the consumer doesn't clamp).
+        added_total = 0
         if adjust_total and indices is not None:
             additional = len(indices) * len(body_order)
             if additional:
                 with progress_state["lock"]:
                     progress_state["total"] += additional
+                added_total += additional
 
         with progress_state["lock"]:
             total = progress_state["total"]
@@ -961,6 +972,7 @@ class StreamingExecutor:
                 if body_order:
                     with progress_state["lock"]:
                         progress_state["total"] += len(body_order)
+                    added_total += len(body_order)
             else:
                 # For loop: re-read bounds each iteration
                 if loop_node.type == "core.control.for":
@@ -1371,8 +1383,31 @@ class StreamingExecutor:
 
         if loop_interrupted or self._should_stop_execution():
             loop_result = self._record_interrupted(node_id)
+            # Reconcile the denominator: anything this loop pre-reserved
+            # but never consumed becomes dead slack. Compute the
+            # unconsumed portion as the difference between what we
+            # reserved (``added_total``) and what we actually emitted
+            # for the body during this loop. We approximate that by
+            # subtracting the per-iteration completes that happened
+            # since this loop entered — captured by the local
+            # ``iterations * len(body_order)`` upper bound — and
+            # capping so ``total`` never drops below ``completed``.
             with progress_state["lock"]:
+                if added_total > 0:
+                    approx_consumed = min(
+                        added_total,
+                        iterations * max(1, len(body_order)),
+                    )
+                    unconsumed = max(0, added_total - approx_consumed)
+                    if unconsumed:
+                        progress_state["total"] = max(
+                            progress_state["completed"],
+                            progress_state["total"] - unconsumed,
+                        )
                 progress_state["completed"] += 1
+                # Final safety clamp so total can't be < completed.
+                if progress_state["total"] < progress_state["completed"]:
+                    progress_state["total"] = progress_state["completed"]
                 completed = progress_state["completed"]
                 total = progress_state["total"]
 

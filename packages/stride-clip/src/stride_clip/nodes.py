@@ -59,7 +59,7 @@ except ImportError:
     CLIPTokenizer = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_control, t_float, t_int, t_list, t_string, t_image, t_record,
@@ -170,14 +170,14 @@ class CLIPClassifyNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("CLIP classify: no image provided")
+            raise NodeInputError("CLIP classify: no image provided", port="image")
         prompts_str = inputs.get("prompts") or ""
         if isinstance(prompts_str, list):
             prompts = [str(p).strip() for p in prompts_str if str(p).strip()]
         else:
             prompts = [p.strip() for p in str(prompts_str).split(",") if p.strip()]
         if not prompts:
-            raise ValueError("CLIP classify: no prompts provided")
+            raise NodeInputError("CLIP classify: no prompts provided", port="prompts")
 
         checkpoint = inputs.get("checkpoint") or "openai/clip-vit-base-patch32"
         device = inputs.get("device") or ""
@@ -252,7 +252,7 @@ class CLIPEmbedNode(NodeBase):
         _require_deps()
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("CLIP embed: no image provided")
+            raise NodeInputError("CLIP embed: no image provided", port="image")
 
         checkpoint = inputs.get("checkpoint") or "openai/clip-vit-base-patch32"
         device = inputs.get("device") or ""

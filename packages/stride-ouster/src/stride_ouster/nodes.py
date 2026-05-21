@@ -190,7 +190,34 @@ OUSTER_OPEN_SOURCE_SPEC = NodeSpec(
         PortSpec(name="sensor_info", type=t_string()),
         PortSpec(name="num_frames", type=t_int()),
     ],
+    # The returned ``source`` wraps a live file handle / lazy iterator
+    # that is torn down at run end. Caching the bundle and serving it on
+    # a later run would hand the caller a closed iterator. Disable.
+    cache_policy="disabled",
 )
+
+
+def _resolve_safe_path(value: str, *, port: str) -> str:
+    """Resolve ``value`` under ``STRIDE_DATA_ROOT`` (defaults to CWD).
+
+    Prevents a graph that wires user-controlled text into a path port
+    from reading arbitrary files anywhere on the host.
+    """
+    data_root = os.environ.get("STRIDE_DATA_ROOT") or os.getcwd()
+    try:
+        resolved = os.path.realpath(os.path.abspath(value))
+        root = os.path.realpath(os.path.abspath(data_root))
+    except OSError as exc:
+        raise NodeInputError(
+            f"could not resolve path {value!r}: {exc}", port=port,
+        ) from exc
+    if os.path.commonpath([resolved, root]) != root:
+        raise NodeInputError(
+            f"path {value!r} is outside the allowed data root {root!r}; "
+            f"set STRIDE_DATA_ROOT to expand the scope",
+            port=port,
+        )
+    return resolved
 
 
 @register_node(OUSTER_OPEN_SOURCE_SPEC)
@@ -207,6 +234,8 @@ class OusterOpenSourceNode(NodeBase):
             raise NodeInputError("pcap_path is required", port="pcap_path")
         if not metadata_path:
             raise NodeInputError("metadata_path is required", port="metadata_path")
+        pcap_path = _resolve_safe_path(pcap_path, port="pcap_path")
+        metadata_path = _resolve_safe_path(metadata_path, port="metadata_path")
         if not os.path.isfile(pcap_path):
             raise NodeFileNotFoundError(f"pcap file not found: {pcap_path}", port="pcap_path")
         if not os.path.isfile(metadata_path):

@@ -43,6 +43,12 @@ class CancellationController:
         self._loop_body_nodes: Dict[str, Set[str]] = {}
         # Track body node -> parent loop for reverse lookup
         self._body_to_loop: Dict[str, str] = {}
+        # Nodes whose async task was force-abandoned after the
+        # interruption deadline. The underlying worker thread may keep
+        # running, so we tag the node id and ignore any late
+        # cache.set / state writes that try to land for it. Inspected
+        # via :py:meth:`is_abandoned`.
+        self._abandoned_nodes: Set[str] = set()
 
     def reset(self) -> None:
         """Reset all cancellation state for a new execution run."""
@@ -54,6 +60,7 @@ class CancellationController:
             self._running_processes = {}
             self._loop_body_nodes = {}
             self._body_to_loop = {}
+            self._abandoned_nodes.clear()
 
     def register_loop_body(self, loop_id: str, body_nodes: Set[str]) -> None:
         """Register loop-body relationships for cascading cancellation.
@@ -145,6 +152,22 @@ class CancellationController:
         """
         with self._state_lock:
             self._running_tasks.pop(node_id, None)
+
+    def mark_abandoned(self, node_id: str) -> None:
+        """Flag a node whose worker thread was force-abandoned mid-run.
+
+        The thread keeps running in the background — we just stop
+        waiting for it. ``is_abandoned()`` then lets the cache and
+        result-finalisation paths drop any results that arrive late so
+        they can't corrupt the next run's state.
+        """
+        with self._state_lock:
+            self._abandoned_nodes.add(node_id)
+
+    def is_abandoned(self, node_id: str) -> bool:
+        """Return ``True`` if ``node_id`` was force-abandoned this run."""
+        with self._state_lock:
+            return node_id in self._abandoned_nodes
 
     def register_process(self, node_id: str, proc: subprocess.Popen) -> None:
         """Register a subprocess for potential termination.

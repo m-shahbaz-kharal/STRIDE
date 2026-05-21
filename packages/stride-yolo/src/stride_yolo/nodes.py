@@ -46,7 +46,7 @@ except ImportError:
     YOLO = None  # type: ignore
 
 from stride_core import register_node, NodeBase, ExecutionContext
-from stride_core.errors import NodeMissingDependencyError
+from stride_core.errors import NodeInputError, NodeMissingDependencyError
 from stride_core.node_spec import NodeSpec, PortSpec
 from stride_core.typesystem import (
     t_boolean, t_control, t_float, t_int, t_list, t_string,
@@ -161,7 +161,7 @@ class YoloDetectNode(NodeBase):
 
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("YOLO detect: no image provided")
+            raise NodeInputError("YOLO detect: no image provided", port="image")
 
         weights = inputs.get("weights") or "yolo11n.pt"
         conf = _coerce_float(inputs.get("confidence"), 0.25)
@@ -275,7 +275,7 @@ class YoloSegmentNode(NodeBase):
 
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("YOLO segment: no image provided")
+            raise NodeInputError("YOLO segment: no image provided", port="image")
 
         weights = inputs.get("weights") or "yolo11n-seg.pt"
         conf = _coerce_float(inputs.get("confidence"), 0.25)
@@ -391,7 +391,7 @@ class YoloPoseNode(NodeBase):
 
         image_str = inputs.get("image")
         if not image_str:
-            raise ValueError("YOLO pose: no image provided")
+            raise NodeInputError("YOLO pose: no image provided", port="image")
 
         weights = inputs.get("weights") or "yolo11n-pose.pt"
         conf = _coerce_float(inputs.get("confidence"), 0.25)
