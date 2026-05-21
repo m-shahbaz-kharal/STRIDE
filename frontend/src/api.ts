@@ -42,20 +42,28 @@ export interface GraphData {
 const SESSION_KEY = "stride_session";
 
 export const readSession = (): AuthSession | null => {
-  const raw = localStorage.getItem(SESSION_KEY);
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
     return JSON.parse(raw) as AuthSession;
   } catch {
+    // localStorage may be disabled (private browsing) or contain a
+    // malformed payload. In either case there's no usable session.
     return null;
   }
 };
 
 export const writeSession = (session: AuthSession | null) => {
-  if (!session) {
-    localStorage.removeItem(SESSION_KEY);
-  } else {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  try {
+    if (!session) {
+      localStorage.removeItem(SESSION_KEY);
+    } else {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    }
+  } catch (e) {
+    // QuotaExceededError in private browsing / out-of-space. Don't
+    // crash the auth flow; the user can still operate within the tab.
+    console.warn("writeSession: localStorage write failed", e);
   }
 };
 
@@ -71,6 +79,22 @@ const apiRequest = async <T>(path: string, options: RequestInit = {}, session?: 
     throw new Error(detail || `Request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
+};
+
+/**
+ * Bare ``fetch`` wrapper that auto-attaches the bearer token from the
+ * persisted session. Use this for endpoints (cancel, cache-clear,
+ * stream-frame, etc.) that aren't already routed through the
+ * ``apiRequest`` helper above. Returns the raw ``Response`` so callers
+ * can inspect status codes.
+ */
+export const authFetch = (path: string, init: RequestInit = {}): Promise<Response> => {
+  const headers = new Headers(init.headers || {});
+  const session = readSession();
+  if (session?.token) {
+    headers.set("Authorization", `Bearer ${session.token}`);
+  }
+  return fetch(path, { ...init, headers });
 };
 
 const toSession = (response: TokenResponse): AuthSession => ({

@@ -80,6 +80,7 @@ import {
   AuthSession,
   GraphData,
   GraphRecord,
+  authFetch,
   createGraph,
   deleteGraph,
   listGraphs,
@@ -187,12 +188,16 @@ const App = () => {
     setRightPanelWidth,
   } = usePanelResize();
 
-  // Undo/Redo hook
+  // Undo/Redo hook. The execution-lock ref is wired further down once
+  // ``isRunning`` exists; the getter pattern keeps the hook above the
+  // execution hook so we don't have to reorder the whole component.
+  const undoRedoLockRef = useRef(false);
   const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo({
     nodes,
     edges,
     setNodes,
     setEdges,
+    isLocked: () => undoRedoLockRef.current,
   });
 
   // Node operations hook
@@ -288,6 +293,11 @@ const App = () => {
   // PERF: Use refs for values that change frequently to keep nodeHandlers stable
   const executionIdRef = useRef(executionId);
   useEffect(() => { executionIdRef.current = executionId; }, [executionId]);
+  // Lock undo/redo while a run is in flight so the user can't yank the
+  // graph out from under the executor (which would erase running/queued
+  // badges and ghost-fire updates against nodes that no longer match
+  // the rendered DOM). See ``useUndoRedo.isLocked`` for the contract.
+  useEffect(() => { undoRedoLockRef.current = isRunning; }, [isRunning]);
   const nodeMapRef = useRef(nodeMap);
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
   const handleRunGraphRef = useRef<(
@@ -301,7 +311,7 @@ const App = () => {
     const uniqueIds = Array.from(new Set(nodeIds));
     if (uniqueIds.length === 0) return;
     try {
-      await fetch("/api/cache/clear-nodes", {
+      await authFetch("/api/cache/clear-nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ node_ids: uniqueIds }),
@@ -402,7 +412,9 @@ const App = () => {
       // PERF: Access executionId from ref to keep handler stable
       if (!executionIdRef.current) return;
       try {
-        await fetch(`/api/executions/${executionIdRef.current}/cancel/${nodeId}`, { method: "POST" });
+        await authFetch(`/api/executions/${executionIdRef.current}/cancel/${nodeId}`, {
+          method: "POST",
+        });
       } catch (e) {
         console.error("Failed to interrupt node:", e);
       }
@@ -1321,6 +1333,12 @@ const App = () => {
       extras?: { max_steps?: number }
     ) => {
       if (nodes.length === 0) return;
+      // Reject double-runs. Without this guard a right-click "Run from
+      // here" while a previous run is still streaming would race two
+      // executions on the same WebSocket, causing the first run's
+      // node-status updates to be wiped when the second emits its
+      // start event.
+      if (isRunning) return;
 
       const resolvedTargets = targetNodes || (mode !== "full" ? selectedNodeIds : undefined);
       const downstreamForRerun = mode === "from_node"
@@ -1399,7 +1417,7 @@ const App = () => {
 
   const handleClearBackendCache = useCallback(async () => {
     try {
-      const response = await fetch("/api/cache/clear", { method: "POST" });
+      const response = await authFetch("/api/cache/clear", { method: "POST" });
       if (response.ok) {
         const data = await response.json();
         console.log(`Cleared ${data.cleared} cached entries`);

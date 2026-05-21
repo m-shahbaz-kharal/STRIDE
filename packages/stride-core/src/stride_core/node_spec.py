@@ -55,6 +55,13 @@ class PortSpec:
         return d
 
 
+# Allowed values for ``NodeSpec.cache_policy``. ``auto`` lets the
+# executor decide based on ``cache_enabled``/tags; ``disabled`` forbids
+# caching unconditionally (use for streaming, time-varying, or stateful
+# nodes); ``always`` requests caching even on control-tagged nodes.
+CACHE_POLICIES = ("auto", "disabled", "always")
+
+
 @dataclass
 class NodeSpec:
     """Complete specification for a node type.
@@ -71,6 +78,10 @@ class NodeSpec:
     * ``suggested`` — when ``True``, the frontend treats this converter
       as a one-click suggestion (the default). When ``False`` the user
       must add it explicitly.
+
+    ``cache_policy`` is validated at spec construction so typos
+    (e.g. ``"diabled"``) fail loudly at import time rather than silently
+    falling back to ``"auto"`` semantics.
     """
 
     type: str
@@ -90,6 +101,13 @@ class NodeSpec:
     # Plugin metadata
     plugin_name: Optional[str] = None
     api_version: str = "1.0"
+
+    def __post_init__(self) -> None:
+        if self.cache_policy not in CACHE_POLICIES:
+            raise ValueError(
+                f"NodeSpec(type={self.type!r}) has invalid cache_policy={self.cache_policy!r}; "
+                f"expected one of {CACHE_POLICIES}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -7,6 +7,7 @@
 
 import { useCallback, useRef } from "react";
 import { Edge, Node } from "reactflow";
+import { authFetch } from "../api";
 import { BlueprintNodeData, TypeDescriptor } from "../types";
 
 interface UseGraphDependenciesProps {
@@ -49,7 +50,7 @@ export function useGraphDependencies({
         const uniqueIds = Array.from(new Set(nodeIds));
         if (uniqueIds.length === 0) return;
         try {
-            await fetch("/api/cache/clear-nodes", {
+            await authFetch("/api/cache/clear-nodes", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ node_ids: uniqueIds }),

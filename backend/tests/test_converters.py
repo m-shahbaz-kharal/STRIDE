@@ -529,24 +529,35 @@ class TestConvertersEndpoint:
     def test_endpoint_returns_indexable_payload(self) -> None:
         from fastapi.testclient import TestClient
 
+        from app.auth import get_current_user
         from app.main import app
 
-        client = TestClient(app)
-        response = client.get("/api/converters")
-        assert response.status_code == 200
-        payload = response.json()
-        converters = payload["converters"]
-        assert isinstance(converters, list) and converters
-        for entry in converters:
-            assert entry["node_type"].startswith("convert.")
-            assert entry["from_kind"]
-            assert entry["to_kind"]
-            assert isinstance(entry["cost"], int)
-        # The image group must be reachable from grayscale → image.
-        types = {(c["from_kind"], c["to_kind"]) for c in converters}
-        assert ("image", "image") in types
-        assert ("depthmap", "pointcloud") in types
-        assert ("detections2d", "detections2d") in types
+        # The endpoint is auth-protected. Override the dependency with a
+        # stub user so the test exercises the converter index logic rather
+        # than the auth layer.
+        class _StubUser:
+            id = "test-user"
+
+        app.dependency_overrides[get_current_user] = lambda: _StubUser()
+        try:
+            client = TestClient(app)
+            response = client.get("/api/converters")
+            assert response.status_code == 200
+            payload = response.json()
+            converters = payload["converters"]
+            assert isinstance(converters, list) and converters
+            for entry in converters:
+                assert entry["node_type"].startswith("convert.")
+                assert entry["from_kind"]
+                assert entry["to_kind"]
+                assert isinstance(entry["cost"], int)
+            # The image group must be reachable from grayscale → image.
+            types = {(c["from_kind"], c["to_kind"]) for c in converters}
+            assert ("image", "image") in types
+            assert ("depthmap", "pointcloud") in types
+            assert ("detections2d", "detections2d") in types
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
 
 
 # ----------------------------------------------------------------------

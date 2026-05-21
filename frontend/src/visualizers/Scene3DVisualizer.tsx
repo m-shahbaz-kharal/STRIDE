@@ -316,6 +316,17 @@ const PointCloudMesh: React.FC<PointCloudMeshProps> = ({ cloud, pointSize, color
     return g;
   }, [cloud]);
 
+  // Three.js BufferGeometry holds GPU-side VBOs. React's "value-bag"
+  // useMemo doesn't dispose the previous geometry when ``cloud`` flips,
+  // so a streaming pipeline that produces 30 clouds/s would leak ~30
+  // VBOs/s into VRAM until the WebGL context crashes. Dispose on
+  // change (cleanup runs with the old value captured) and on unmount.
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
   // Active field as a separate attribute (swappable without re-creating geometry).
   useEffect(() => {
     const active =
@@ -363,6 +374,16 @@ const PointCloudMesh: React.FC<PointCloudMeshProps> = ({ cloud, pointSize, color
     });
     return m;
   }, []); // Material instance is stable; we update uniforms below.
+
+  // Dispose the ShaderMaterial (and the compiled GLSL program it holds)
+  // on unmount. Without this, every PointCloudMesh that ever existed
+  // leaks a program into the WebGL context — fatal for dashboards that
+  // create/destroy scene widgets dynamically.
+  useEffect(() => {
+    return () => {
+      material.dispose();
+    };
+  }, [material]);
 
   useEffect(() => {
     material.uniforms.uPointSize.value = pointSize;

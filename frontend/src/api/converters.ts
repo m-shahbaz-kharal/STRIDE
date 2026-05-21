@@ -5,6 +5,8 @@
 // validation then consults the index to decide whether an invalid edge
 // can be repaired by inserting a single converter node.
 
+import { authFetch } from "../api";
+
 export interface ConverterSpec {
   node_type: string;
   display_name: string;
@@ -62,11 +64,11 @@ const buildIndex = (specs: ConverterSpec[]): ConverterIndex => {
 
 export const fetchConverterIndex = async (): Promise<ConverterIndex> => {
   try {
-    const response = await fetch("/api/converters");
+    const response = await authFetch("/api/converters");
     if (!response.ok) {
-      // Endpoint missing (e.g. older backend) — return an empty index so
-      // the editor degrades gracefully to "no suggestions" rather than
-      // crashing.
+      // Endpoint missing (e.g. older backend) or unauthenticated — return
+      // an empty index so the editor degrades gracefully to "no
+      // suggestions" rather than crashing.
       return EMPTY_INDEX;
     }
     const payload = (await response.json()) as { converters?: ConverterSpec[] };

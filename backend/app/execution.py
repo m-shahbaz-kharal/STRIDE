@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field, asdict, is_dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -108,9 +110,17 @@ class ExecutionStats:
 
 
 class ExecutionCache:
-    """Thread-safe cache shared across executor instances."""
+    """Thread-safe LRU cache shared across executor instances.
 
-    _cache: Dict[str, Dict[str, Any]] = {}
+    The cache is process-global so repeated runs of the same graph can
+    skip redundant work. To keep memory bounded across long-running
+    deployments, entries are evicted in least-recently-used order once
+    ``MAX_ENTRIES`` is reached. Configure via ``STRIDE_CACHE_MAX_ENTRIES``.
+    """
+
+    MAX_ENTRIES: int = int(os.getenv("STRIDE_CACHE_MAX_ENTRIES", "1024"))
+
+    _cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
     _metadata: Dict[str, Any] = {}
     _lock = threading.Lock()
 
@@ -211,21 +221,31 @@ class ExecutionCache:
 
     @staticmethod
     def _compute_key(node_type: str, params: Dict[str, Any], inputs: Dict[str, Any]) -> str:
-        """Create a stable hash from node metadata and inputs."""
+        """Create a stable hash from node metadata and inputs.
+
+        Uses the full 256-bit SHA-256 digest (64 hex chars). The previous
+        16-char truncation was at risk of birthday collisions once the
+        cache held more than ~4 billion entries; keeping the full digest
+        is cheap and eliminates the concern entirely.
+        """
         key_data = {
             "type": node_type,
             "params": ExecutionCache._normalize_for_key(params),
             "inputs": ExecutionCache._normalize_for_key(inputs),
         }
         key_str = json.dumps(key_data, sort_keys=True, default=str)
-        return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+        return hashlib.sha256(key_str.encode()).hexdigest()
 
     def get(self, node_type: str, params: Dict[str, Any], inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self.enabled:
             return None
         cache_key = self._compute_key(node_type, params, inputs)
         with self._lock:
-            return self._cache.get(cache_key)
+            if cache_key not in self._cache:
+                return None
+            # Touch for LRU recency.
+            self._cache.move_to_end(cache_key)
+            return self._cache[cache_key]
 
     def set(
         self,
@@ -245,7 +265,12 @@ class ExecutionCache:
                 node_id_value = str(raw_id)
         with self._lock:
             self._cache[cache_key] = outputs
+            self._cache.move_to_end(cache_key)
             self._metadata[cache_key] = {"node_type": node_type, "node_id": node_id_value}
+            # LRU eviction. ``popitem(last=False)`` drops the oldest entry.
+            while len(self._cache) > self.MAX_ENTRIES:
+                old_key, _ = self._cache.popitem(last=False)
+                self._metadata.pop(old_key, None)
 
     @classmethod
     def clear_all(cls) -> int:

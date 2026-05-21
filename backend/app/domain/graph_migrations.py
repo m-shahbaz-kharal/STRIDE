@@ -178,6 +178,12 @@ def _build_chain() -> Dict[str, Tuple[str, MigrationFn]]:
     return chain
 
 
+# Build the chain once at module import time. ``migrate`` is called
+# per-graph on every list/load request, so re-running the validation
+# loop each call adds measurable overhead for large libraries.
+_MIGRATION_CHAIN: Dict[str, Tuple[str, MigrationFn]] = _build_chain()
+
+
 def migrate(graph: dict) -> dict:
     """Walk the migration chain to bring ``graph`` to the current version.
 
@@ -198,7 +204,7 @@ def migrate(graph: dict) -> dict:
     raw_version = out.get("schema_version")
     version = raw_version or "1.0"
 
-    chain = _build_chain()
+    chain = _MIGRATION_CHAIN
     seen: set[str] = set()
     while version != CURRENT_SCHEMA_VERSION:
         if version in seen:

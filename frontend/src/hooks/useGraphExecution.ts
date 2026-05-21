@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readSession } from "../api";
 import {
   ExecutionEvent,
   ExecutionResult,
@@ -53,15 +54,31 @@ interface UseGraphExecutionReturn {
   stop: () => Promise<void>; // Cancel all active executions
 }
 
-// Construct WebSocket URL - works with both Vite proxy and production
+// Construct WebSocket URL - works with both Vite proxy and production.
+// The auth token is passed as a query parameter because browsers can't
+// set custom Authorization headers on the WebSocket handshake.
 const getWebSocketUrl = (): string => {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws/run-graph`;
+  const base = `${protocol}//${window.location.host}/ws/run-graph`;
+  const session = readSession();
+  if (!session?.token) return base;
+  return `${base}?token=${encodeURIComponent(session.token)}`;
+};
+
+// Authorization header for the run/cancel REST endpoints. The legacy
+// inline fetch() calls in this hook bypass the centralised apiRequest
+// helper, so we add the bearer token here too.
+const getAuthHeaders = (): Record<string, string> => {
+  const session = readSession();
+  if (!session?.token) return {};
+  return { Authorization: `Bearer ${session.token}` };
 };
 
 export function useGraphExecution(): UseGraphExecutionReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
   const pendingPayloadRef = useRef<GraphPayload | null>(null);
   const activeRunRef = useRef(false);
 
@@ -351,11 +368,13 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     }
 
     try {
+      intentionalCloseRef.current = false;
       const ws = new WebSocket(getWebSocketUrl());
 
       ws.onopen = () => {
         setIsConnected(true);
         setError(null);
+        reconnectAttemptRef.current = 0;
         activeRunRef.current = false;
 
         if (pendingPayloadRef.current) {
@@ -364,7 +383,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setIsConnected(false);
         wsRef.current = null;
         if (activeRunRef.current) {
@@ -376,9 +395,27 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         activeExecutionIdsRef.current.clear();
         setIsInterrupting(false);
 
+        // 4001 = explicit auth-rejection from the server. Don't retry —
+        // the user needs to re-authenticate. The session-expired UI will
+        // pick this up the next time something tries to fetch.
+        if (event.code === 4001) {
+          setError("WebSocket authentication failed (session may have expired)");
+          return;
+        }
+
+        // Skip reconnect when the unmount path closed us deliberately.
+        if (intentionalCloseRef.current) {
+          return;
+        }
+
+        // Exponential backoff with jitter — 1s, 2s, 4s, 8s, ... capped at 30s.
+        const attempt = reconnectAttemptRef.current;
+        reconnectAttemptRef.current = Math.min(attempt + 1, 6);
+        const baseDelay = Math.min(30_000, 1000 * 2 ** attempt);
+        const jitter = Math.random() * Math.min(1000, baseDelay * 0.25);
         reconnectTimeoutRef.current = window.setTimeout(() => {
           connect();
-        }, 2000);
+        }, baseDelay + jitter);
       };
 
       ws.onerror = () => {
@@ -409,6 +446,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (wsRef.current) {
+        intentionalCloseRef.current = true;
         wsRef.current.close();
       }
     };
@@ -468,7 +506,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     try {
       const response = await fetch("/api/run-graph-async", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
 
@@ -485,16 +523,20 @@ export function useGraphExecution(): UseGraphExecutionReturn {
       setLevels(data.levels ?? []);
       setProgress(1);
 
-      const statuses = new Map<string, NodeExecutionStatus>(nodeStatuses);
-      for (const entry of data.trace ?? []) {
-        statuses.set(entry.node_id, "completed");
-      }
-      runNodeIds.forEach((id) => {
-        if (!statuses.has(id)) {
-          statuses.set(id, "completed");
+      // Use the functional updater so streaming events that arrived
+      // mid-flight aren't trampled by a stale snapshot of nodeStatuses.
+      setNodeStatuses((prev) => {
+        const statuses = new Map(prev);
+        for (const entry of data.trace ?? []) {
+          statuses.set(entry.node_id, "completed");
         }
+        runNodeIds.forEach((id) => {
+          if (!statuses.has(id)) {
+            statuses.set(id, "completed");
+          }
+        });
+        return statuses;
       });
-      setNodeStatuses(statuses);
 
       return data;
     } catch (e) {
@@ -504,7 +546,7 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     } finally {
       setActiveRuns((prev) => Math.max(0, prev - 1));
     }
-  }, [nodeStatuses]);
+  }, []);
 
   // Clear results
   const clearResults = useCallback(() => {
@@ -574,7 +616,10 @@ export function useGraphExecution(): UseGraphExecutionReturn {
     const results = await Promise.all(
       ids.map(async (id) => {
         try {
-          const response = await fetch(`/api/executions/${id}/cancel`, { method: "POST" });
+          const response = await fetch(`/api/executions/${id}/cancel`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+          });
           // 404 means the execution already finished; treat as success and
           // forget about it so we don't keep waiting on phantom events.
           if (response.status === 404) {

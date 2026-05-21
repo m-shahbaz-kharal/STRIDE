@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { authFetch } from "../api";
 import { NodeTypeDefinition, TypeDescriptor } from "../types";
 
 export const useNodeLibrary = () => {
@@ -69,7 +70,7 @@ export const useNodeLibrary = () => {
             const urls = ["/api/node-definitions", "/api/node-types"];
             for (const url of urls) {
                 try {
-                    const response = await fetch(url);
+                    const response = await authFetch(url);
                     if (!response.ok) continue;
                     const data: any[] = await response.json();
                     setNodeLibrary(data.filter((d) => d.node_type !== "general.to_display").map((d) => normalizeDefinition(d)));

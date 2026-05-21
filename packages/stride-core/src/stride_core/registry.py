@@ -6,6 +6,7 @@ Provides the register_node decorator and registry utilities.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, List, Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,13 +14,16 @@ if TYPE_CHECKING:
     from .node_spec import NodeSpec
 
 
-# Global registry of node types
+# Global registry of node types. Mutations are serialised by
+# ``_REGISTRY_LOCK`` so concurrent plugin imports can't tear the dict
+# under iteration on alternative runtimes without the GIL.
 NODE_REGISTRY: Dict[str, Dict[str, Any]] = {}
+_REGISTRY_LOCK = threading.Lock()
 
 
 def register_node(spec: "NodeSpec") -> Callable[[Type["NodeBase"]], Type["NodeBase"]]:
     """Decorator to register a node class with its specification.
-    
+
     Usage:
         @register_node(MY_NODE_SPEC)
         class MyNode(NodeBase):
@@ -28,36 +32,37 @@ def register_node(spec: "NodeSpec") -> Callable[[Type["NodeBase"]], Type["NodeBa
     """
     def decorator(cls: Type["NodeBase"]) -> Type["NodeBase"]:
         cls.spec = spec
-        NODE_REGISTRY[spec.type] = {
-            "spec": spec,
-            "class": cls,
-        }
+        with _REGISTRY_LOCK:
+            NODE_REGISTRY[spec.type] = {
+                "spec": spec,
+                "class": cls,
+            }
         return cls
     return decorator
 
 
 def get_node(node_type: str) -> Dict[str, Any]:
     """Get a registered node by its type name.
-    
+
     Returns:
         Dictionary with 'spec' and 'class' keys.
-        
+
     Raises:
         KeyError: If node type is not registered.
     """
-    if node_type not in NODE_REGISTRY:
+    with _REGISTRY_LOCK:
+        entry = NODE_REGISTRY.get(node_type)
+    if entry is None:
         raise KeyError(f"Unknown node type: {node_type}")
-    return NODE_REGISTRY[node_type]
+    return entry
 
 
 def list_node_types() -> List[Dict[str, Any]]:
-    """List all registered node types with summary info.
-    
-    Returns:
-        List of dictionaries with node type info.
-    """
+    """List all registered node types with summary info."""
+    with _REGISTRY_LOCK:
+        snapshot = list(NODE_REGISTRY.items())
     result = []
-    for node_type, info in NODE_REGISTRY.items():
+    for node_type, info in snapshot:
         spec = info["spec"]
         result.append({
             "node_type": node_type,
@@ -72,14 +77,13 @@ def list_node_types() -> List[Dict[str, Any]]:
 
 
 def list_node_definitions() -> List[Dict[str, Any]]:
-    """List all registered nodes with full specifications.
-    
-    Returns:
-        List of full node specification dictionaries.
-    """
-    return [info["spec"].to_dict() for info in NODE_REGISTRY.values()]
+    """List all registered nodes with full specifications."""
+    with _REGISTRY_LOCK:
+        infos = list(NODE_REGISTRY.values())
+    return [info["spec"].to_dict() for info in infos]
 
 
 def clear_registry() -> None:
     """Clear the node registry. Useful for testing."""
-    NODE_REGISTRY.clear()
+    with _REGISTRY_LOCK:
+        NODE_REGISTRY.clear()

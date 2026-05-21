@@ -7,6 +7,7 @@
 
 import { useCallback, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
+import { authFetch } from '../api';
 import { BlueprintNodeData, TypeDescriptor } from '../types';
 import { getDownstreamNodes, getDependentNodes, getUpstreamNodes } from '../domain';
 
@@ -85,7 +86,7 @@ export const useExecutionOrchestrator = ({
     const uniqueIds = Array.from(new Set(nodeIds));
     if (uniqueIds.length === 0) return;
     try {
-      await fetch('/api/cache/clear-nodes', {
+      await authFetch('/api/cache/clear-nodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ node_ids: uniqueIds }),
@@ -262,7 +263,7 @@ export const useExecutionOrchestrator = ({
    */
   const handleClearBackendCache = useCallback(async () => {
     try {
-      const response = await fetch('/api/cache/clear', { method: 'POST' });
+      const response = await authFetch('/api/cache/clear', { method: 'POST' });
       if (response.ok) {
         const data = await response.json();
         console.log(`Cleared ${data.cleared} cached entries`);

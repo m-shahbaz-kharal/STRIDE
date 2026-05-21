@@ -138,11 +138,18 @@ def make_detections2d(
     height: int,
     image: Optional[str] = None,
 ) -> dict:
-    """Build a detections2d record (matches t_detections2d convention)."""
+    """Build a detections2d record (matches t_detections2d convention).
+
+    The ``image`` field is declared ``nullable=True`` on the canonical
+    schema; absent values must be ``None``, not ``""``. The previous
+    empty-string sentinel caused downstream nodes that try to decode the
+    image to either silently produce garbage or raise ``"failed to
+    decode image bytes"`` on what should have been a no-op.
+    """
     return {
         "_type": "Detections2D",
         "image_width": int(width),
         "image_height": int(height),
         "boxes": list(boxes),
-        "image": image or "",
+        "image": image if image else None,
     }

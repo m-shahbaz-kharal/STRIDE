@@ -3,20 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from .auth import get_current_user, resolve_user_for_token
+from .db import SessionLocal, init_db
+from .models import User
 from .nodes import list_node_types, list_node_definitions
 from .runner import GraphExecutionError, GraphExecutor, NodeStatus
 from stride_fl511.nodes import get_active_stream
-from .db import init_db
 from .routers import auth as auth_router
 from .routers import graphs as graphs_router
+
+
+# Maximum request body size (JSON payload) accepted by the API. Defaults
+# to 16 MiB which covers graphs of a few thousand nodes plus modest
+# embedded payloads; tune via env for embedded-image-heavy use cases.
+MAX_BODY_BYTES = int(os.getenv("STRIDE_MAX_BODY_BYTES", str(16 * 1024 * 1024)))
+
+# Maximum single WebSocket message size. Same default as the HTTP cap.
+MAX_WS_MESSAGE_BYTES = int(os.getenv("STRIDE_MAX_WS_MESSAGE_BYTES", str(16 * 1024 * 1024)))
+
+# Maximum number of concurrent graph executions per WebSocket connection.
+MAX_WS_CONCURRENT_EXECUTIONS = int(os.getenv("STRIDE_MAX_WS_CONCURRENT_EXECUTIONS", "4"))
 
 
 class _LegacyWSKeepaliveFilter(logging.Filter):
@@ -95,18 +113,58 @@ def _json_serializer(obj: Any) -> Any:
     return str(obj)
 
 
-app = FastAPI(title="STRIDE Graph Runtime")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="STRIDE Graph Runtime", lifespan=_lifespan)
+
+_cors_origins_raw = os.getenv("STRIDE_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+_cors_origins = [origin.strip() for origin in _cors_origins_raw.split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class _BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject HTTP requests whose declared ``Content-Length`` exceeds the cap.
+
+    Streaming bodies without an advertised length are still bounded by
+    Starlette's per-receive buffer; this guard catches the common case
+    where a curl one-liner pushes a multi-gigabyte payload.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > self._max_bytes:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": f"Request body too large (max {self._max_bytes} bytes)"},
+                    )
+            except ValueError:
+                pass
+        return await call_next(request)
+
+
+app.add_middleware(_BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 app.include_router(auth_router.router)
 app.include_router(graphs_router.router)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
 
 
 @app.get("/", response_class=FileResponse)
@@ -117,18 +175,18 @@ async def serve_client() -> FileResponse:
 
 
 @app.get("/api/node-types")
-async def get_node_types() -> list[Dict[str, Any]]:
+async def get_node_types(current_user: User = Depends(get_current_user)) -> list[Dict[str, Any]]:
     return list_node_types()
 
 
 @app.get("/api/node-definitions")
-async def get_node_definitions() -> list[Dict[str, Any]]:
+async def get_node_definitions(current_user: User = Depends(get_current_user)) -> list[Dict[str, Any]]:
     """Typed node definition schema (preferred)."""
     return list_node_definitions()
 
 
 @app.get("/api/converters")
-async def get_converters() -> Dict[str, Any]:
+async def get_converters(current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
     """Index of every registered ``convert.*`` node.
 
     The frontend fetches this once at app start to build a single-hop
@@ -164,7 +222,10 @@ async def get_converters() -> Dict[str, Any]:
 
 
 @app.post("/api/run-graph")
-async def run_graph(payload: Dict[str, Any]) -> Response:
+async def run_graph(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+) -> Response:
     """Execute graph synchronously (legacy endpoint)."""
     try:
         graph_definition = payload.get("graph", payload)
@@ -174,14 +235,17 @@ async def run_graph(payload: Dict[str, Any]) -> Response:
         return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
         return Response(
-            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
-            status_code=400, 
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}),
+            status_code=400,
             media_type="application/json"
         )
 
 
 @app.post("/api/run-graph-async")
-async def run_graph_async(payload: Dict[str, Any]) -> Response:
+async def run_graph_async(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+) -> Response:
     """Execute graph with parallel execution."""
     try:
         graph_definition = payload.get("graph", payload)
@@ -191,14 +255,17 @@ async def run_graph_async(payload: Dict[str, Any]) -> Response:
         return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
         return Response(
-            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
-            status_code=400, 
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}),
+            status_code=400,
             media_type="application/json"
         )
 
 
 @app.post("/api/execution-plan")
-async def get_execution_plan(payload: Dict[str, Any]) -> Response:
+async def get_execution_plan(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+) -> Response:
     """Get execution plan without running."""
     try:
         graph_definition = payload.get("graph", payload)
@@ -208,27 +275,33 @@ async def get_execution_plan(payload: Dict[str, Any]) -> Response:
         return Response(content=json.dumps(result, default=_json_serializer), media_type="application/json")
     except GraphExecutionError as exc:
         return Response(
-            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}), 
-            status_code=400, 
+            content=json.dumps({"error": str(exc), "code": getattr(exc, "code", "execution_error")}),
+            status_code=400,
             media_type="application/json"
         )
 
 
 @app.post("/api/cache/clear")
-async def clear_cache() -> Dict[str, Any]:
+async def clear_cache(current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
     """Clear the execution cache."""
     cleared = GraphExecutor.clear_cache()
     return {"cleared": cleared, "message": f"Cleared {cleared} cached entries"}
 
 
 @app.post("/api/cache/clear/{node_type:path}")
-async def clear_cache_by_type(node_type: str) -> Dict[str, Any]:
+async def clear_cache_by_type(
+    node_type: str,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Clear the execution cache for a specific node type."""
     cleared = GraphExecutor.clear_cache_by_type(node_type)
     return {"cleared": cleared, "node_type": node_type, "message": f"Cleared {cleared} cached entries for {node_type}"}
 
 @app.post("/api/cache/clear-nodes")
-async def clear_cache_by_nodes(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def clear_cache_by_nodes(
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Clear the execution cache for a list of node ids."""
     node_ids = payload.get("node_ids") or []
     if not isinstance(node_ids, list):
@@ -243,13 +316,16 @@ async def clear_cache_by_nodes(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/cache/stats")
-async def get_cache_stats() -> Dict[str, Any]:
+async def get_cache_stats(current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
     """Get cache statistics."""
     return {"size": GraphExecutor.get_cache_size()}
 
 
 @app.get("/api/streams/{stream_id}/frame")
-async def get_stream_frame(stream_id: str) -> Response:
+async def get_stream_frame(
+    stream_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Response:
     """Fetch the latest JPEG frame for a running stream."""
     worker = get_active_stream(stream_id)
     if not worker:
@@ -278,7 +354,10 @@ async def get_stream_frame(stream_id: str) -> Response:
 
 
 @app.post("/api/executions/{execution_id}/cancel")
-async def cancel_execution(execution_id: str) -> Dict[str, Any]:
+async def cancel_execution(
+    execution_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Cancel an in-flight execution."""
     cancelled = GraphExecutor.cancel_execution(execution_id)
     if not cancelled:
@@ -287,7 +366,11 @@ async def cancel_execution(execution_id: str) -> Dict[str, Any]:
 
 
 @app.post("/api/executions/{execution_id}/cancel/{node_id}")
-async def cancel_node(execution_id: str, node_id: str) -> Dict[str, Any]:
+async def cancel_node(
+    execution_id: str,
+    node_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
     """Cancel a specific node inside an in-flight execution."""
     cancelled = GraphExecutor.cancel_node(execution_id, node_id)
     if not cancelled:
@@ -320,9 +403,35 @@ def serialize_event(event) -> str:
     return json.dumps(data, default=_json_serializer)
 
 
+def _authenticate_websocket(websocket: WebSocket) -> Optional[User]:
+    """Extract a user from a WebSocket connection.
+
+    Browsers can't set custom Authorization headers on the WebSocket
+    handshake, so we accept the token from a ``token`` query parameter
+    (the conventional pattern). The DB lookup runs synchronously on a
+    short-lived session because the WS handler isn't covered by FastAPI's
+    Depends machinery.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        return None
+    db = SessionLocal()
+    try:
+        return resolve_user_for_token(token, db)
+    finally:
+        db.close()
+
+
 @app.websocket("/ws/run-graph")
 async def websocket_run_graph(websocket: WebSocket):
     """WebSocket endpoint for streaming graph execution."""
+    # Authenticate BEFORE accept() so we don't expose any session state to
+    # an unauthenticated client.
+    user = _authenticate_websocket(websocket)
+    if user is None:
+        # Code 4001 = "policy violation, unauthorized" by convention.
+        await websocket.close(code=4001)
+        return
     await websocket.accept()
 
     # Lock to ensure thread-safe writes to the websocket
@@ -332,7 +441,15 @@ async def websocket_run_graph(websocket: WebSocket):
     # connection drops or is forcefully closed.
     active_executors: set[str] = set()
 
+    # Bound concurrent runs per socket so a single client can't exhaust
+    # the thread pool by spamming run requests.
+    request_semaphore = asyncio.Semaphore(MAX_WS_CONCURRENT_EXECUTIONS)
+
     async def handle_request(payload: Dict[str, Any]):
+        async with request_semaphore:
+            await _handle_one_request(payload)
+
+    async def _handle_one_request(payload: Dict[str, Any]):
         graph_executor: GraphExecutor | None = None
         try:
             graph_definition = payload.get("graph", payload)
@@ -422,7 +539,32 @@ async def websocket_run_graph(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            payload = json.loads(data)
+            if len(data) > MAX_WS_MESSAGE_BYTES:
+                try:
+                    async with send_lock:
+                        await websocket.send_text(json.dumps({
+                            "event_type": "error",
+                            "error": (
+                                f"Payload too large ({len(data)} > {MAX_WS_MESSAGE_BYTES} bytes)"
+                            ),
+                            "error_code": "payload_too_large",
+                        }))
+                except Exception:
+                    pass
+                continue
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError as exc:
+                try:
+                    async with send_lock:
+                        await websocket.send_text(json.dumps({
+                            "event_type": "error",
+                            "error": f"Invalid JSON: {exc.msg}",
+                            "error_code": "bad_request",
+                        }))
+                except Exception:
+                    pass
+                continue
 
             # Create a background task for each request to allow concurrency
             task = asyncio.create_task(handle_request(payload))

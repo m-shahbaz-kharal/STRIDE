@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -47,8 +47,23 @@ def _migrate_on_load(graph: Graph) -> Graph:
 def list_graphs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[GraphOut]:
-    graphs = db.execute(select(Graph).where(Graph.owner_id == current_user.id).order_by(Graph.updated_at.desc())).scalars().all()
+    """List the caller's graphs, paginated.
+
+    Default page size of 100 covers the realistic UI need (the library
+    panel renders ~20 graphs at a time); the ``limit=500`` ceiling caps
+    the worst case at a single round-trip without unbounded memory.
+    """
+    stmt = (
+        select(Graph)
+        .where(Graph.owner_id == current_user.id)
+        .order_by(Graph.updated_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    graphs = db.execute(stmt).scalars().all()
     return [GraphOut.model_validate(_migrate_on_load(graph)) for graph in graphs]
 
 

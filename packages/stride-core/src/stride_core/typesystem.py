@@ -263,6 +263,23 @@ class TypeDescriptor:
             if not self.element_type or not target.element_type:
                 return True
             return self.element_type.is_assignable_to(target.element_type)
+        # Tuples are positional records: structural subtyping by index,
+        # with length equality required. A 3-tuple is NOT assignable to a
+        # 2-tuple target (the extra element has nowhere to go), and a
+        # 2-tuple is NOT assignable to a 3-tuple target (missing
+        # element).
+        if self.kind == "tuple":
+            if self.fields is None or target.fields is None:
+                return True
+            if len(self.fields) != len(target.fields):
+                return False
+            for key, val in target.fields.items():
+                src_field = self.fields.get(key)
+                if src_field is None:
+                    return False
+                if not src_field.is_assignable_to(val):
+                    return False
+            return True
         # Record-shaped kinds: structural subtyping on `fields`. This
         # covers `record` plus every domain kind built via
         # `t_record_kind` (image, bbox2d, pointcloud, …).

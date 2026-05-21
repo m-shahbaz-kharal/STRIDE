@@ -701,7 +701,12 @@ class GraphExecutor:
 
     async def run_streaming(self) -> AsyncIterator[ExecutionEvent]:
         """Execute the graph with real-time event streaming using readiness queue (no level barrier)."""
-        event_queue: asyncio.Queue = asyncio.Queue()
+        # Bound the queue so a slow consumer (paused tab, congested
+        # WebSocket) can't grow the buffer to GB-scale. Producers will
+        # back-pressure naturally via ``await queue.put(...)`` once the
+        # queue is full. Override via ``STRIDE_EVENT_QUEUE_MAX``.
+        _queue_max = int(os.environ.get("STRIDE_EVENT_QUEUE_MAX", "2048"))
+        event_queue: asyncio.Queue = asyncio.Queue(maxsize=max(64, _queue_max))
 
         streaming_executor = StreamingExecutor(
             executor=self._create_node_executor(),

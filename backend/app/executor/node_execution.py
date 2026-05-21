@@ -139,16 +139,24 @@ class NodeExecutor:
     def can_cache(self, node_id: str) -> bool:
         """Check if a node's outputs can be cached.
 
-        Args:
-            node_id: The node ID
+        Honours ``spec.cache_policy``:
 
-        Returns:
-            True if the node can be cached
+        * ``"disabled"`` — never cache (overrides ``cache_enabled``).
+        * ``"always"`` — cache unconditionally (overrides ``cache_enabled``
+          and the control-tag heuristic).
+        * ``"auto"`` (default) — cache iff the node opts in via
+          ``cache_enabled`` and is not a control node.
         """
         node = self.nodes[node_id]
+        spec = getattr(node, "spec", None)
+        policy = str(getattr(spec, "cache_policy", "auto")).lower()
+        if policy == "disabled":
+            return False
+        if policy == "always":
+            return True
+        # "auto" — fall back to the heuristic.
         if node.type.startswith("core.control"):
             return False
-        spec = getattr(node, "spec", None)
         tags = getattr(spec, "tags", None) or []
         if "control" in tags:
             return False
