@@ -2277,6 +2277,509 @@ def demo_traffic_10_fundamental_diagram() -> Tuple[str, str, Dict[str, Any]]:
     return name, desc, make_graph_data(nodes, edges, widgets=widgets)
 
 
+def demo_traffic_11_endtoend_intersection() -> Tuple[str, str, Dict[str, Any]]:
+    """End-user-grade traffic analytics pipeline on FL511 camera 2130.
+
+    This is the showpiece "everything wired together" graph. Geometry
+    (counting-line position, calibration baseline, speed window) was
+    chosen by inspecting the actual camera frame at 704×480 — see
+    .claude/jobs/.../fl511_frames/cam_2130 for the reference snapshot.
+
+    Pipeline (perception → analytics):
+        FL511 stream → frame → YOLO11n (cars/trucks/buses) → ByteTrack
+            → traffic.count.line   (entry counter at y=200)
+            → traffic.count.classify (FHWA-class breakdown)
+            → traffic.calibration.from_known_width (4-lane road, 14.6 m)
+            → traffic.speed.estimate (per-track kph)
+            → traffic.speed.percentile (85th-percentile operating speed)
+            → traffic.flow.live_metrics (extrapolated AADT + hourly rate)
+            → traffic.flow.live_phf (rolling 4×15-min PHF)
+            → traffic.safety.headway_live (mean / min / critical headways)
+            → traffic.events.annotate (overlay line + events on frame)
+            → dashboard widgets
+
+    The whole graph runs at ~5 fps on CPU and finishes its 30-iter
+    sample in roughly a minute. The annotated frame stays live in the
+    dashboard while the analytics tiles update in place.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 11 — Live Intersection Analytics (Camera 2130)"
+    desc = (
+        "End-to-end live perception → analytics pipeline driven by FL511 "
+        "camera 2130 — Griffin Rd west of the FL Turnpike, an urban "
+        "signalised intersection (704×480). Geometry was chosen by "
+        "inspecting an actual reference frame: WB counting line at "
+        "y=400 catches vehicles approaching the stop bar in the "
+        "lower-half WB lanes; calibration baseline at y=380 maps "
+        "320 px ↔ 14.6 m (4-lane approach × 3.65 m US standard). "
+        "Outputs include per-frame vehicle count, FHWA-class breakdown, "
+        "mean and 85th-percentile speed, rolling PHF, AADT extrapolation, "
+        "live headway statistics and a structured event stream — every "
+        "primitive a traffic engineer reaches for when commissioning a "
+        "new camera. If camera 2130 is offline (404), edit the "
+        "``camera`` parameter on the ``connect`` node — any active "
+        "FL511 camera ID works."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Row 0 — perception pipeline
+        make_node("start", "core.control.start", *gp(0, 0)),
+        make_node("connect", "fl511.connect", *gp(1, 0),
+                  inputs={"camera": 2130, "fps": 10,
+                          "buffer_seconds": 4, "refresh_minutes": 4}),
+        make_node("loop", "core.control.for", *gp(2, 0),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 0),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("decode", "convert.image.from_url", *gp(4, 0),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 0),
+                  inputs={"weights": "yolo11n.pt",
+                          "confidence": 0.30,
+                          "iou": 0.45,
+                          "image_size": 640,
+                          "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 0),
+                  inputs={"track_activation_threshold": 0.25,
+                          "lost_track_buffer": 30,
+                          "minimum_matching_threshold": 0.8,
+                          "frame_rate": 10,
+                          "annotate": True}),
+        # Row 1 — counting line: y=400 inside the WB lanes (lower half
+        # of the frame), well below the median. This catches every WB
+        # vehicle as its bbox-bottom passes the line on the way to the
+        # stop bar at the right edge.
+        make_node("line_roi", "traffic.roi.line", *gp(1, 1),
+                  inputs={"name": "WB counter",
+                          "x1": 50, "y1": 400, "x2": 650, "y2": 400}),
+        make_node("lines_merged", "traffic.roi.merge_lines", *gp(2, 1),
+                  inputs={}),
+        make_node("count", "traffic.count.line", *gp(3, 1),
+                  inputs={"reference": "bottom", "hysteresis_px": 2.0}),
+        make_node("classify", "traffic.count.classify", *gp(4, 1),
+                  inputs={}),
+        # Row 2 — calibration + speed (calibrated against the road
+        # width at y=380; visible 4-lane WB approach ≈ 320 px ↔ 14.6 m)
+        make_node("calib_a_str", "core.literal.string", *gp(0, 2),
+                  inputs={"value": "[190, 380]"}),
+        make_node("calib_b_str", "core.literal.string", *gp(0, 3),
+                  inputs={"value": "[510, 380]"}),
+        make_node("calib_a", "core.json.parse", *gp(1, 2),
+                  inputs={}),
+        make_node("calib_b", "core.json.parse", *gp(1, 3),
+                  inputs={}),
+        make_node("calib", "traffic.calibration.from_known_width", *gp(2, 2),
+                  inputs={"image_width": 704, "image_height": 480,
+                          "real_distance_m": 14.6}),
+        make_node("speed", "traffic.speed.estimate", *gp(3, 2),
+                  inputs={"reference": "bottom",
+                          "ema_alpha": 0.3,
+                          "window_s": 0.5,
+                          "store_key": "speed_main"}),
+        make_node("speed_p85", "traffic.speed.percentile", *gp(4, 2),
+                  inputs={"percentile": 85.0}),
+        # Row 3 — flow / PHF / headway / events
+        make_node("flow", "traffic.flow.live_metrics", *gp(3, 3),
+                  inputs={"seasonal_factor": 1.0,
+                          "dow_factor": 1.0,
+                          "axle_factor": 1.0}),
+        make_node("phf", "traffic.flow.live_phf", *gp(4, 3),
+                  inputs={"bin_seconds": 900.0,
+                          "kind_filter": "line_cross"}),
+        make_node("headway", "traffic.safety.headway_live", *gp(5, 2),
+                  inputs={"kind_filter": "line_cross",
+                          "max_samples": 4096}),
+        make_node("events_filter", "traffic.events.filter", *gp(5, 3),
+                  inputs={"kind": "", "severity": "critical"}),
+        # Row 4 — annotation + dashboard
+        make_node("annotate", "traffic.events.annotate", *gp(7, 0),
+                  inputs={"thickness": 2}),
+        make_node("disp_frame", "general.to_display", *gp(8, 0),
+                  inputs={"section": "Live", "title": "Annotated frame"}),
+        make_node("disp_total", "general.to_display", *gp(8, 1),
+                  inputs={"section": "Counts", "title": "Total"}),
+        make_node("disp_forward", "general.to_display", *gp(7, 1),
+                  inputs={"section": "Counts", "title": "NB forward"}),
+        make_node("disp_classes", "general.to_display", *gp(7, 2),
+                  inputs={"section": "Counts", "title": "FHWA classes"}),
+        make_node("disp_mean_speed", "general.to_display", *gp(8, 2),
+                  inputs={"section": "Speed", "title": "Mean (kph)"}),
+        make_node("disp_p85", "general.to_display", *gp(8, 3),
+                  inputs={"section": "Speed", "title": "85th %ile (kph)"}),
+        make_node("disp_scale", "general.to_display", *gp(6, 2),
+                  inputs={"section": "Calibration",
+                          "title": "Scale (m/px)"}),
+        make_node("disp_aadt", "general.to_display", *gp(7, 3),
+                  inputs={"section": "Flow", "title": "AADT"}),
+        make_node("disp_hourly", "general.to_display", *gp(6, 3),
+                  inputs={"section": "Flow", "title": "Hourly rate"}),
+        make_node("disp_phf", "general.to_display", *gp(8, 4),
+                  inputs={"section": "Flow", "title": "Live PHF"}),
+        make_node("disp_hd_mean", "general.to_display", *gp(7, 4),
+                  inputs={"section": "Headway", "title": "Mean (s)"}),
+        make_node("disp_hd_min", "general.to_display", *gp(6, 4),
+                  inputs={"section": "Headway", "title": "Min (s)"}),
+        make_node("disp_hd_crit", "general.to_display", *gp(5, 4),
+                  inputs={"section": "Headway", "title": "Critical (<1 s)"}),
+    ]
+    edges: List[Dict[str, Any]] = [
+        # Stream sequencing
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        # Perception chain
+        make_edge("frame", "control_out", "decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "decode", "url", nodes=nodes),
+        make_edge("decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("decode", "image", "track", "image", nodes=nodes),
+        # Counting + classification
+        make_edge("track", "control_out", "count", "control_in", nodes=nodes),
+        make_edge("track", "detections", "count", "detections", nodes=nodes),
+        make_edge("line_roi", "line", "count", "line", nodes=nodes),
+        make_edge("track", "control_out", "classify", "control_in", nodes=nodes),
+        make_edge("track", "detections", "classify", "detections", nodes=nodes),
+        make_edge("line_roi", "line", "lines_merged", "line_1", nodes=nodes),
+        # Calibration
+        make_edge("calib_a_str", "value", "calib_a", "json_string", nodes=nodes),
+        make_edge("calib_b_str", "value", "calib_b", "json_string", nodes=nodes),
+        make_edge("calib_a", "control_out", "calib", "control_in", nodes=nodes),
+        make_edge("calib_a", "data", "calib", "point_a", nodes=nodes),
+        make_edge("calib_b", "data", "calib", "point_b", nodes=nodes),
+        # Speed estimation (calibration + tracked detections). The
+        # control_in MUST come from a loop-body node (track), not from
+        # the static `calib` node — otherwise the readiness-queue
+        # scheduler runs speed exactly once at graph start, before any
+        # frame has been processed. See the matching wiring in
+        # demo_traffic_02 / 05 for reference.
+        make_edge("track", "control_out", "speed", "control_in", nodes=nodes),
+        make_edge("track", "detections", "speed", "detections", nodes=nodes),
+        make_edge("calib", "calibration", "speed", "calibration", nodes=nodes),
+        # speed_p85 also needs its control_in inside the loop body so
+        # it re-runs every iteration.
+        make_edge("speed", "control_out", "speed_p85", "control_in", nodes=nodes),
+        make_edge("speed", "speeds_kph", "speed_p85", "speeds_kph", nodes=nodes),
+        # Flow / PHF / headway / events_filter (driven by counter's
+        # total + events). Every one needs an explicit control edge
+        # from `count` so the loop body re-runs them per iteration.
+        make_edge("count", "control_out", "flow", "control_in", nodes=nodes),
+        make_edge("count", "total", "flow", "count", nodes=nodes),
+        make_edge("count", "control_out", "phf", "control_in", nodes=nodes),
+        make_edge("count", "events", "phf", "events", nodes=nodes),
+        make_edge("count", "control_out", "headway", "control_in", nodes=nodes),
+        make_edge("count", "events", "headway", "events", nodes=nodes),
+        make_edge("count", "control_out", "events_filter", "control_in", nodes=nodes),
+        make_edge("count", "events", "events_filter", "events", nodes=nodes),
+        # Annotation: combine tracked frame + counter line + critical events
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("events_filter", "events", "annotate", "events", nodes=nodes),
+        make_edge("lines_merged", "lines", "annotate", "lines", nodes=nodes),
+        # Dashboard wiring
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("annotate", "control_out", "disp_frame", "control_in", nodes=nodes),
+        make_edge("count", "total", "disp_total", "value", nodes=nodes),
+        make_edge("count", "control_out", "disp_total", "control_in", nodes=nodes),
+        make_edge("count", "forward", "disp_forward", "value", nodes=nodes),
+        make_edge("count", "control_out", "disp_forward", "control_in", nodes=nodes),
+        make_edge("classify", "counts", "disp_classes", "value", nodes=nodes),
+        make_edge("classify", "control_out", "disp_classes", "control_in", nodes=nodes),
+        make_edge("speed", "mean_speed_kph", "disp_mean_speed", "value", nodes=nodes),
+        make_edge("speed", "control_out", "disp_mean_speed", "control_in", nodes=nodes),
+        make_edge("speed_p85", "value_kph", "disp_p85", "value", nodes=nodes),
+        make_edge("speed_p85", "control_out", "disp_p85", "control_in", nodes=nodes),
+        make_edge("calib", "scale_m_per_px", "disp_scale", "value", nodes=nodes),
+        make_edge("calib", "control_out", "disp_scale", "control_in", nodes=nodes),
+        make_edge("flow", "aadt", "disp_aadt", "value", nodes=nodes),
+        make_edge("flow", "control_out", "disp_aadt", "control_in", nodes=nodes),
+        make_edge("flow", "hourly_rate", "disp_hourly", "value", nodes=nodes),
+        make_edge("flow", "control_out", "disp_hourly", "control_in", nodes=nodes),
+        make_edge("phf", "phf", "disp_phf", "value", nodes=nodes),
+        make_edge("phf", "control_out", "disp_phf", "control_in", nodes=nodes),
+        make_edge("headway", "mean_s", "disp_hd_mean", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_mean", "control_in", nodes=nodes),
+        make_edge("headway", "min_s", "disp_hd_min", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_min", "control_in", nodes=nodes),
+        make_edge("headway", "critical_count", "disp_hd_crit", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_crit", "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=900, h=40,
+               label="Traffic 11 — Live Intersection Analytics (Camera 2130)"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=700, h=500,
+               label="Live annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-total", type="bound-output", x=740, y=80, w=200, h=110,
+               label="Total count", node_id="count", port_name="total",
+               input_type="int"),
+        widget("w-forward", type="bound-output", x=960, y=80, w=200, h=110,
+               label="NB forward", node_id="count", port_name="forward",
+               input_type="int"),
+        widget("w-mean-spd", type="bound-output", x=740, y=210, w=200, h=110,
+               label="Mean speed (kph)", node_id="speed",
+               port_name="mean_speed_kph", input_type="float"),
+        widget("w-p85", type="bound-output", x=960, y=210, w=200, h=110,
+               label="85th %ile (kph)", node_id="speed_p85",
+               port_name="value_kph", input_type="float"),
+        widget("w-classes", type="bound-output", x=740, y=340, w=420, h=110,
+               label="FHWA classes", node_id="classify",
+               port_name="counts", input_type="any"),
+        widget("w-hourly", type="bound-output", x=740, y=470, w=200, h=110,
+               label="Hourly rate", node_id="flow",
+               port_name="hourly_rate", input_type="float"),
+        widget("w-aadt", type="bound-output", x=960, y=470, w=200, h=110,
+               label="AADT (extrap)", node_id="flow",
+               port_name="aadt", input_type="float"),
+        widget("w-hd-mean", type="bound-output", x=20, y=600, w=200, h=110,
+               label="Headway mean (s)", node_id="headway",
+               port_name="mean_s", input_type="float"),
+        widget("w-hd-min", type="bound-output", x=240, y=600, w=200, h=110,
+               label="Headway min (s)", node_id="headway",
+               port_name="min_s", input_type="float"),
+        widget("w-hd-crit", type="bound-output", x=460, y=600, w=200, h=110,
+               label="Critical headways (<1 s)", node_id="headway",
+               port_name="critical_count", input_type="int"),
+        widget("w-phf", type="bound-output", x=680, y=600, w=200, h=110,
+               label="Live PHF", node_id="phf", port_name="phf",
+               input_type="float"),
+        widget("w-scale", type="bound-output", x=900, y=600, w=240, h=110,
+               label="Calib scale (m/px)", node_id="calib",
+               port_name="scale_m_per_px", input_type="float"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
+def demo_traffic_12_endtoend_highway() -> Tuple[str, str, Dict[str, Any]]:
+    """End-user-grade traffic analytics on FL511 camera 501 — I-95 at
+    NW 135 ST, an HD (1280×720) highway viewpoint with constant flow.
+
+    Companion to Traffic 11. The intersection demo shows what
+    perception+analytics looks like in stop-and-go conditions; this
+    one shows free-flow highway operation, where speed estimation and
+    headway analytics are the primary signals. The wall in the
+    centre of the frame separates north- and south-bound lanes; we
+    instrument the SB direction (the left half) because vehicles
+    there approach the camera, giving the tracker a stable
+    bbox-bottom trajectory the speed estimator can integrate.
+    """
+    name = f"{DEMO_NAME_PREFIX}Traffic 12 — Live Highway Speed Study (Camera 501)"
+    desc = (
+        "End-to-end live perception → analytics pipeline driven by FL511 "
+        "camera 501 — I-95 at NW 135 ST (Miami), a free-flow urban "
+        "highway viewpoint at 1280×720. Instruments the southbound "
+        "lanes (left half of the frame, vehicles approaching the "
+        "camera): SB counting line at y=420 across x=[20, 580], "
+        "calibration baseline across the visible 3-lane SB approach "
+        "at y=500 maps 540 px ↔ 11.0 m (3 lanes × 3.65 m). "
+        "On a moving highway every car moves several pixels per frame, "
+        "so speed.estimate produces realistic 80–110 kph readings and "
+        "headway.live captures the actual time-gaps between successive "
+        "vehicles. Pair with Traffic 11 (urban intersection) for the "
+        "full free-flow vs. stop-and-go comparison."
+    )
+    nodes: List[Dict[str, Any]] = [
+        # Row 0 — perception
+        make_node("start", "core.control.start", *gp(0, 0)),
+        make_node("connect", "fl511.connect", *gp(1, 0),
+                  inputs={"camera": 501, "fps": 10,
+                          "buffer_seconds": 4, "refresh_minutes": 4}),
+        make_node("loop", "core.control.for", *gp(2, 0),
+                  inputs={"first_index": 0, "last_index": 29}),
+        make_node("frame", "fl511.get_frame", *gp(3, 0),
+                  inputs={"timeout": 5.0, "quality": 80,
+                          "require_frame": True, "pace": True}),
+        make_node("decode", "convert.image.from_url", *gp(4, 0),
+                  inputs={"timeout": 5.0}),
+        make_node("yolo", "image.detect.yolo", *gp(5, 0),
+                  inputs={"weights": "yolo11n.pt",
+                          "confidence": 0.30,
+                          "iou": 0.45,
+                          "image_size": 800,
+                          "annotate": False}),
+        make_node("track", "tracker.bytetrack", *gp(6, 0),
+                  inputs={"track_activation_threshold": 0.25,
+                          "lost_track_buffer": 30,
+                          "minimum_matching_threshold": 0.8,
+                          "frame_rate": 10,
+                          "annotate": True}),
+        # Row 1 — counting line in SB lanes
+        make_node("line_roi", "traffic.roi.line", *gp(1, 1),
+                  inputs={"name": "SB counter",
+                          "x1": 20, "y1": 420, "x2": 580, "y2": 420}),
+        make_node("lines_merged", "traffic.roi.merge_lines", *gp(2, 1),
+                  inputs={}),
+        make_node("count", "traffic.count.line", *gp(3, 1),
+                  inputs={"reference": "bottom", "hysteresis_px": 2.0}),
+        make_node("classify", "traffic.count.classify", *gp(4, 1),
+                  inputs={}),
+        # Row 2 — calibration + speed
+        make_node("calib_a_str", "core.literal.string", *gp(0, 2),
+                  inputs={"value": "[40, 500]"}),
+        make_node("calib_b_str", "core.literal.string", *gp(0, 3),
+                  inputs={"value": "[580, 500]"}),
+        make_node("calib_a", "core.json.parse", *gp(1, 2),
+                  inputs={}),
+        make_node("calib_b", "core.json.parse", *gp(1, 3),
+                  inputs={}),
+        make_node("calib", "traffic.calibration.from_known_width", *gp(2, 2),
+                  inputs={"image_width": 1280, "image_height": 720,
+                          "real_distance_m": 11.0}),
+        make_node("speed", "traffic.speed.estimate", *gp(3, 2),
+                  inputs={"reference": "bottom",
+                          "ema_alpha": 0.3,
+                          "window_s": 0.5,
+                          "store_key": "speed_hwy"}),
+        make_node("speed_p85", "traffic.speed.percentile", *gp(4, 2),
+                  inputs={"percentile": 85.0}),
+        # Row 3 — flow / PHF / headway
+        make_node("flow", "traffic.flow.live_metrics", *gp(3, 3),
+                  inputs={"seasonal_factor": 1.0,
+                          "dow_factor": 1.0,
+                          "axle_factor": 1.0}),
+        make_node("phf", "traffic.flow.live_phf", *gp(4, 3),
+                  inputs={"bin_seconds": 900.0,
+                          "kind_filter": "line_cross"}),
+        make_node("headway", "traffic.safety.headway_live", *gp(5, 2),
+                  inputs={"kind_filter": "line_cross",
+                          "max_samples": 4096}),
+        make_node("events_filter", "traffic.events.filter", *gp(5, 3),
+                  inputs={"kind": "", "severity": "critical"}),
+        # Row 4 — annotation + dashboard
+        make_node("annotate", "traffic.events.annotate", *gp(7, 0),
+                  inputs={"thickness": 3}),
+        make_node("disp_frame", "general.to_display", *gp(8, 0),
+                  inputs={"section": "Live", "title": "Annotated frame"}),
+        make_node("disp_total", "general.to_display", *gp(8, 1),
+                  inputs={"section": "Counts", "title": "Total"}),
+        make_node("disp_classes", "general.to_display", *gp(7, 1),
+                  inputs={"section": "Counts", "title": "FHWA classes"}),
+        make_node("disp_mean_speed", "general.to_display", *gp(7, 2),
+                  inputs={"section": "Speed", "title": "Mean (kph)"}),
+        make_node("disp_p85", "general.to_display", *gp(8, 2),
+                  inputs={"section": "Speed", "title": "85th %ile (kph)"}),
+        make_node("disp_scale", "general.to_display", *gp(6, 2),
+                  inputs={"section": "Calibration",
+                          "title": "Scale (m/px)"}),
+        make_node("disp_hourly", "general.to_display", *gp(7, 3),
+                  inputs={"section": "Flow", "title": "Hourly rate"}),
+        make_node("disp_aadt", "general.to_display", *gp(8, 3),
+                  inputs={"section": "Flow", "title": "AADT"}),
+        make_node("disp_phf", "general.to_display", *gp(6, 3),
+                  inputs={"section": "Flow", "title": "Live PHF"}),
+        make_node("disp_hd_mean", "general.to_display", *gp(7, 4),
+                  inputs={"section": "Headway", "title": "Mean (s)"}),
+        make_node("disp_hd_min", "general.to_display", *gp(8, 4),
+                  inputs={"section": "Headway", "title": "Min (s)"}),
+        make_node("disp_hd_crit", "general.to_display", *gp(6, 4),
+                  inputs={"section": "Headway", "title": "Critical (<1 s)"}),
+    ]
+    edges: List[Dict[str, Any]] = [
+        make_edge("start", "control_out", "connect", "control_in", nodes=nodes),
+        make_edge("connect", "control_out", "loop", "control_in", nodes=nodes),
+        make_edge("loop", "loop_body", "frame", "control_in", nodes=nodes),
+        make_edge("connect", "stream", "frame", "stream", nodes=nodes),
+        make_edge("frame", "control_out", "decode", "control_in", nodes=nodes),
+        make_edge("frame", "image", "decode", "url", nodes=nodes),
+        make_edge("decode", "control_out", "yolo", "control_in", nodes=nodes),
+        make_edge("decode", "image", "yolo", "image", nodes=nodes),
+        make_edge("yolo", "control_out", "track", "control_in", nodes=nodes),
+        make_edge("yolo", "detections", "track", "detections", nodes=nodes),
+        make_edge("decode", "image", "track", "image", nodes=nodes),
+        make_edge("track", "control_out", "count", "control_in", nodes=nodes),
+        make_edge("track", "detections", "count", "detections", nodes=nodes),
+        make_edge("line_roi", "line", "count", "line", nodes=nodes),
+        make_edge("track", "control_out", "classify", "control_in", nodes=nodes),
+        make_edge("track", "detections", "classify", "detections", nodes=nodes),
+        make_edge("line_roi", "line", "lines_merged", "line_1", nodes=nodes),
+        make_edge("calib_a_str", "value", "calib_a", "json_string", nodes=nodes),
+        make_edge("calib_b_str", "value", "calib_b", "json_string", nodes=nodes),
+        make_edge("calib_a", "control_out", "calib", "control_in", nodes=nodes),
+        make_edge("calib_a", "data", "calib", "point_a", nodes=nodes),
+        make_edge("calib_b", "data", "calib", "point_b", nodes=nodes),
+        # Speed control_in must come from track (a loop-body node) so
+        # the readiness scheduler re-runs it per iteration. See
+        # demo_traffic_11 for the same fix.
+        make_edge("track", "control_out", "speed", "control_in", nodes=nodes),
+        make_edge("track", "detections", "speed", "detections", nodes=nodes),
+        make_edge("calib", "calibration", "speed", "calibration", nodes=nodes),
+        make_edge("speed", "control_out", "speed_p85", "control_in", nodes=nodes),
+        make_edge("speed", "speeds_kph", "speed_p85", "speeds_kph", nodes=nodes),
+        make_edge("count", "control_out", "flow", "control_in", nodes=nodes),
+        make_edge("count", "total", "flow", "count", nodes=nodes),
+        make_edge("count", "control_out", "phf", "control_in", nodes=nodes),
+        make_edge("count", "events", "phf", "events", nodes=nodes),
+        make_edge("count", "control_out", "headway", "control_in", nodes=nodes),
+        make_edge("count", "events", "headway", "events", nodes=nodes),
+        make_edge("count", "control_out", "events_filter", "control_in", nodes=nodes),
+        make_edge("count", "events", "events_filter", "events", nodes=nodes),
+        make_edge("track", "image", "annotate", "image", nodes=nodes),
+        make_edge("track", "control_out", "annotate", "control_in", nodes=nodes),
+        make_edge("events_filter", "events", "annotate", "events", nodes=nodes),
+        make_edge("lines_merged", "lines", "annotate", "lines", nodes=nodes),
+        make_edge("annotate", "image", "disp_frame", "value", nodes=nodes),
+        make_edge("annotate", "control_out", "disp_frame", "control_in", nodes=nodes),
+        make_edge("count", "total", "disp_total", "value", nodes=nodes),
+        make_edge("count", "control_out", "disp_total", "control_in", nodes=nodes),
+        make_edge("classify", "counts", "disp_classes", "value", nodes=nodes),
+        make_edge("classify", "control_out", "disp_classes", "control_in", nodes=nodes),
+        make_edge("speed", "mean_speed_kph", "disp_mean_speed", "value", nodes=nodes),
+        make_edge("speed", "control_out", "disp_mean_speed", "control_in", nodes=nodes),
+        make_edge("speed_p85", "value_kph", "disp_p85", "value", nodes=nodes),
+        make_edge("speed_p85", "control_out", "disp_p85", "control_in", nodes=nodes),
+        make_edge("calib", "scale_m_per_px", "disp_scale", "value", nodes=nodes),
+        make_edge("calib", "control_out", "disp_scale", "control_in", nodes=nodes),
+        make_edge("flow", "aadt", "disp_aadt", "value", nodes=nodes),
+        make_edge("flow", "control_out", "disp_aadt", "control_in", nodes=nodes),
+        make_edge("flow", "hourly_rate", "disp_hourly", "value", nodes=nodes),
+        make_edge("flow", "control_out", "disp_hourly", "control_in", nodes=nodes),
+        make_edge("phf", "phf", "disp_phf", "value", nodes=nodes),
+        make_edge("phf", "control_out", "disp_phf", "control_in", nodes=nodes),
+        make_edge("headway", "mean_s", "disp_hd_mean", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_mean", "control_in", nodes=nodes),
+        make_edge("headway", "min_s", "disp_hd_min", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_min", "control_in", nodes=nodes),
+        make_edge("headway", "critical_count", "disp_hd_crit", "value", nodes=nodes),
+        make_edge("headway", "control_out", "disp_hd_crit", "control_in", nodes=nodes),
+    ]
+    widgets = [
+        widget("w-title", type="label", x=20, y=20, w=900, h=40,
+               label="Traffic 12 — Live Highway Speed Study (Camera 501)"),
+        widget("w-frame", type="bound-output", x=20, y=80, w=900, h=500,
+               label="Live annotated frame", node_id="annotate",
+               port_name="image", input_type="image"),
+        widget("w-total", type="bound-output", x=940, y=80, w=220, h=110,
+               label="Total count", node_id="count", port_name="total",
+               input_type="int"),
+        widget("w-mean-spd", type="bound-output", x=940, y=210, w=220, h=110,
+               label="Mean speed (kph)", node_id="speed",
+               port_name="mean_speed_kph", input_type="float"),
+        widget("w-p85", type="bound-output", x=940, y=340, w=220, h=110,
+               label="85th %ile (kph)", node_id="speed_p85",
+               port_name="value_kph", input_type="float"),
+        widget("w-classes", type="bound-output", x=940, y=470, w=220, h=110,
+               label="FHWA classes", node_id="classify",
+               port_name="counts", input_type="any"),
+        widget("w-hd-mean", type="bound-output", x=20, y=600, w=220, h=110,
+               label="Headway mean (s)", node_id="headway",
+               port_name="mean_s", input_type="float"),
+        widget("w-hd-min", type="bound-output", x=260, y=600, w=220, h=110,
+               label="Headway min (s)", node_id="headway",
+               port_name="min_s", input_type="float"),
+        widget("w-hourly", type="bound-output", x=500, y=600, w=220, h=110,
+               label="Hourly rate", node_id="flow",
+               port_name="hourly_rate", input_type="float"),
+        widget("w-phf", type="bound-output", x=740, y=600, w=220, h=110,
+               label="Live PHF", node_id="phf", port_name="phf",
+               input_type="float"),
+        widget("w-scale", type="bound-output", x=980, y=600, w=220, h=110,
+               label="Calib (m/px)", node_id="calib",
+               port_name="scale_m_per_px", input_type="float"),
+    ]
+    return name, desc, make_graph_data(nodes, edges, widgets=widgets)
+
+
 DEMO_BUILDERS = [
     demo_01_yolo_clip,
     demo_02_tracking_loop,
@@ -2298,6 +2801,8 @@ DEMO_BUILDERS = [
     demo_traffic_08_safety_ranking,
     demo_traffic_09_capacity_workbook,
     demo_traffic_10_fundamental_diagram,
+    demo_traffic_11_endtoend_intersection,
+    demo_traffic_12_endtoend_highway,
 ]
 
 
