@@ -70,10 +70,16 @@ class GraphExecutor:
         self.definition = graph_definition
         self.options: Dict[str, Any] = options or {}
         self.execution_id = str(uuid.uuid4())[:8]
+        # Per-graph worker cap. The old default of ``cpu_count() + 2``
+        # blew up on 64-core boxes (66 threads per run × N concurrent
+        # runs = thousands of OS threads). Default down to 8 to bound
+        # total concurrency; ``STRIDE_MAX_WORKERS`` raises the ceiling
+        # and ``options["max_workers"]`` overrides per-call.
+        _env_default = int(os.getenv("STRIDE_MAX_WORKERS", "8"))
         self._max_workers = int(
             self.options.get(
                 "max_workers",
-                max(2, min(32, (os.cpu_count() or 4) + 2)),
+                max(2, min(32, _env_default)),
             )
         )
         self._fail_fast = bool(self.options.get("fail_fast", True))

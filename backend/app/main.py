@@ -174,6 +174,33 @@ async def serve_client() -> FileResponse:
     return FileResponse(INDEX_FILE)
 
 
+@app.get("/api/health")
+async def health_check() -> Dict[str, Any]:
+    """Liveness probe. Returns plain JSON, no DB hop, no auth.
+
+    Use this for load-balancer health checks and container probes;
+    keep it cheap and unauthenticated so a misconfigured token can't
+    take the deployment off the LB.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/api/ready")
+async def ready_check() -> Dict[str, Any]:
+    """Readiness probe. Touches the DB so the LB only routes traffic
+    once the database is reachable.
+    """
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"db not ready: {exc}") from exc
+    finally:
+        db.close()
+
+
 @app.get("/api/node-types")
 async def get_node_types(current_user: User = Depends(get_current_user)) -> list[Dict[str, Any]]:
     return list_node_types()
